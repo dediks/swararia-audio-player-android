@@ -1,0 +1,17 @@
+{
+  "unit": {
+    "tests": 14,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "lint": {
+    "Warning": 26
+  },
+  "host_source_contracts": {
+    "ui": 7,
+    "integration": 3,
+    "pure_jvm_ui": 3,
+    "android_device_execution": false
+  }
+}

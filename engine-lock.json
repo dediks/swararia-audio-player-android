@@ -1,0 +1,9 @@
+{
+  "wrapper": "io.github.deniscerri.youtubedl-android:library:0.19.0",
+  "bundled_yt_dlp_version": "2026.10.26",
+  "source": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp",
+  "sha256": "e51e69e89489f199530f13d32a4342da3ddb2cf34842f364603a066db05afbf3",
+  "checksum_source": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/SHA2-256SUMS",
+  "reason": "Original AAR bundles 2025.09.26 but adds --js-runtimes, which that parser rejects. An app raw-resource override pins a compatible official Python zipapp; no new native runtime or host tool is installed.",
+  "verification_limit": "Host CLI parsing is tested; Android execution remains untested."
+}

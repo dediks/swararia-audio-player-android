@@ -1,0 +1,6 @@
+{
+  "files_scanned": 21,
+  "findings": [],
+  "scope": "heuristic own-source scan; not a security certification",
+  "git_repo": false
+}

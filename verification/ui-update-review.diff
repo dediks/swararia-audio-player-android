@@ -1,0 +1,1646 @@
+--- a/app/src/main/java/com/swararia/audiolab/MainActivity.kt
++++ b/app/src/main/java/com/swararia/audiolab/MainActivity.kt
+@@ -10,12 +10,8 @@
+ import androidx.activity.compose.setContent
+ import androidx.activity.enableEdgeToEdge
+ import androidx.activity.result.contract.ActivityResultContracts
+-import androidx.compose.foundation.layout.*
+-import androidx.compose.material3.*
++import androidx.compose.material3.SnackbarHostState
+ import androidx.compose.runtime.*
+-import androidx.compose.runtime.saveable.rememberSaveable
+-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+-import androidx.compose.ui.Modifier
+ import androidx.core.content.ContextCompat
+ import androidx.lifecycle.ViewModelProvider
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
+@@ -32,11 +28,19 @@
+     private var controller by mutableStateOf<MediaController?>(null)
+     private var controllerFuture: ListenableFuture<MediaController>? = null
+     private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+-        pendingPermissionAction?.invoke(); pendingPermissionAction = null
++        val action = pendingPermissionAction
++        pendingPermissionAction = null
++        action?.invoke()
+     }
+     private val chooseAudio = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+-        if (uri != null) withNotificationPermission {
+-            runCatching { IngestService.importAudio(this, uri) }.onFailure { model.message(it.message ?: "Impor tidak dapat dimulai.") }
++        if (uri != null) whenOnlineIdle {
++            withNotificationPermission {
++                // The picker/permission dialog can outlive the state seen by the button.
++                whenOnlineIdle {
++                    runCatching { IngestService.importAudio(this, uri) }
++                        .onFailure { model.message(it.message ?: "Impor tidak dapat dimulai.") }
++                }
++            }
+         }
+     }
+ 
+@@ -49,8 +53,11 @@
+             AudioTheme {
+                 val tracks by model.tracks.collectAsStateWithLifecycle()
+                 val ingest by IngestStatus.state.collectAsStateWithLifecycle()
++                val search by model.search.collectAsStateWithLifecycle()
+                 val lastRename by model.lastRename.collectAsStateWithLifecycle()
+                 val organizerBusy by model.organizerBusy.collectAsStateWithLifecycle()
++                val snackbars = remember { SnackbarHostState() }
++                LaunchedEffect(model) { model.messages.collect { snackbars.showSnackbar(it) } }
+                 LaunchedEffect(tracks, controller) {
+                     val player = controller
+                     if (player != null && player.isConnected) {
+@@ -58,44 +65,50 @@
+                         for (index in 0 until player.mediaItemCount) {
+                             val item = player.getMediaItemAt(index)
+                             val updated = titles[item.mediaId] ?: continue
+-                            if (item.mediaMetadata.title?.toString() != updated.displayName) {
+-                                player.replaceMediaItem(index, item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setTitle(updated.displayName).build()).build())
++                            val title = UiPresentation.title(updated.displayName)
++                            if (item.mediaMetadata.title?.toString() != title) {
++                                player.replaceMediaItem(index, item.buildUpon().setMediaMetadata(
++                                    item.mediaMetadata.buildUpon().setTitle(title).build()).build())
+                             }
+                         }
+                     }
+                 }
+-                val snackbars = remember { SnackbarHostState() }
+-                var tab by rememberSaveable { mutableIntStateOf(0) }
+-                val screens = rememberSaveableStateHolder()
+-                LaunchedEffect(model) { model.messages.collect { snackbars.showSnackbar(it) } }
+-                Scaffold(
+-                    snackbarHost = { SnackbarHost(snackbars) }, topBar = { AppHeader() },
+-                    bottomBar = { NavigationBar {
+-                        NavigationBarItem(selected = tab == 0, onClick = { tab = 0 }, icon = { Text("＋") }, label = { Text("Tambah") })
+-                        NavigationBarItem(selected = tab == 1, onClick = { tab = 1 }, icon = { Text("▶") }, label = { Text("Player") })
+-                        NavigationBarItem(selected = tab == 2, onClick = { tab = 2 }, icon = { Text("Aa") }, label = { Text("Organizer") })
+-                    } }
+-                ) { padding ->
+-                    val body = Modifier.padding(padding).consumeWindowInsets(padding).imePadding()
+-                    screens.SaveableStateProvider(tab) {
+-                        when (tab) {
+-                            0 -> IngestScreen(ingest, tracks.size, body,
+-                                onDownload = { url, authorized -> withNotificationPermission {
+-                                    runCatching { IngestService.download(this, url, authorized) }.onFailure { model.message(it.message ?: "Unduhan tidak dapat dimulai.") }
+-                                } },
+-                                onImport = { chooseAudio.launch(arrayOf("audio/*")) },
+-                                onUpdate = { withNotificationPermission { runCatching { IngestService.update(this) }.onFailure { model.message(it.message ?: "Pembaruan tidak dapat dimulai.") } } },
+-                                onCancel = { IngestService.cancel(this) })
+-                            1 -> PlayerScreen(tracks, controller, body) { track -> withNotificationPermission {
+-                                runCatching { playTrack(track, tracks) }.onFailure { model.message(it.message ?: "Audio tidak dapat diputar.") }
+-                            } }
+-                            2 -> OrganizerScreen(tracks, lastRename, organizerBusy, body,
+-                                onRename = { id, title, done -> model.rename(id, title, done) }, onUndo = { model.undoRename() })
+-                        }
+-                    }
+-                }
++                SwarariaUi(
++                    tracks = tracks, controller = controller, ingest = ingest, search = search,
++                    lastRename = lastRename, organizerBusy = organizerBusy, snackbarHostState = snackbars,
++                    onDownload = { url, authorized -> whenOnlineIdle {
++                        withNotificationPermission { whenOnlineIdle {
++                            runCatching { IngestService.download(this, url, authorized) }
++                                .onFailure { model.message(it.message ?: "Unduhan tidak dapat dimulai.") }
++                        } }
++                    } },
++                    onImport = { whenOnlineIdle { chooseAudio.launch(arrayOf("audio/*")) } },
++                    onUpdate = { whenOnlineIdle {
++                        withNotificationPermission { whenOnlineIdle {
++                            runCatching { IngestService.update(this) }
++                                .onFailure { model.message(it.message ?: "Pembaruan tidak dapat dimulai.") }
++                        } }
++                    } },
++                    onCancel = { IngestService.cancel(this) },
++                    onPlay = { track -> withNotificationPermission {
++                        runCatching { playTrack(track, tracks) }
++                            .onFailure { model.message(it.message ?: "Audio tidak dapat diputar.") }
++                    } },
++                    onRename = { id, title, done -> model.rename(id, title, done) },
++                    onUndo = { model.undoRename() },
++                    onSearch = { query, provider -> whenOnlineIdle { model.search(query, provider) } },
++                    onCancelSearch = { model.cancelSearch() },
++                )
+             }
+         }
++    }
++
++    private fun whenOnlineIdle(action: () -> Unit) {
++        if (!OnlineWorkRules.canStart(model.search.value.busy, IngestStatus.state.value.busy)) {
++            model.message("Tunggu pencarian atau proses audio selesai terlebih dahulu.")
++            return
++        }
++        action()
+     }
+ 
+     private fun connectPlayer() {
+@@ -112,7 +125,7 @@
+         check(player.isConnected) { "Pemutar terputus. Tutup dan buka aplikasi untuk menghubungkan lagi." }
+         val queue = tracks.map { item ->
+             MediaItem.Builder().setMediaId(item.id.toString()).setUri(Uri.parse(item.uri))
+-                .setMediaMetadata(MediaMetadata.Builder().setTitle(item.displayName).build()).build()
++                .setMediaMetadata(MediaMetadata.Builder().setTitle(UiPresentation.title(item.displayName)).build()).build()
+         }
+         player.setMediaItems(queue, tracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0), 0)
+         player.prepare(); player.play()
+--- a/app/src/main/java/com/swararia/audiolab/AppUi.kt
++++ b/app/src/main/java/com/swararia/audiolab/AppUi.kt
+@@ -9,17 +9,63 @@
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.text.TextStyle
++import androidx.compose.ui.text.ExperimentalTextApi
++import androidx.compose.ui.text.font.Font
++import androidx.compose.ui.text.font.FontFamily
++import androidx.compose.ui.text.font.FontVariation
+ import androidx.compose.ui.text.font.FontWeight
+ import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.sp
++
++@OptIn(ExperimentalTextApi::class)
++private val SwarariaFont = FontFamily(
++    Font(R.font.inter_variable, weight = FontWeight.Normal,
++        variationSettings = FontVariation.Settings(FontVariation.weight(400))),
++    Font(R.font.inter_variable, weight = FontWeight.Medium,
++        variationSettings = FontVariation.Settings(FontVariation.weight(500))),
++    Font(R.font.inter_variable, weight = FontWeight.SemiBold,
++        variationSettings = FontVariation.Settings(FontVariation.weight(600))),
++    Font(R.font.inter_variable, weight = FontWeight.Bold,
++        variationSettings = FontVariation.Settings(FontVariation.weight(700))),
++)
++
++private val SwarariaTypography = Typography(
++    displayLarge = TextStyle(fontFamily = SwarariaFont, fontSize = 57.sp, lineHeight = 64.sp, fontWeight = FontWeight.Bold),
++    displayMedium = TextStyle(fontFamily = SwarariaFont, fontSize = 45.sp, lineHeight = 52.sp, fontWeight = FontWeight.Bold),
++    displaySmall = TextStyle(fontFamily = SwarariaFont, fontSize = 36.sp, lineHeight = 44.sp, fontWeight = FontWeight.Bold),
++    headlineLarge = TextStyle(fontFamily = SwarariaFont, fontSize = 36.sp, lineHeight = 43.sp, letterSpacing = (-1).sp, fontWeight = FontWeight.Bold),
++    headlineMedium = TextStyle(fontFamily = SwarariaFont, fontSize = 28.sp, lineHeight = 35.sp, letterSpacing = (-.5).sp, fontWeight = FontWeight.SemiBold),
++    headlineSmall = TextStyle(fontFamily = SwarariaFont, fontSize = 24.sp, lineHeight = 31.sp, fontWeight = FontWeight.SemiBold),
++    titleLarge = TextStyle(fontFamily = SwarariaFont, fontSize = 22.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold),
++    titleMedium = TextStyle(fontFamily = SwarariaFont, fontSize = 18.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold),
++    titleSmall = TextStyle(fontFamily = SwarariaFont, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
++    bodyLarge = TextStyle(fontFamily = SwarariaFont, fontSize = 16.sp, lineHeight = 24.sp),
++    bodyMedium = TextStyle(fontFamily = SwarariaFont, fontSize = 14.sp, lineHeight = 21.sp),
++    bodySmall = TextStyle(fontFamily = SwarariaFont, fontSize = 12.sp, lineHeight = 18.sp),
++    labelLarge = TextStyle(fontFamily = SwarariaFont, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
++    labelMedium = TextStyle(fontFamily = SwarariaFont, fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium),
++    labelSmall = TextStyle(fontFamily = SwarariaFont, fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
++)
+ 
+ @Composable
+ fun AudioTheme(content: @Composable () -> Unit) {
+     MaterialTheme(colorScheme = darkColorScheme(
+-        primary = Color(0xFF76E0D1), onPrimary = Color(0xFF003730),
+-        primaryContainer = Color(0xFF23443E),
+-        background = Color(0xFF101416), surface = Color(0xFF171D1F),
+-        onSurface = Color(0xFFE1E8E7), onSurfaceVariant = Color(0xFFADB9B7)
+-    ), content = content)
++        primary = Color(0xFF8CE3C7), onPrimary = Color(0xFF12392C),
++        primaryContainer = Color(0xFF173B2E), onPrimaryContainer = Color(0xFF8CE3C7),
++        secondary = Color(0xFFB5D7C6), onSecondary = Color(0xFF15372A),
++        secondaryContainer = Color(0xFF2B4538), onSecondaryContainer = Color(0xFFD6EDE0),
++        background = Color(0xFF101715), onBackground = Color(0xFFF1F5EF),
++        surface = Color(0xFF19231F), onSurface = Color(0xFFF1F5EF),
++        surfaceVariant = Color(0xFF22322A), onSurfaceVariant = Color(0xFFA9B6AD),
++        surfaceContainerLowest = Color(0xFF0B120F), surfaceContainerLow = Color(0xFF141E19),
++        surfaceContainer = Color(0xFF19231F), surfaceContainerHigh = Color(0xFF202D26),
++        surfaceContainerHighest = Color(0xFF28372F), surfaceBright = Color(0xFF304138),
++        surfaceDim = Color(0xFF101715), outline = Color(0xFF6A8071), outlineVariant = Color(0xFF354C3F),
++        error = Color(0xFFFFB4AB), onError = Color(0xFF690005),
++        errorContainer = Color(0xFF4B2526), onErrorContainer = Color(0xFFFFDAD6),
++        inverseSurface = Color(0xFFF1F5EF), inverseOnSurface = Color(0xFF19231F), inversePrimary = Color(0xFF236B53),
++    ), typography = SwarariaTypography, content = content)
+ }
+ 
+ @Composable
+--- a/app/src/main/java/com/swararia/audiolab/SwarariaUi.kt
++++ b/app/src/main/java/com/swararia/audiolab/SwarariaUi.kt
+@@ -0,0 +1,1081 @@
++package com.swararia.audiolab
++
++import androidx.activity.compose.BackHandler
++import androidx.compose.foundation.Image
++import androidx.compose.foundation.background
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.layout.*
++import androidx.compose.foundation.lazy.LazyColumn
++import androidx.compose.foundation.lazy.items
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.selection.toggleable
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.foundation.text.KeyboardActions
++import androidx.compose.foundation.text.KeyboardOptions
++import androidx.compose.foundation.text.selection.SelectionContainer
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.material3.*
++import androidx.compose.runtime.*
++import androidx.compose.runtime.saveable.rememberSaveable
++import androidx.compose.runtime.saveable.rememberSaveableStateHolder
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.clip
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.graphics.vector.ImageVector
++import androidx.compose.ui.layout.ContentScale
++import androidx.compose.ui.platform.LocalClipboardManager
++import androidx.compose.ui.platform.LocalSoftwareKeyboardController
++import androidx.compose.ui.res.painterResource
++import androidx.compose.ui.semantics.*
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.text.input.ImeAction
++import androidx.compose.ui.text.input.KeyboardType
++import androidx.compose.ui.text.style.TextOverflow
++import androidx.compose.ui.unit.Dp
++import androidx.compose.ui.unit.dp
++import androidx.lifecycle.Lifecycle
++import androidx.lifecycle.compose.LocalLifecycleOwner
++import androidx.lifecycle.repeatOnLifecycle
++import androidx.media3.common.C
++import androidx.media3.common.Player
++import androidx.media3.session.MediaController
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.flow.collectLatest
++import kotlinx.coroutines.isActive
++import java.util.Locale
++import kotlin.math.roundToInt
++
++/** Presentation only: storage, playback-session ownership and ingest remain outside this UI. */
++@Composable
++fun SwarariaUi(
++    tracks: List<AudioTrack>,
++    controller: MediaController?,
++    ingest: IngestState,
++    search: YoutubeSearchState,
++    lastRename: RenameRecord?,
++    organizerBusy: Boolean,
++    snackbarHostState: SnackbarHostState,
++    onDownload: (String, Boolean) -> Unit,
++    onImport: () -> Unit,
++    onUpdate: () -> Unit,
++    onCancel: () -> Unit,
++    onPlay: (AudioTrack) -> Unit,
++    onRename: (Long, String, () -> Unit) -> Unit,
++    onUndo: () -> Unit,
++    onSearch: (String, SearchProvider) -> Unit,
++    onCancelSearch: () -> Unit,
++) {
++    var destination by rememberSaveable { mutableIntStateOf(0) }
++    var fullPlayer by rememberSaveable { mutableStateOf(false) }
++    var settings by rememberSaveable { mutableStateOf(false) }
++    var history by rememberSaveable { mutableStateOf(false) }
++    var editing by remember { mutableStateOf<AudioTrack?>(null) }
++    val pages = rememberSaveableStateHolder()
++    val playback = rememberSwarariaPlayback(controller)
++    val current = tracks.firstOrNull { it.id.toString() == playback.mediaId }
++    val playTrack: (AudioTrack) -> Unit = { track ->
++        if (playback.connected) {
++            if (track.id.toString() == playback.mediaId) toggleSwarariaPlayback(controller)
++            else onPlay(track)
++        }
++    }
++
++    BackHandler(enabled = fullPlayer || destination != 0) {
++        if (fullPlayer) fullPlayer = false else destination = 0
++    }
++    Scaffold(
++        modifier = Modifier.fillMaxSize().imePadding(),
++        containerColor = MaterialTheme.colorScheme.background,
++        contentWindowInsets = WindowInsets.safeDrawing,
++        snackbarHost = { SnackbarHost(snackbarHostState) },
++        bottomBar = {
++            if (!fullPlayer) Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
++                if (playback.mediaId != null) MiniPlayer(
++                    current, playback, controller, onOpen = { fullPlayer = true }
++                )
++                NavigationBar(
++                    containerColor = MaterialTheme.colorScheme.background,
++                    tonalElevation = 0.dp,
++                    windowInsets = WindowInsets.navigationBars.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
++                ) {
++                    NavigationBarItem(
++                        selected = destination == 0,
++                        onClick = { destination = 0 },
++                        icon = { Icon(UiIcons.Library, contentDescription = null) },
++                        label = { Text("Pustaka") },
++                        colors = navigationColors(),
++                    )
++                    NavigationBarItem(
++                        selected = destination == 1,
++                        onClick = { destination = 1 },
++                        icon = { Icon(UiIcons.Plus, contentDescription = null) },
++                        label = { Text("Tambah audio") },
++                        colors = navigationColors(),
++                    )
++                }
++            }
++        },
++    ) { padding ->
++        val contentModifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)
++        if (fullPlayer) FocusedPlayer(
++            tracks = tracks, current = current, playback = playback, controller = controller,
++            modifier = contentModifier, onBack = { fullPlayer = false },
++            onRename = { editing = it }, onSettings = { settings = true },
++        ) else pages.SaveableStateProvider(destination) {
++            if (destination == 0) LibraryPage(
++                tracks = tracks, currentId = playback.mediaId, connected = playback.connected,
++                ingest = ingest, search = search, organizerBusy = organizerBusy,
++                modifier = contentModifier, onAdd = { destination = 1 }, onPlay = playTrack,
++                onRename = { editing = it }, onHistory = { history = true },
++                onSettings = { settings = true },
++            ) else AddAudioPage(
++                ingest = ingest, search = search, modifier = contentModifier,
++                onDownload = { url, authorized -> if (!ingest.busy && !search.busy && authorized) onDownload(url, true) },
++                onImport = { if (!ingest.busy && !search.busy) onImport() },
++                onCancel = { if (ingest.busy && ingest.cancelable) onCancel() },
++                onSearch = { query, provider -> if (!ingest.busy && !search.busy) onSearch(query, provider) },
++                onCancelSearch = onCancelSearch, onSettings = { settings = true },
++            )
++        }
++    }
++    editing?.let { track ->
++        key(track.id, track.displayName) {
++            RenameAudioDialog(track, organizerBusy, onDismiss = { editing = null }, onRename = onRename)
++        }
++    }
++    if (history) RenameHistoryDialog(lastRename, organizerBusy, onDismiss = { history = false }, onUndo = onUndo)
++    if (settings) EngineSettingsDialog(ingest, search.busy, onDismiss = { settings = false },
++        onUpdate = { if (!ingest.busy && !search.busy) onUpdate() },
++        onCancel = { if (ingest.busy && ingest.cancelable) onCancel() })
++}
++
++@Composable
++private fun LibraryPage(
++    tracks: List<AudioTrack>,
++    currentId: String?,
++    connected: Boolean,
++    ingest: IngestState,
++    search: YoutubeSearchState,
++    organizerBusy: Boolean,
++    modifier: Modifier,
++    onAdd: () -> Unit,
++    onPlay: (AudioTrack) -> Unit,
++    onRename: (AudioTrack) -> Unit,
++    onHistory: () -> Unit,
++    onSettings: () -> Unit,
++) {
++    var query by rememberSaveable { mutableStateOf("") }
++    var alphabetical by rememberSaveable { mutableStateOf(false) }
++    var sortMenu by remember { mutableStateOf(false) }
++    var appMenu by remember { mutableStateOf(false) }
++    val visible = remember(tracks, query, alphabetical) {
++        val matching = tracks.filter {
++            it.displayName.contains(query.trim(), ignoreCase = true) ||
++                UiPresentation.title(it.displayName).contains(query.trim(), ignoreCase = true)
++        }
++        if (alphabetical) matching.sortedWith(compareBy<AudioTrack> {
++            UiPresentation.title(it.displayName).lowercase(Locale.ROOT)
++        }.thenBy { it.id })
++        else matching.sortedWith(compareByDescending<AudioTrack> { it.addedAt }.thenByDescending { it.id })
++    }
++    LazyColumn(modifier, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 20.dp),
++        verticalArrangement = Arrangement.spacedBy(8.dp)) {
++        item(key = "library-header") {
++            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
++                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
++                    Text("Pustaka", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold,
++                        modifier = Modifier.weight(1f))
++                    GlyphButton(UiIcons.Plus, "Tambah audio", onAdd, Modifier.size(52.dp), filled = true)
++                    Box {
++                        GlyphButton(UiIcons.More, "Menu Pustaka", { appMenu = true })
++                        DropdownMenu(expanded = appMenu, onDismissRequest = { appMenu = false }) {
++                            DropdownMenuItem(text = { Text("Riwayat nama & urungkan") },
++                                leadingIcon = { Icon(UiIcons.History, null) },
++                                onClick = { appMenu = false; onHistory() })
++                            DropdownMenuItem(text = { Text("Pengaturan & tentang") },
++                                leadingIcon = { Icon(UiIcons.Settings, null) },
++                                onClick = { appMenu = false; onSettings() })
++                        }
++                    }
++                }
++                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++                    BrandLogo(24.dp)
++                    Text("Swararia · Audio tersimpan di HP", style = MaterialTheme.typography.bodyMedium,
++                        color = MaterialTheme.colorScheme.onSurfaceVariant)
++                }
++                Spacer(Modifier.height(4.dp))
++                OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Cari audio") },
++                    leadingIcon = { Icon(UiIcons.Search, null) },
++                    trailingIcon = if (query.isNotEmpty()) ({ GlyphButton(UiIcons.Close, "Hapus pencarian pustaka", { query = "" }) }) else null,
++                    singleLine = true, modifier = Modifier.fillMaxWidth(),
++                    shape = RoundedCornerShape(18.dp), colors = searchFieldColors(),
++                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
++                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
++                    Text(if (query.isBlank()) "${tracks.size} audio" else "${visible.size} dari ${tracks.size} audio",
++                        style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
++                        modifier = Modifier.weight(1f))
++                    Box {
++                        TextButton(onClick = { sortMenu = true }, modifier = Modifier.heightIn(min = 48.dp)
++                            .semantics { contentDescription = "Urutkan audio: ${if (alphabetical) "A–Z" else "Terbaru"}" }) {
++                            Text(if (alphabetical) "A–Z" else "Terbaru", color = MaterialTheme.colorScheme.onSurfaceVariant)
++                            Icon(UiIcons.ChevronDown, null, Modifier.padding(start = 6.dp).size(20.dp))
++                        }
++                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
++                            DropdownMenuItem(text = { Text("Terbaru") }, onClick = { alphabetical = false; sortMenu = false },
++                                trailingIcon = if (!alphabetical) ({ Icon(UiIcons.Check, null) }) else null)
++                            DropdownMenuItem(text = { Text("A–Z") }, onClick = { alphabetical = true; sortMenu = false },
++                                trailingIcon = if (alphabetical) ({ Icon(UiIcons.Check, null) }) else null)
++                        }
++                    }
++                }
++            }
++        }
++        if (ingest.busy || search.busy) item(key = "active-operation") {
++            Surface(onClick = onAdd, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
++                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically,
++                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
++                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
++                    Text(if (ingest.busy) ingest.stage else "Mencari di ${search.provider.label}…",
++                        style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
++                    Icon(UiIcons.ChevronRight, "Lihat proses", Modifier.size(20.dp))
++                }
++            }
++        }
++        if (!connected && tracks.isNotEmpty()) item(key = "player-disconnected") {
++            Text("Pemutar belum terhubung. Audio tetap bisa dicari dan diubah namanya.",
++                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
++                modifier = Modifier.padding(vertical = 8.dp))
++        }
++        if (organizerBusy) item(key = "rename-progress") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
++        if (visible.isEmpty()) item(key = "library-empty") {
++            if (tracks.isEmpty()) EmptyMessage("Pustaka masih kosong", "Tambahkan tautan berizin atau impor audio dari HP.", UiIcons.Library) {
++                Button(onClick = onAdd, modifier = Modifier.heightIn(min = 48.dp)) { Text("Tambah audio") }
++            } else EmptyMessage("Audio tidak ditemukan", "Coba nama lain atau hapus kata pencarian.", UiIcons.Search) {
++                TextButton(onClick = { query = "" }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Hapus pencarian") }
++            }
++        }
++        items(visible, key = { it.id }) { track ->
++            LibraryAudioRow(track, selected = track.id.toString() == currentId, connected = connected,
++                renameEnabled = !organizerBusy, onPlay = { onPlay(track) }, onRename = { onRename(track) })
++        }
++    }
++}
++
++@Composable
++private fun searchFieldColors() = OutlinedTextFieldDefaults.colors(
++    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
++    focusedContainerColor = MaterialTheme.colorScheme.surface,
++    disabledContainerColor = MaterialTheme.colorScheme.surface,
++    unfocusedBorderColor = Color.Transparent,
++    focusedBorderColor = MaterialTheme.colorScheme.primary,
++)
++
++@Composable
++private fun LibraryAudioRow(
++    track: AudioTrack,
++    selected: Boolean,
++    connected: Boolean,
++    renameEnabled: Boolean,
++    onPlay: () -> Unit,
++    onRename: () -> Unit,
++) {
++    var menu by remember { mutableStateOf(false) }
++    Surface(shape = RoundedCornerShape(18.dp),
++        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent) {
++        Column {
++            Row(Modifier.fillMaxWidth().heightIn(min = 80.dp).semantics { this.selected = selected },
++                verticalAlignment = Alignment.CenterVertically) {
++                Row(Modifier.weight(1f).clickable(enabled = connected, onClickLabel = "Putar ${UiPresentation.title(track.displayName)}",
++                    onClick = onPlay).padding(start = 8.dp, top = 10.dp, bottom = 10.dp),
++                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
++                    TrackArtwork(track.id, Modifier.size(56.dp).clip(RoundedCornerShape(7.dp)))
++                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
++                        Text(UiPresentation.title(track.displayName), style = MaterialTheme.typography.titleMedium,
++                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
++                            maxLines = 2, overflow = TextOverflow.Ellipsis)
++                        Text(UiPresentation.metadata(track.displayName, track.durationMs), style = MaterialTheme.typography.bodyMedium,
++                            color = MaterialTheme.colorScheme.onSurfaceVariant)
++                    }
++                }
++                Box {
++                    GlyphButton(UiIcons.More, "Menu audio ${UiPresentation.title(track.displayName)}", { menu = true })
++                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
++                        DropdownMenuItem(text = { Text("Ubah nama") }, leadingIcon = { Icon(UiIcons.Rename, null) },
++                            enabled = renameEnabled, onClick = { menu = false; onRename() })
++                    }
++                }
++            }
++            if (!selected) HorizontalDivider(Modifier.padding(start = 78.dp, end = 12.dp),
++                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
++        }
++    }
++}
++
++@Composable
++private fun RenameAudioDialog(
++    track: AudioTrack,
++    busy: Boolean,
++    onDismiss: () -> Unit,
++    onRename: (Long, String, () -> Unit) -> Unit,
++) {
++    // The editor uses the real filename, never the cosmetic library title.
++    var title by rememberSaveable(track.id, track.displayName) {
++        mutableStateOf(track.displayName.substringBeforeLast('.', track.displayName))
++    }
++    val validated = remember(track.displayName, title) { runCatching { LibraryRules.renamedDisplayName(track.displayName, title) } }
++    val canSave = !busy && validated.isSuccess && validated.getOrNull() != track.displayName
++    AlertDialog(onDismissRequest = { if (!busy) onDismiss() },
++        icon = { Icon(UiIcons.Rename, null) }, title = { Text("Ubah nama audio") },
++        text = {
++            Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                Text("File saat ini: ${track.displayName}", style = MaterialTheme.typography.bodySmall,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant)
++                OutlinedTextField(value = title, onValueChange = { title = it }, enabled = !busy,
++                    label = { Text("Nama tanpa ekstensi") }, modifier = Modifier.fillMaxWidth(),
++                    isError = validated.isFailure, maxLines = 3,
++                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
++                    keyboardActions = KeyboardActions(onDone = { if (canSave) onRename(track.id, title, onDismiss) }))
++                Text("Format file tetap sama. Audio tidak dikonversi.", style = MaterialTheme.typography.bodySmall)
++                if (validated.isSuccess) Text("Nama file: ${validated.getOrNull()}", style = MaterialTheme.typography.bodySmall)
++                else Text(validated.exceptionOrNull()?.message ?: "Nama tidak valid.",
++                    color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
++                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
++            }
++        },
++        confirmButton = { TextButton(onClick = { onRename(track.id, title, onDismiss) }, enabled = canSave) { Text("Simpan nama") } },
++        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("Batal") } })
++}
++
++@Composable
++private fun RenameHistoryDialog(record: RenameRecord?, busy: Boolean, onDismiss: () -> Unit, onUndo: () -> Unit) {
++    AlertDialog(onDismissRequest = onDismiss, icon = { Icon(UiIcons.History, null) },
++        title = { Text("Riwayat perubahan nama") },
++        text = {
++            Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                if (record == null) Text("Belum ada perubahan nama yang dapat diurungkan.")
++                else {
++                    Text("Perubahan terakhir", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
++                    SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
++                        Text("Sebelum: ${record.fromName}")
++                        Text("Sekarang: ${record.toName}")
++                    } }
++                    Text("Urungkan untuk mengembalikan nama sebelumnya. Riwayat yang lebih lama akan tampil jika masih tersedia.",
++                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                }
++                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
++            }
++        },
++        confirmButton = { TextButton(onClick = onUndo, enabled = record != null && !busy) { Text("Urungkan nama terakhir") } },
++        dismissButton = { TextButton(onClick = onDismiss) { Text("Tutup") } })
++}
++
++@Composable
++private fun AddAudioPage(
++    ingest: IngestState,
++    search: YoutubeSearchState,
++    modifier: Modifier,
++    onDownload: (String, Boolean) -> Unit,
++    onImport: () -> Unit,
++    onCancel: () -> Unit,
++    onSearch: (String, SearchProvider) -> Unit,
++    onCancelSearch: () -> Unit,
++    onSettings: () -> Unit,
++) {
++    var mode by rememberSaveable { mutableIntStateOf(if (search.busy) 1 else 0) }
++    var url by rememberSaveable { mutableStateOf("") }
++    var authorized by remember { mutableStateOf(false) }
++    var query by rememberSaveable { mutableStateOf(search.query) }
++    var providerName by rememberSaveable { mutableStateOf(search.provider.name) }
++    var providerMenu by remember { mutableStateOf(false) }
++    var selectedHit by remember { mutableStateOf<SearchHit?>(null) }
++    val provider = SearchProvider.entries.firstOrNull { it.name == providerName } ?: SearchProvider.YOUTUBE
++    val canStart = !ingest.busy && !search.busy
++    val urlValidation = remember(url) { runCatching { LibraryRules.validatedHttpsUrl(url) } }
++    val queryValidation = remember(query) { runCatching { YoutubeSearchRules.validatedQuery(query) } }
++    val clipboard = LocalClipboardManager.current
++    val keyboard = LocalSoftwareKeyboardController.current
++    val submitSearch: () -> Unit = {
++        if (canStart && queryValidation.isSuccess) {
++            keyboard?.hide()
++            onSearch(query, provider)
++        }
++    }
++    LazyColumn(modifier, contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 24.dp),
++        verticalArrangement = Arrangement.spacedBy(20.dp)) {
++        item(key = "add-header") {
++            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
++                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
++                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
++                    Text("Tambah audio", style = MaterialTheme.typography.headlineLarge,
++                        fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
++                    BrandLogo(40.dp)
++                }
++                Text("Dari tautan, pencarian, atau file di HP.", style = MaterialTheme.typography.bodyLarge,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant)
++            }
++        }
++        item(key = "add-modes") {
++            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surface).padding(4.dp)) {
++                Tab(selected = mode == 0, onClick = { mode = 0; authorized = false },
++                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
++                        .background(if (mode == 0) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).heightIn(min = 52.dp),
++                    selectedContentColor = MaterialTheme.colorScheme.primary,
++                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
++                    text = { Text("Tautan") })
++                Tab(selected = mode == 1, onClick = { mode = 1; authorized = false },
++                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
++                        .background(if (mode == 1) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).heightIn(min = 52.dp),
++                    selectedContentColor = MaterialTheme.colorScheme.primary,
++                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
++                    text = { Text("Cari") })
++            }
++        }
++        if (mode == 0) item(key = "paste-form") {
++            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
++                Text("TAUTAN AUDIO", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                OutlinedTextField(value = url, onValueChange = { url = it; authorized = false }, enabled = canStart,
++                    label = { Text("Tautan HTTPS") }, placeholder = { Text("https://…") },
++                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), maxLines = 4,
++                    isError = url.isNotBlank() && urlValidation.isFailure,
++                    trailingIcon = {
++                        TextButton(onClick = {
++                            clipboard.getText()?.text?.let { url = it.trim(); authorized = false }
++                        }, enabled = canStart, modifier = Modifier.heightIn(min = 48.dp)) { Text("Tempel") }
++                    },
++                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
++                    supportingText = if (url.isNotBlank() && urlValidation.isFailure) ({
++                        Text(urlValidation.exceptionOrNull()?.message ?: "Tautan tidak valid.")
++                    }) else null)
++                RightsConfirmation(authorized, { authorized = it }, canStart)
++                if (!ingest.busy) Button(onClick = {
++                    val validUrl = urlValidation.getOrNull()
++                    if (canStart && authorized && validUrl != null) {
++                        authorized = false
++                        keyboard?.hide()
++                        onDownload(validUrl, true)
++                    }
++                }, enabled = canStart && authorized && urlValidation.isSuccess,
++                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(18.dp)) {
++                    Icon(UiIcons.Download, null, Modifier.size(20.dp))
++                    Spacer(Modifier.width(10.dp)); Text("Unduh audio")
++                }
++            }
++        } else item(key = "search-form") {
++            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                Text("CARI DI SUMBER", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                Box(Modifier.fillMaxWidth()) {
++                    OutlinedButton(onClick = { providerMenu = true }, enabled = canStart,
++                        shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
++                            .semantics { contentDescription = "Sumber pencarian: ${provider.label}" }) {
++                        Text(provider.label, modifier = Modifier.weight(1f))
++                        Icon(UiIcons.ChevronDown, null, Modifier.size(22.dp))
++                    }
++                    DropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
++                        SearchProvider.entries.forEach { source ->
++                            DropdownMenuItem(text = { Text(source.label) }, enabled = canStart,
++                                trailingIcon = if (source == provider) ({ Icon(UiIcons.Check, null) }) else null,
++                                onClick = { providerName = source.name; providerMenu = false })
++                        }
++                    }
++                }
++                OutlinedTextField(value = query, onValueChange = { query = it }, enabled = canStart,
++                    label = { Text("Judul atau kata kunci") }, leadingIcon = { Icon(UiIcons.Search, null) },
++                    trailingIcon = if (query.isNotEmpty()) ({ GlyphButton(UiIcons.Close, "Hapus kata pencarian", { query = "" }, enabled = canStart) }) else null,
++                    singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
++                    isError = query.isNotBlank() && queryValidation.isFailure,
++                    supportingText = if (query.isNotBlank() && queryValidation.isFailure) ({
++                        Text(queryValidation.exceptionOrNull()?.message ?: "Kata pencarian tidak valid.")
++                    }) else null,
++                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
++                    keyboardActions = KeyboardActions(onSearch = { submitSearch() }))
++                Button(onClick = submitSearch, enabled = canStart && queryValidation.isSuccess,
++                    shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
++                    Icon(UiIcons.Search, null, Modifier.size(20.dp))
++                    Spacer(Modifier.width(10.dp)); Text("Cari audio")
++                }
++                Text("Pencarian hanya mengambil informasi. Pilih hasil lalu konfirmasi izin sebelum mengunduh.",
++                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++            }
++        }
++        if (search.busy) item(key = "search-loading") {
++            Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
++                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                    Text("Mencari di ${search.provider.label}…", style = MaterialTheme.typography.titleMedium,
++                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
++                    Text(search.query, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
++                        maxLines = 2, overflow = TextOverflow.Ellipsis)
++                    LinearProgressIndicator(Modifier.fillMaxWidth())
++                    Text("Unduhan, impor, dan pembaruan mesin menunggu pencarian selesai.",
++                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                    OutlinedButton(onClick = onCancelSearch, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Batalkan pencarian") }
++                }
++            }
++        }
++        if (ingest.busy || ingest.error || ingest.progress != null || ingest.detail.isNotBlank() || ingest.stage != "Siap menambah audio") {
++            item(key = "ingest-status") { IngestStatusCard(ingest, onCancel) }
++        }
++        item(key = "local-import") {
++            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
++                Text("ATAU FILE LOKAL", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                OutlinedButton(onClick = onImport, enabled = canStart, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
++                    shape = RoundedCornerShape(18.dp)) {
++                    Icon(UiIcons.Import, null, Modifier.size(22.dp)); Spacer(Modifier.width(10.dp)); Text("Impor audio dari HP")
++                }
++                Text("Audio yang selesai ditambahkan akan muncul di Pustaka. Impor membuat salinan; file asli tetap.",
++                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++            }
++        }
++        if (mode == 1 && !search.busy) {
++            when {
++                search.error != null -> item(key = "search-error") {
++                    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.errorContainer) {
++                        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                            Text("Pencarian belum berhasil", style = MaterialTheme.typography.titleMedium,
++                                color = MaterialTheme.colorScheme.onErrorContainer)
++                            Text(search.error, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium,
++                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
++                            TextButton(onClick = { onSearch(search.query, search.provider) },
++                                enabled = canStart && runCatching { YoutubeSearchRules.validatedQuery(search.query) }.isSuccess) { Text("Coba lagi") }
++                        }
++                    }
++                }
++                !search.hasSearched -> item(key = "search-idle") {
++                    EmptyMessage("Temukan audio", "Pilih YouTube atau YouTube Music, isi kata kunci, lalu tekan Cari audio.", UiIcons.Search)
++                }
++                search.results.isEmpty() -> item(key = "search-empty") {
++                    EmptyMessage("Tidak ada hasil", "Tidak ada hasil untuk “${search.query}” di ${search.provider.label}. Coba kata kunci lain.", UiIcons.Search)
++                }
++                else -> {
++                    item(key = "search-results-heading") {
++                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
++                            Text("${search.results.size} hasil · ${search.provider.label}", style = MaterialTheme.typography.titleSmall)
++                            Text("Untuk “${search.query}”", style = MaterialTheme.typography.bodySmall,
++                                color = MaterialTheme.colorScheme.onSurfaceVariant)
++                        }
++                    }
++                    items(search.results, key = { "search-${it.videoId}" }) { hit ->
++                        SearchResultRow(hit, search.provider, canStart, onSelect = { selectedHit = hit })
++                    }
++                }
++            }
++        }
++        item(key = "engine-settings") {
++            TextButton(onClick = onSettings, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
++                Icon(UiIcons.Settings, null, Modifier.size(22.dp)); Spacer(Modifier.width(10.dp))
++                Text("Pengaturan & tentang", modifier = Modifier.weight(1f))
++                Icon(UiIcons.ChevronRight, null, Modifier.size(20.dp))
++            }
++        }
++    }
++    selectedHit?.let { hit ->
++        key(hit.videoId, hit.url) {
++            SearchDownloadDialog(hit, search.provider, canStart, onDismiss = { selectedHit = null },
++                onDownload = { link, consent -> selectedHit = null; onDownload(link, consent) })
++        }
++    }
++}
++
++@Composable
++private fun RightsConfirmation(checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean) {
++    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(value = checked,
++        enabled = enabled, role = Role.Checkbox, onValueChange = onCheckedChange).padding(vertical = 4.dp),
++        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++        Checkbox(checked = checked, onCheckedChange = null, enabled = enabled)
++        Text("Saya memiliki izin untuk mengunduh audio ini.", style = MaterialTheme.typography.bodyMedium,
++            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
++            modifier = Modifier.weight(1f))
++    }
++}
++
++@Composable
++private fun SearchResultRow(hit: SearchHit, provider: SearchProvider, enabled: Boolean, onSelect: () -> Unit) {
++    Surface(onClick = onSelect, enabled = enabled, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
++        modifier = Modifier.fillMaxWidth()) {
++        Row(Modifier.heightIn(min = 84.dp).padding(12.dp), verticalAlignment = Alignment.CenterVertically,
++            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
++            YoutubeThumbnail(hit.thumbnailUrl, hit.title, Modifier.size(width = 80.dp, height = 56.dp).clip(RoundedCornerShape(8.dp)))
++            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
++                Text(hit.title, style = MaterialTheme.typography.titleSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
++                Text(hit.channel ?: provider.label, style = MaterialTheme.typography.bodySmall, maxLines = 2,
++                    overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                Text(hit.durationSeconds?.let { LibraryRules.durationLabel(it * 1000L) } ?: "Durasi belum tersedia",
++                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++            }
++            Icon(UiIcons.Download, contentDescription = "Pilih untuk konfirmasi unduhan", tint = MaterialTheme.colorScheme.primary,
++                modifier = Modifier.size(22.dp))
++        }
++    }
++}
++
++@Composable
++private fun SearchDownloadDialog(
++    hit: SearchHit,
++    provider: SearchProvider,
++    canStart: Boolean,
++    onDismiss: () -> Unit,
++    onDownload: (String, Boolean) -> Unit,
++) {
++    var authorized by remember { mutableStateOf(false) }
++    val validUrl = remember(hit.url) { runCatching { LibraryRules.validatedHttpsUrl(hit.url) }.isSuccess }
++    AlertDialog(onDismissRequest = onDismiss, title = { Text("Unduh audio ini?") },
++        text = {
++            Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                YoutubeThumbnail(hit.thumbnailUrl, hit.title, Modifier.fillMaxWidth().height(128.dp).clip(RoundedCornerShape(12.dp)))
++                Text(hit.title, style = MaterialTheme.typography.titleMedium)
++                Text(hit.channel ?: provider.label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                Text("File audio akan disimpan di HP, bukan diputar dari layanan sumber.", style = MaterialTheme.typography.bodySmall)
++                RightsConfirmation(authorized, { authorized = it }, canStart)
++                if (!canStart) Text("Tunggu proses atau pencarian selesai, atau batalkan proses yang aktif.",
++                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                if (!validUrl) Text("Tautan hasil tidak valid. Lakukan pencarian kembali.", color = MaterialTheme.colorScheme.error)
++            }
++        },
++        confirmButton = {
++            TextButton(onClick = { if (canStart && authorized && validUrl) onDownload(hit.url, true) },
++                enabled = canStart && authorized && validUrl) { Text("Unduh audio") }
++        },
++        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } })
++}
++
++@Composable
++private fun IngestStatusCard(state: IngestState, onCancel: () -> Unit) {
++    var details by remember { mutableStateOf(false) }
++    val progress = state.progress?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
++    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
++        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
++            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
++                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
++                Text(state.stage, style = MaterialTheme.typography.titleLarge,
++                    color = if (state.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
++                    modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite })
++                if (progress != null) Text("${(progress * 100).roundToInt()}%", style = MaterialTheme.typography.headlineMedium,
++                    color = MaterialTheme.colorScheme.primary)
++            }
++            if (state.busy) {
++                if (progress == null) LinearProgressIndicator(Modifier.fillMaxWidth())
++                else LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
++                Text(if (progress == null) "Proses berjalan; persentase belum tersedia." else "Progres dari mesin unduh",
++                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++            }
++            if (!state.busy && !state.error && state.detail.isNotBlank()) Text(state.detail, style = MaterialTheme.typography.bodyMedium,
++                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
++            if (state.error) Text("Proses belum berhasil. Lihat detail untuk penyebabnya, lalu coba lagi atau impor file lokal.",
++                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
++            if (state.busy && state.cancelable) OutlinedButton(onClick = onCancel,
++                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Batalkan proses") }
++            if (state.busy && !state.cancelable) Text("Tahap ini perlu diselesaikan sebelum proses baru dimulai.",
++                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++            if (state.detail.isNotBlank()) TextButton(onClick = { details = true }) { Text("Detail proses") }
++        }
++    }
++    if (details) DiagnosticsDialog(state, onDismiss = { details = false })
++}
++
++@Composable
++private fun DiagnosticsDialog(state: IngestState, onDismiss: () -> Unit) {
++    AlertDialog(onDismissRequest = onDismiss, title = { Text("Detail proses") },
++        text = {
++            SelectionContainer {
++                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                    Text(state.stage, style = MaterialTheme.typography.titleSmall)
++                    Text("yt-dlp: ${state.engineVersion}", style = MaterialTheme.typography.bodySmall)
++                    Text(state.detail.ifBlank { "Belum ada keluaran diagnostik." }, style = MaterialTheme.typography.bodySmall)
++                }
++            }
++        }, confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } })
++}
++
++@Composable
++private fun EngineSettingsDialog(
++    ingest: IngestState,
++    searchBusy: Boolean,
++    onDismiss: () -> Unit,
++    onUpdate: () -> Unit,
++    onCancel: () -> Unit,
++) {
++    var details by remember { mutableStateOf(false) }
++    AlertDialog(onDismissRequest = onDismiss, icon = { BrandLogo(36.dp) }, title = { Text("Pengaturan & tentang") },
++        text = {
++            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
++                Text("Mesin audio", style = MaterialTheme.typography.titleMedium)
++                Text("yt-dlp: ${ingest.engineVersion}", style = MaterialTheme.typography.bodyMedium)
++                Text("Pembaruan opsional mengambil versi stabil dari GitHub resmi. Memerlukan internet dan tidak memasang Termux.",
++                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                OutlinedButton(onClick = onUpdate, enabled = !ingest.busy && !searchBusy,
++                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Perbarui mesin yt-dlp") }
++                if (searchBusy) Text("Selesaikan atau batalkan pencarian sebelum memperbarui mesin.",
++                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                if (ingest.busy) {
++                    Text(ingest.stage, style = MaterialTheme.typography.bodyMedium)
++                    if (ingest.cancelable) TextButton(onClick = onCancel) { Text("Batalkan proses") }
++                }
++                TextButton(onClick = { details = true }) { Text("Buka diagnostik") }
++                HorizontalDivider()
++                Text("Tentang Swararia", style = MaterialTheme.typography.titleMedium)
++                Text("Audio tersimpan di Music/SwarariaAudioLab. Impor membuat salinan tanpa mengubah file asli. Pemutar memakai file lokal; pencarian, tautan, dan pembaruan memerlukan internet.",
++                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                Text("Tanpa akun, server pendamping, atau analitik aplikasi. Unduh hanya audio yang boleh Anda gunakan. Engine downloader dan FFmpeg memiliki kewajiban lisensi; lihat source dan catatan lisensi sebelum distribusi.",
++                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++            }
++        }, confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } })
++    if (details) DiagnosticsDialog(ingest, onDismiss = { details = false })
++}
++
++private data class SessionQueueItem(val index: Int, val mediaId: String, val title: String?)
++
++private data class SessionPlayback(
++    val connected: Boolean = false,
++    val mediaId: String? = null,
++    val title: String? = null,
++    val currentIndex: Int = -1,
++    val playing: Boolean = false,
++    val wantsPlay: Boolean = false,
++    val idle: Boolean = true,
++    val ended: Boolean = false,
++    val buffering: Boolean = false,
++    val positionMs: Long = 0,
++    val durationMs: Long? = null,
++    val canPlay: Boolean = false,
++    val canSeek: Boolean = false,
++    val canStop: Boolean = false,
++    val hasPrevious: Boolean = false,
++    val hasNext: Boolean = false,
++    val canChooseQueue: Boolean = false,
++    val queue: List<SessionQueueItem> = emptyList(),
++    val error: String? = null,
++)
++
++@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
++private fun readSwarariaPlayback(p: MediaController): SessionPlayback {
++    if (!p.isConnected) return SessionPlayback()
++    val queue = if (p.isCommandAvailable(Player.COMMAND_GET_TIMELINE)) List(p.mediaItemCount) { index ->
++        val item = p.getMediaItemAt(index)
++        SessionQueueItem(index, item.mediaId, item.mediaMetadata.title?.toString())
++    } else emptyList()
++    return SessionPlayback(
++        connected = true, mediaId = p.currentMediaItem?.mediaId,
++        title = p.mediaMetadata.title?.toString(), currentIndex = p.currentMediaItemIndex,
++        playing = p.isPlaying, wantsPlay = playbackRequestsPause(p), idle = p.playbackState == Player.STATE_IDLE,
++        ended = p.playbackState == Player.STATE_ENDED,
++        buffering = p.playbackState == Player.STATE_BUFFERING,
++        positionMs = p.currentPosition.coerceAtLeast(0), durationMs = p.duration.takeIf { it > 0 && it != C.TIME_UNSET },
++        canPlay = p.isCommandAvailable(Player.COMMAND_PLAY_PAUSE),
++        canSeek = p.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) && p.isCurrentMediaItemSeekable,
++        canStop = p.isCommandAvailable(Player.COMMAND_STOP),
++        hasPrevious = p.isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) && p.hasPreviousMediaItem(),
++        hasNext = p.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) && p.hasNextMediaItem(),
++        canChooseQueue = p.isCommandAvailable(Player.COMMAND_SEEK_TO_MEDIA_ITEM), queue = queue,
++        error = p.playerError?.let { "${it.errorCodeName}: ${it.message.orEmpty()}" },
++    )
++}
++
++@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
++@Composable
++private fun rememberSwarariaPlayback(controller: MediaController?): SessionPlayback {
++    var state by remember(controller) { mutableStateOf(SessionPlayback()) }
++    val owner = LocalLifecycleOwner.current
++    LaunchedEffect(controller, owner) {
++        val p = controller ?: return@LaunchedEffect
++        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
++            if (!p.isConnected) { state = SessionPlayback(); return@repeatOnLifecycle }
++            val listener = object : Player.Listener {
++                override fun onEvents(player: Player, events: Player.Events) { state = readSwarariaPlayback(p) }
++            }
++            p.addListener(listener)
++            try {
++                state = readSwarariaPlayback(p)
++                // Events handle paused/idle changes. The position ticker exists only while playing and visible.
++                snapshotFlow { state.playing }.collectLatest { playing ->
++                    if (playing) while (isActive) {
++                        delay(500)
++                        if (!p.isConnected) { state = SessionPlayback(); break }
++                        state = state.copy(positionMs = p.currentPosition.coerceAtLeast(0))
++                    }
++                }
++            } finally { p.removeListener(listener) }
++        }
++    }
++    return state
++}
++
++@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
++private inline fun connectedCommand(controller: MediaController?, command: Int, action: (MediaController) -> Unit) {
++    val p = controller ?: return
++    if (p.isConnected && p.isCommandAvailable(command)) action(p)
++}
++
++private fun playbackRequestsPause(p: Player): Boolean =
++    p.playWhenReady && p.playbackState != Player.STATE_IDLE &&
++        p.playbackState != Player.STATE_ENDED && p.playerError == null
++
++private fun toggleSwarariaPlayback(controller: MediaController?) {
++    connectedCommand(controller, Player.COMMAND_PLAY_PAUSE) { p ->
++        if (p.currentMediaItem != null) {
++            if (playbackRequestsPause(p)) p.pause() else {
++                if (p.playbackState == Player.STATE_ENDED && p.isCommandAvailable(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)) p.seekToDefaultPosition()
++                if (p.playbackState == Player.STATE_IDLE && p.isCommandAvailable(Player.COMMAND_PREPARE)) p.prepare()
++                p.play()
++            }
++        }
++    }
++}
++
++private fun playbackTitle(current: AudioTrack?, playback: SessionPlayback): String =
++    current?.let { UiPresentation.title(it.displayName) }
++        ?: playback.title?.takeIf { it.isNotBlank() }?.let { UiPresentation.title(it) }
++        ?: if (playback.mediaId == null) "Pilih audio dari Pustaka" else "Audio tidak tersedia"
++
++private fun playbackStatus(playback: SessionPlayback): String = when {
++    !playback.connected -> "Pemutar belum terhubung"
++    playback.error != null -> "Pemutaran bermasalah"
++    playback.buffering -> "Menyiapkan audio…"
++    playback.idle && playback.mediaId != null -> "Dihentikan"
++    playback.playing -> "Audio lokal"
++    playback.ended -> "Selesai · Audio lokal"
++    playback.mediaId != null -> "Dijeda · Audio lokal"
++    else -> "Pilih audio dari Pustaka"
++}
++
++@Composable
++private fun MiniPlayer(current: AudioTrack?, playback: SessionPlayback, controller: MediaController?, onOpen: () -> Unit) {
++    Surface(onClick = onOpen, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceVariant,
++        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
++        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
++            .semantics { contentDescription = "Buka pemutar lengkap" }) {
++        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
++            Row(Modifier.fillMaxWidth().heightIn(min = 60.dp), verticalAlignment = Alignment.CenterVertically,
++                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
++                TrackArtwork(current?.id ?: playback.mediaId?.toLongOrNull(), Modifier.size(48.dp).clip(RoundedCornerShape(7.dp)))
++                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
++                    Text(playbackTitle(current, playback), style = MaterialTheme.typography.titleSmall,
++                        maxLines = 2, overflow = TextOverflow.Ellipsis)
++                    Text(playbackStatus(playback), style = MaterialTheme.typography.bodySmall,
++                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
++                }
++                GlyphButton(if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
++                    if (playback.wantsPlay) "Jeda audio" else "Lanjutkan audio", { toggleSwarariaPlayback(controller) },
++                    enabled = playback.connected && playback.canPlay, filled = true)
++                GlyphButton(UiIcons.Next, "Audio berikutnya", {
++                    connectedCommand(controller, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) { p -> if (p.hasNextMediaItem()) p.seekToNextMediaItem() }
++                }, enabled = playback.connected && playback.hasNext)
++            }
++            playback.durationMs?.let { duration ->
++                LinearProgressIndicator(progress = { (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f) },
++                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(2.dp),
++                    color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.outlineVariant)
++            }
++        }
++    }
++}
++
++@Composable
++private fun FocusedPlayer(
++    tracks: List<AudioTrack>,
++    current: AudioTrack?,
++    playback: SessionPlayback,
++    controller: MediaController?,
++    modifier: Modifier,
++    onBack: () -> Unit,
++    onRename: (AudioTrack) -> Unit,
++    onSettings: () -> Unit,
++) {
++    var queueOpen by rememberSaveable { mutableStateOf(false) }
++    var menu by remember { mutableStateOf(false) }
++    var seekPosition by remember(playback.mediaId, playback.currentIndex) { mutableStateOf<Float?>(null) }
++    BoxWithConstraints(modifier) {
++        val coverSize = minOf(maxWidth - 64.dp, maxHeight * .39f, 320.dp).coerceAtLeast(80.dp)
++        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 12.dp),
++            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
++            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
++                GlyphButton(UiIcons.Back, "Kembali", onBack)
++                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
++                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
++                    Text(when {
++                        playback.buffering -> "MENYIAPKAN AUDIO"
++                        playback.playing -> "SEDANG DIPUTAR"
++                        playback.mediaId != null -> "PEMUTAR AUDIO"
++                        else -> "PEMUTAR"
++                    }, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
++                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
++                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
++                        BrandLogo(20.dp); Text("Swararia", style = MaterialTheme.typography.bodyMedium)
++                    }
++                }
++                Box {
++                    GlyphButton(UiIcons.More, "Menu pemutar", { menu = true })
++                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
++                        DropdownMenuItem(text = { Text("Ubah nama audio") }, leadingIcon = { Icon(UiIcons.Rename, null) },
++                            enabled = current != null, onClick = { menu = false; current?.let(onRename) })
++                        DropdownMenuItem(text = { Text("Pengaturan & tentang") }, leadingIcon = { Icon(UiIcons.Settings, null) },
++                            onClick = { menu = false; onSettings() })
++                    }
++                }
++            }
++            TrackArtwork(current?.id ?: playback.mediaId?.toLongOrNull(),
++                Modifier.size(coverSize).clip(RoundedCornerShape(24.dp)))
++            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
++                Text(playbackTitle(current, playback), style = MaterialTheme.typography.headlineMedium,
++                    fontWeight = FontWeight.SemiBold, maxLines = 4, overflow = TextOverflow.Ellipsis)
++                Text(current?.let { "${UiPresentation.metadata(it.displayName, playback.durationMs ?: it.durationMs)} · Audio lokal" }
++                    ?: playbackStatus(playback), style = MaterialTheme.typography.bodyLarge,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant)
++            }
++            Column(Modifier.fillMaxWidth()) {
++                val duration = playback.durationMs ?: 1L
++                val displayed = if (playback.durationMs == null) 0f else (seekPosition ?: playback.positionMs.toFloat()).coerceIn(0f, duration.toFloat())
++                Slider(value = displayed, onValueChange = { seekPosition = it },
++                    valueRange = 0f..duration.toFloat(), enabled = playback.connected && playback.canSeek && playback.durationMs != null,
++                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Posisi pemutaran audio" },
++                    onValueChangeFinished = {
++                        val requested = seekPosition
++                        seekPosition = null
++                        if (requested != null) connectedCommand(controller, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) { p ->
++                            if (p.currentMediaItem?.mediaId == playback.mediaId && p.currentMediaItemIndex == playback.currentIndex) p.seekTo(requested.toLong())
++                        }
++                    })
++                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
++                    Text(LibraryRules.durationLabel(seekPosition?.toLong() ?: playback.positionMs.takeIf { playback.connected && playback.mediaId != null }),
++                        style = MaterialTheme.typography.bodyMedium,
++                        color = MaterialTheme.colorScheme.onSurfaceVariant)
++                    Text(LibraryRules.durationLabel(playback.durationMs), style = MaterialTheme.typography.bodyMedium,
++                        color = MaterialTheme.colorScheme.onSurfaceVariant)
++                }
++            }
++            if (playback.buffering) LinearProgressIndicator(Modifier.fillMaxWidth())
++            if (!playback.connected) Text("Pemutar belum terhubung. Kembali ke Pustaka untuk memilih audio setelah tersambung.",
++                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
++            playback.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
++                modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }) }
++            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
++                GlyphButton(UiIcons.Previous, "Audio sebelumnya", {
++                    connectedCommand(controller, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) { p -> if (p.hasPreviousMediaItem()) p.seekToPreviousMediaItem() }
++                }, modifier = Modifier.size(56.dp), enabled = playback.connected && playback.hasPrevious)
++                GlyphButton(if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
++                    if (playback.wantsPlay) "Jeda audio" else "Putar atau lanjutkan audio", { toggleSwarariaPlayback(controller) },
++                    modifier = Modifier.size(80.dp), enabled = playback.connected && playback.mediaId != null && playback.canPlay,
++                    filled = true, iconSize = 32.dp)
++                GlyphButton(UiIcons.Next, "Audio berikutnya", {
++                    connectedCommand(controller, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) { p -> if (p.hasNextMediaItem()) p.seekToNextMediaItem() }
++                }, modifier = Modifier.size(56.dp), enabled = playback.connected && playback.hasNext)
++            }
++            TextButton(onClick = { connectedCommand(controller, Player.COMMAND_STOP) { it.stop() } },
++                enabled = playback.connected && playback.mediaId != null && playback.canStop,
++                modifier = Modifier.heightIn(min = 48.dp)) {
++                Icon(UiIcons.Stop, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("Stop")
++            }
++            Surface(onClick = { queueOpen = true }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
++                modifier = Modifier.fillMaxWidth()) {
++                Row(Modifier.heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 10.dp),
++                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
++                    Icon(UiIcons.Queue, null, tint = MaterialTheme.colorScheme.primary)
++                    Text("Antrean", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
++                    Text("${playback.queue.size} audio", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                    Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp))
++                }
++            }
++            Spacer(Modifier.height(4.dp))
++        }
++    }
++    if (queueOpen) QueueDialog(tracks, playback, controller, onDismiss = { queueOpen = false })
++}
++
++@Composable
++private fun QueueDialog(tracks: List<AudioTrack>, playback: SessionPlayback, controller: MediaController?, onDismiss: () -> Unit) {
++    val byId = remember(tracks) { tracks.associateBy { it.id.toString() } }
++    AlertDialog(onDismissRequest = onDismiss, icon = { Icon(UiIcons.Queue, null) }, title = { Text("Antrean · ${playback.queue.size} audio") },
++        text = {
++            if (playback.queue.isEmpty()) Text("Antrean sesi pemutar belum tersedia. Pilih audio dari Pustaka.")
++            else LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
++                items(playback.queue, key = { it.index }) { entry ->
++                    val track = byId[entry.mediaId]
++                    val title = track?.let { UiPresentation.title(it.displayName) }
++                        ?: entry.title?.takeIf { it.isNotBlank() }?.let { UiPresentation.title(it) } ?: "Audio tidak tersedia"
++                    val active = entry.index == playback.currentIndex
++                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
++                        .background(if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
++                        .clickable(enabled = playback.connected && playback.canChooseQueue, onClickLabel = "Putar $title") {
++                            connectedCommand(controller, Player.COMMAND_SEEK_TO_MEDIA_ITEM) { p ->
++                                if (entry.index in 0 until p.mediaItemCount && p.getMediaItemAt(entry.index).mediaId == entry.mediaId) {
++                                    if (p.currentMediaItemIndex == entry.index) toggleSwarariaPlayback(p)
++                                    else {
++                                        p.seekTo(entry.index, C.TIME_UNSET)
++                                        if (p.playbackState == Player.STATE_IDLE && p.isCommandAvailable(Player.COMMAND_PREPARE)) p.prepare()
++                                        if (p.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) p.play()
++                                    }
++                                }
++                            }
++                        }.semantics { selected = active }.padding(horizontal = 10.dp, vertical = 12.dp).heightIn(min = 48.dp),
++                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
++                        Text("${entry.index + 1}", style = MaterialTheme.typography.labelMedium,
++                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.widthIn(min = 20.dp))
++                        Text(title, style = MaterialTheme.typography.bodyMedium,
++                            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
++                            modifier = Modifier.weight(1f), maxLines = 3, overflow = TextOverflow.Ellipsis)
++                        if (active) Icon(UiIcons.Check, "Audio saat ini", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
++                    }
++                }
++            }
++        }, confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } })
++}
++
++@Composable
++private fun navigationColors() = NavigationBarItemDefaults.colors(
++    selectedIconColor = MaterialTheme.colorScheme.primary,
++    selectedTextColor = MaterialTheme.colorScheme.primary,
++    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
++    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
++    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
++)
++
++@Composable
++private fun BrandLogo(size: Dp, modifier: Modifier = Modifier) {
++    Image(painterResource(R.drawable.swararia_logo), contentDescription = null,
++        modifier = modifier.size(size), contentScale = ContentScale.Fit)
++}
++
++@Composable
++private fun TrackArtwork(id: Long?, modifier: Modifier = Modifier) {
++    val image = if (id == null) R.drawable.swararia_logo else when (UiPresentation.artworkIndex(id)) {
++        0 -> R.drawable.cover_0
++        1 -> R.drawable.cover_1
++        2 -> R.drawable.cover_2
++        3 -> R.drawable.cover_3
++        else -> R.drawable.cover_4
++    }
++    Image(painterResource(image), contentDescription = null, modifier = modifier,
++        contentScale = if (id == null) ContentScale.Fit else ContentScale.Crop)
++}
++
++@Composable
++private fun GlyphButton(
++    icon: ImageVector,
++    description: String,
++    onClick: () -> Unit,
++    modifier: Modifier = Modifier,
++    enabled: Boolean = true,
++    filled: Boolean = false,
++    iconSize: Dp = 24.dp,
++) {
++    val colors = MaterialTheme.colorScheme
++    IconButton(onClick = onClick, enabled = enabled,
++        modifier = modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
++            .then(if (filled) Modifier.background(if (enabled) colors.primary else colors.surfaceVariant, CircleShape) else Modifier)) {
++        Icon(icon, contentDescription = description,
++            tint = if (!enabled) colors.onSurface.copy(alpha = .38f) else if (filled) colors.onPrimary else colors.onSurface,
++            modifier = Modifier.size(iconSize))
++    }
++}
++
++@Composable
++private fun EmptyMessage(title: String, description: String, icon: ImageVector, action: (@Composable () -> Unit)? = null) {
++    Column(Modifier.fillMaxWidth().padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally,
++        verticalArrangement = Arrangement.spacedBy(12.dp)) {
++        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
++        Text(title, style = MaterialTheme.typography.titleLarge)
++        Text(description, style = MaterialTheme.typography.bodyMedium,
++            color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
++        action?.invoke()
++    }
++}
+--- a/app/src/main/java/com/swararia/audiolab/UiIcons.kt
++++ b/app/src/main/java/com/swararia/audiolab/UiIcons.kt
+@@ -0,0 +1,124 @@
++package com.swararia.audiolab
++
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.graphics.SolidColor
++import androidx.compose.ui.graphics.StrokeCap
++import androidx.compose.ui.graphics.StrokeJoin
++import androidx.compose.ui.graphics.vector.ImageVector
++import androidx.compose.ui.graphics.vector.PathBuilder
++import androidx.compose.ui.graphics.vector.path
++import androidx.compose.ui.unit.dp
++
++/** A single, local 24 dp icon family. No font glyphs or icon-library dependency. */
++internal object UiIcons {
++    val Library = outline("Library") {
++        moveTo(5f, 4f); lineTo(9f, 4f); lineTo(9f, 20f); lineTo(5f, 20f); close()
++        moveTo(14f, 4f); lineTo(18f, 4f); lineTo(18f, 20f); lineTo(14f, 20f); close()
++    }
++    val Plus = outline("Plus") {
++        moveTo(12f, 4f); lineTo(12f, 20f); moveTo(4f, 12f); lineTo(20f, 12f)
++    }
++    val Search = outline("Search") {
++        moveTo(17f, 10f); arcTo(7f, 7f, 0f, true, true, 3f, 10f)
++        arcTo(7f, 7f, 0f, true, true, 17f, 10f)
++        moveTo(15.2f, 15.2f); lineTo(21f, 21f)
++    }
++    val More = outline("More") {
++        moveTo(12f, 5f); lineTo(12f, 5.2f)
++        moveTo(12f, 11.9f); lineTo(12f, 12.1f)
++        moveTo(12f, 18.8f); lineTo(12f, 19f)
++    }
++    val ChevronDown = outline("ChevronDown") {
++        moveTo(6f, 9f); lineTo(12f, 15f); lineTo(18f, 9f)
++    }
++    val ChevronRight = outline("ChevronRight") {
++        moveTo(9f, 6f); lineTo(15f, 12f); lineTo(9f, 18f)
++    }
++    val Back = outline("Back") {
++        moveTo(15f, 4f); lineTo(7f, 12f); lineTo(15f, 20f)
++    }
++    val Close = outline("Close") {
++        moveTo(6f, 6f); lineTo(18f, 18f); moveTo(18f, 6f); lineTo(6f, 18f)
++    }
++    val Play = filled("Play") {
++        moveTo(7f, 4f); lineTo(20f, 12f); lineTo(7f, 20f); close()
++    }
++    val Pause = filled("Pause") {
++        moveTo(6f, 4f); lineTo(10f, 4f); lineTo(10f, 20f); lineTo(6f, 20f); close()
++        moveTo(14f, 4f); lineTo(18f, 4f); lineTo(18f, 20f); lineTo(14f, 20f); close()
++    }
++    val Previous = filled("Previous") {
++        moveTo(4f, 4f); lineTo(6f, 4f); lineTo(6f, 20f); lineTo(4f, 20f); close()
++        moveTo(20f, 4f); lineTo(7f, 12f); lineTo(20f, 20f); close()
++    }
++    val Next = filled("Next") {
++        moveTo(18f, 4f); lineTo(20f, 4f); lineTo(20f, 20f); lineTo(18f, 20f); close()
++        moveTo(4f, 4f); lineTo(17f, 12f); lineTo(4f, 20f); close()
++    }
++    val Stop = filled("Stop") {
++        moveTo(6f, 6f); lineTo(18f, 6f); lineTo(18f, 18f); lineTo(6f, 18f); close()
++    }
++    val Queue = outline("Queue") {
++        moveTo(4f, 6f); lineTo(4.2f, 6f); moveTo(9f, 6f); lineTo(21f, 6f)
++        moveTo(4f, 12f); lineTo(4.2f, 12f); moveTo(9f, 12f); lineTo(21f, 12f)
++        moveTo(4f, 18f); lineTo(4.2f, 18f); moveTo(9f, 18f); lineTo(21f, 18f)
++    }
++    val Import = outline("Import") {
++        moveTo(4f, 15f); lineTo(4f, 20f); lineTo(20f, 20f); lineTo(20f, 15f)
++        moveTo(12f, 3f); lineTo(12f, 14f)
++        moveTo(7f, 9f); lineTo(12f, 14f); lineTo(17f, 9f)
++    }
++    val Download = outline("Download") {
++        moveTo(5f, 20f); lineTo(19f, 20f)
++        moveTo(12f, 3f); lineTo(12f, 15f)
++        moveTo(7f, 10f); lineTo(12f, 15f); lineTo(17f, 10f)
++    }
++    val Link = outline("Link") {
++        moveTo(9f, 15f); lineTo(15f, 9f)
++        moveTo(8f, 10f); lineTo(5f, 13f); curveTo(1f, 17f, 7f, 23f, 11f, 19f); lineTo(14f, 16f)
++        moveTo(10f, 8f); lineTo(13f, 5f); curveTo(17f, 1f, 23f, 7f, 19f, 11f); lineTo(16f, 14f)
++    }
++    val Settings = outline("Settings") {
++        moveTo(15.3f, 12f); arcTo(3.3f, 3.3f, 0f, true, true, 8.7f, 12f)
++        arcTo(3.3f, 3.3f, 0f, true, true, 15.3f, 12f)
++        moveTo(18.5f, 12f); arcTo(6.5f, 6.5f, 0f, true, true, 5.5f, 12f)
++        arcTo(6.5f, 6.5f, 0f, true, true, 18.5f, 12f)
++        moveTo(12f, 2f); lineTo(12f, 5.5f); moveTo(12f, 18.5f); lineTo(12f, 22f)
++        moveTo(2f, 12f); lineTo(5.5f, 12f); moveTo(18.5f, 12f); lineTo(22f, 12f)
++        moveTo(5f, 5f); lineTo(7.4f, 7.4f); moveTo(16.6f, 16.6f); lineTo(19f, 19f)
++        moveTo(5f, 19f); lineTo(7.4f, 16.6f); moveTo(16.6f, 7.4f); lineTo(19f, 5f)
++    }
++    val History = outline("History") {
++        moveTo(4f, 10f); curveTo(5f, 3f, 14f, 1f, 19f, 6f)
++        curveTo(25f, 13f, 17f, 25f, 8f, 20f)
++        moveTo(4f, 4f); lineTo(4f, 10f); lineTo(10f, 10f)
++        moveTo(12f, 7f); lineTo(12f, 12f); lineTo(16f, 14f)
++    }
++    val Rename = outline("Rename") {
++        moveTo(4f, 16f); lineTo(4f, 20f); lineTo(8f, 20f); lineTo(20f, 8f)
++        lineTo(16f, 4f); lineTo(4f, 16f); moveTo(13f, 7f); lineTo(17f, 11f)
++    }
++    val Info = outline("Info") {
++        moveTo(21f, 12f); arcTo(9f, 9f, 0f, true, true, 3f, 12f)
++        arcTo(9f, 9f, 0f, true, true, 21f, 12f)
++        moveTo(12f, 7f); lineTo(12f, 7.2f); moveTo(12f, 11f); lineTo(12f, 17f)
++    }
++    val Paste = outline("Paste") {
++        moveTo(8f, 5f); lineTo(5f, 5f); lineTo(5f, 21f); lineTo(19f, 21f); lineTo(19f, 5f); lineTo(16f, 5f)
++        moveTo(8f, 3f); lineTo(16f, 3f); lineTo(16f, 7f); lineTo(8f, 7f); close()
++    }
++    val Check = outline("Check") {
++        moveTo(4f, 12f); lineTo(9f, 17f); lineTo(20f, 6f)
++    }
++
++    private fun outline(name: String, draw: PathBuilder.() -> Unit) =
++        ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
++            path(fill = null, stroke = SolidColor(Color.White), strokeLineWidth = 1.8f,
++                strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, pathBuilder = draw)
++        }.build()
++
++    private fun filled(name: String, draw: PathBuilder.() -> Unit) =
++        ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
++            path(fill = SolidColor(Color.White), pathBuilder = draw)
++        }.build()
++}
+--- a/app/src/main/java/com/swararia/audiolab/UiPresentation.kt
++++ b/app/src/main/java/com/swararia/audiolab/UiPresentation.kt
+@@ -0,0 +1,22 @@
++package com.swararia.audiolab
++
++import java.util.Locale
++
++/** Display-only formatting: never changes a file, URI, stored name or database row. */
++object UiPresentation {
++    private val audioExtensions = setOf("mp3", "m4a", "mp4", "opus", "ogg", "webm", "wav", "flac", "aac")
++    private val generatedIdSuffix = Regex("[ _]+\\[[A-Za-z0-9_-]{11}\\]$")
++    private val separators = Regex("[_\\s]+")
++    fun title(displayName: String): String {
++        val dot = displayName.lastIndexOf('.')
++        val extension = displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
++        val stem = if (dot > 0 && extension in audioExtensions) displayName.substring(0, dot) else displayName
++        return stem.replace(generatedIdSuffix, "").replace(separators, " ").trim().ifBlank { displayName.ifBlank { "Audio" } }
++    }
++    fun metadata(displayName: String, durationMs: Long?): String {
++        val type = displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
++        val label = if (type in audioExtensions) type.uppercase(Locale.ROOT) else "Audio"
++        return "$label · ${LibraryRules.durationLabel(durationMs)}"
++    }
++    fun artworkIndex(id: Long): Int = Math.floorMod(id, 5L).toInt()
++}
+--- a/app/src/main/java/com/swararia/audiolab/OnlineWorkRules.kt
++++ b/app/src/main/java/com/swararia/audiolab/OnlineWorkRules.kt
+@@ -0,0 +1,7 @@
++package com.swararia.audiolab
++
++/** Presentation dispatch guard; read fresh state again after permission/picker returns. */
++object OnlineWorkRules {
++    @JvmStatic fun canStart(searchBusy: Boolean, ingestBusy: Boolean): Boolean =
++        !searchBusy && !ingestBusy
++}
+--- a/app/src/main/java/com/swararia/audiolab/ThumbnailTransfer.kt
++++ b/app/src/main/java/com/swararia/audiolab/ThumbnailTransfer.kt
+@@ -0,0 +1,30 @@
++package com.swararia.audiolab
++
++import java.io.ByteArrayOutputStream
++import java.io.IOException
++import java.io.InputStream
++import java.io.InterruptedIOException
++
++/** Bounds compressed thumbnail bytes before any Android bitmap decoder is invoked. */
++object ThumbnailTransfer {
++    @JvmStatic fun read(input: InputStream, maxBytes: Int = 524_288): ByteArray {
++        require(maxBytes in 1..1_048_576)
++        val output = ByteArrayOutputStream(minOf(maxBytes, 8192))
++        val buffer = ByteArray(8192)
++        while (true) {
++            if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Thumbnail canceled")
++            val count = input.read(buffer)
++            if (count == -1) break
++            if (count == 0) {
++                val single = input.read()
++                if (single == -1) break
++                if (output.size() == maxBytes) throw IOException("Thumbnail exceeds byte limit")
++                output.write(single)
++            } else {
++                if (count > maxBytes - output.size()) throw IOException("Thumbnail exceeds byte limit")
++                output.write(buffer, 0, count)
++            }
++        }
++        return output.toByteArray()
++    }
++}
+--- a/app/src/main/java/com/swararia/audiolab/YoutubeThumbnail.kt
++++ b/app/src/main/java/com/swararia/audiolab/YoutubeThumbnail.kt
+@@ -0,0 +1,76 @@
++package com.swararia.audiolab
++
++import android.graphics.Bitmap
++import android.graphics.BitmapFactory
++import android.util.LruCache
++import androidx.compose.foundation.Image
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.runtime.*
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.asImageBitmap
++import androidx.compose.ui.layout.ContentScale
++import androidx.compose.ui.res.painterResource
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.runInterruptible
++import kotlinx.coroutines.withTimeoutOrNull
++import java.io.IOException
++import java.net.URL
++import javax.net.ssl.HttpsURLConnection
++
++private val thumbnailCache = object : LruCache<String, Bitmap>(4 * 1024 * 1024) {
++    override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
++}
++
++@Composable
++fun YoutubeThumbnail(url: String?, title: String, modifier: Modifier = Modifier) {
++    val safeUrl = url?.takeIf { ThumbnailPolicy.allowed(it) }
++    val bitmap by produceState<Bitmap?>(null, safeUrl) {
++        value = null
++        if (safeUrl != null) {
++            value = thumbnailCache.get(safeUrl) ?: withTimeoutOrNull(6000) {
++                runInterruptible(Dispatchers.IO) {
++                    loadYoutubeThumbnail(safeUrl)?.also { thumbnailCache.put(safeUrl, it) }
++                }
++            }
++        }
++    }
++    Box(modifier) {
++        val current = bitmap
++        if (current != null) Image(current.asImageBitmap(), contentDescription = "Pratinjau $title",
++            modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
++        else Image(painterResource(R.drawable.cover_0), contentDescription = null,
++            modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
++    }
++}
++
++/** No redirects, cookies or authorization; allowlisted HTTPS hosts only. */
++private fun loadYoutubeThumbnail(url: String): Bitmap? {
++    if (!ThumbnailPolicy.allowed(url)) return null
++    var connection: HttpsURLConnection? = null
++    return try {
++        val request = URL(url).openConnection() as HttpsURLConnection
++        connection = request
++        request.instanceFollowRedirects = false
++        request.connectTimeout = 2500
++        request.readTimeout = 3500
++        request.setRequestProperty("Accept", "image/*")
++        if (request.responseCode != 200 || request.contentLengthLong > 524_288L) null
++        else {
++            val bytes = request.inputStream.use { ThumbnailTransfer.read(it) }
++            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
++            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
++            if (bounds.outWidth !in 1..8192 || bounds.outHeight !in 1..8192 ||
++                bounds.outWidth.toLong() * bounds.outHeight > 16_777_216L) null
++            else {
++                var sample = 1
++                while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 512) sample *= 2
++                BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
++                    BitmapFactory.Options().apply { inSampleSize = sample })
++            }
++        }
++    } catch (_: IOException) { null }
++      catch (_: IllegalArgumentException) { null }
++      catch (_: SecurityException) { null }
++      finally { connection?.disconnect() }
++}
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -7,7 +7,7 @@
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+-    <application android:name="com.swararia.audiolab.SwarariaApp" android:label="Swararia Audio Lab • Uji" android:icon="@drawable/ic_audio" android:theme="@style/AppTheme" android:allowBackup="false" android:supportsRtl="true" android:usesCleartextTraffic="false">
++    <application android:name="com.swararia.audiolab.SwarariaApp" android:label="Swararia Audio Lab • Uji" android:icon="@mipmap/ic_launcher" android:theme="@style/AppTheme" android:allowBackup="false" android:supportsRtl="true" android:usesCleartextTraffic="false">
+         <activity android:name="com.swararia.audiolab.MainActivity" android:exported="true">
+             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+         </activity>
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -12,8 +12,8 @@
+         applicationId 'com.swararia.audiolab.spike'
+         minSdk 29
+         targetSdk 36
+-        versionCode 1
+-        versionName '0.1.0-spike'
++        versionCode 2
++        versionName '0.2.0-spike'
+     }
+     splits {
+         abi {
+@@ -56,6 +56,7 @@
+     implementation 'io.github.deniscerri.youtubedl-android:library:0.19.0'
+     implementation 'io.github.deniscerri.youtubedl-android:ffmpeg:0.19.0'
+     implementation platform('com.fasterxml.jackson:jackson-bom:2.20.1')
++    implementation 'com.fasterxml.jackson.core:jackson-databind' // Already bundled transitively; direct use by search parser.
+     constraints {
+         implementation('commons-io:commons-io:2.20.0') { because 'Avoid the obsolete 2.5 transitive version from the downloader wrapper' }
+     }
+--- a/app/src/main/res/drawable/splash_background.xml
++++ b/app/src/main/res/drawable/splash_background.xml
+@@ -0,0 +1,4 @@
++<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
++    <item><shape><solid android:color="#101715" /></shape></item>
++    <item android:drawable="@drawable/swararia_logo" android:gravity="center" android:width="144dp" android:height="144dp" />
++</layer-list>
+--- a/app/src/main/res/values/styles.xml
++++ b/app/src/main/res/values/styles.xml
+@@ -1 +1,12 @@
+-<resources><style name="AppTheme" parent="android:style/Theme.Material.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">false</item><item name="android:windowLightNavigationBar">false</item><item name="android:colorAccent">#76E0D1</item><item name="android:windowBackground">#101416</item></style></resources>+<resources>
++    <style name="AppThemeBase" parent="android:style/Theme.Material.NoActionBar">
++        <item name="android:fontFamily">sans</item>
++        <item name="android:windowLightStatusBar">false</item>
++        <item name="android:windowLightNavigationBar">false</item>
++        <item name="android:colorAccent">#8CE3C7</item>
++        <item name="android:windowBackground">@drawable/splash_background</item>
++        <item name="android:statusBarColor">#101715</item>
++        <item name="android:navigationBarColor">#101715</item>
++    </style>
++    <style name="AppTheme" parent="AppThemeBase" />
++</resources>--- a/app/src/main/res/values/colors.xml
++++ b/app/src/main/res/values/colors.xml
+@@ -0,0 +1 @@
++<resources><color name="launcher_background">#06224B</color></resources>
+--- a/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
++++ b/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+@@ -0,0 +1,4 @@
++<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
++    <background android:drawable="@color/launcher_background" />
++    <foreground android:drawable="@drawable/ic_launcher_foreground" />
++</adaptive-icon>
+--- a/app/src/main/res/values-v31/styles.xml
++++ b/app/src/main/res/values-v31/styles.xml
+@@ -0,0 +1,7 @@
++<resources>
++    <style name="AppTheme" parent="AppThemeBase">
++        <item name="android:windowSplashScreenBackground">#101715</item>
++        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
++        <item name="android:windowSplashScreenAnimationDuration">0</item>
++    </style>
++</resources>

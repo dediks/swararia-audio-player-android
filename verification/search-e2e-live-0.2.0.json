@@ -1,0 +1,196 @@
+{
+  "checked_at_utc": "2026-11-10T13:50:14.870812+00:00",
+  "host_only": true,
+  "android_device_tested": false,
+  "media_downloaded": false,
+  "results": [
+    {
+      "provider": "YOUTUBE",
+      "arguments_from_kotlin_rules": true,
+      "exit_code": 0,
+      "stderr": "",
+      "kotlin_parser_exit_code": 0,
+      "parsed_results": {
+        "result_count": 10,
+        "items": [
+          {
+            "videoId": "eitWM4gNZoM",
+            "title": "Upbeat Funky Background Music for Video // ROYALTY FREE Funk Music for Commercial Use",
+            "channel": "Music Library - Royalty Free Music",
+            "durationSeconds": 65,
+            "thumbnailUrl": "https://i.ytimg.com/vi/eitWM4gNZoM/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLANDEgJxUn_Ee5-kwQIhwdjSJpHYg",
+            "url": "https://www.youtube.com/watch?v=eitWM4gNZoM"
+          },
+          {
+            "videoId": "L-VMCv4Y9l8",
+            "title": "Mortals x Royalty Mashup | NCS - Copyright Free Music",
+            "channel": "NoCopyrightSounds",
+            "durationSeconds": 225,
+            "thumbnailUrl": "https://i.ytimg.com/vi/L-VMCv4Y9l8/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLAZjTxShW4RQTNZuqQydI6Mc_vnyw",
+            "url": "https://www.youtube.com/watch?v=L-VMCv4Y9l8"
+          },
+          {
+            "videoId": "TQvXEza4fPc",
+            "title": "1 hour of comfy & relaxing songs | royalty free vlog music \u2728",
+            "channel": "Stream Cafe",
+            "durationSeconds": 3533,
+            "thumbnailUrl": "https://i.ytimg.com/vi/TQvXEza4fPc/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLCCYan8IJpF_cbd-Y1e0BPp0YFBPg",
+            "url": "https://www.youtube.com/watch?v=TQvXEza4fPc"
+          },
+          {
+            "videoId": "5KTDN4keQmU",
+            "title": "Top 50 NoCopyrightSounds Songs 2025 \ud83c\udfa7 Best Free EDM & Gaming Music Mix\ud83d\udd25 Best of NCS \u2728",
+            "channel": "VibeX Mix",
+            "durationSeconds": 10293,
+            "thumbnailUrl": "https://i.ytimg.com/vi/5KTDN4keQmU/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLCViktn1mpfO-qBkViD8CfS8dCUQg",
+            "url": "https://www.youtube.com/watch?v=5KTDN4keQmU"
+          },
+          {
+            "videoId": "BhWA7dk9yUA",
+            "title": "Best Pop Music 2024 - No Copyright Song - Royalty Free Music",
+            "channel": "Vynxwave",
+            "durationSeconds": 3709,
+            "thumbnailUrl": "https://i.ytimg.com/vi/BhWA7dk9yUA/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLBQYUj0oiOTpvMYCy1G--lvYwTefw",
+            "url": "https://www.youtube.com/watch?v=BhWA7dk9yUA"
+          },
+          {
+            "videoId": "FNb1i7G6sPk",
+            "title": "12 Hours of Free Background Music - Copyright Free Music for Creators and Streamers [April Edition]",
+            "channel": "TheRelaxedMovement",
+            "durationSeconds": 43140,
+            "thumbnailUrl": "https://i.ytimg.com/vi/FNb1i7G6sPk/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLDF7Fq8vB2yX1WajjtRJ-XtIQTOtg",
+            "url": "https://www.youtube.com/watch?v=FNb1i7G6sPk"
+          },
+          {
+            "videoId": "LLVNia6-43k",
+            "title": "bossa nova background music \u3010Copyright Free\u30114K",
+            "channel": "TOGO EDITORIAL OFFICE",
+            "durationSeconds": 8176,
+            "thumbnailUrl": "https://i.ytimg.com/vi/LLVNia6-43k/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLDynOisT7HdkjGD7M9oXI-tE4y5wQ",
+            "url": "https://www.youtube.com/watch?v=LLVNia6-43k"
+          },
+          {
+            "videoId": "vqwnTNRtQ80",
+            "title": "12 Hours of Copyright Free Music - Free Background Music for YouTube Videos and Content Creators",
+            "channel": "TheRelaxedMovement",
+            "durationSeconds": 43199,
+            "thumbnailUrl": "https://i.ytimg.com/vi/vqwnTNRtQ80/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLCN662pSW7fQ1OMCfm77J1xyl6eUQ",
+            "url": "https://www.youtube.com/watch?v=vqwnTNRtQ80"
+          },
+          {
+            "videoId": "j38nYNzc6_8",
+            "title": "Royalty Free Store Music \ud83d\udecd\ufe0f",
+            "channel": "Ron Gelinas Chill Beats",
+            "durationSeconds": 7342,
+            "thumbnailUrl": "https://i.ytimg.com/vi/j38nYNzc6_8/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLCAfTEVRJdBkUNGnOP-an3yiwwAsg",
+            "url": "https://www.youtube.com/watch?v=j38nYNzc6_8"
+          },
+          {
+            "videoId": "FrvZFjXXORk",
+            "title": "\ud83d\udca3 Copyright Free Military Music - \"Legionnaire\" by @ScottBuckley",
+            "channel": "BreakingCopyright \u2014 Royalty Free Music",
+            "durationSeconds": 185,
+            "thumbnailUrl": "https://i.ytimg.com/vi/FrvZFjXXORk/hq720.jpg?sqp=-oaymwEcCOgCEMoBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLBMX44rmCFxpr3Yv30weViMujhCQw",
+            "url": "https://www.youtube.com/watch?v=FrvZFjXXORk"
+          }
+        ]
+      },
+      "parser_error": "",
+      "elapsed_seconds": 2.88
+    },
+    {
+      "provider": "YOUTUBE_MUSIC",
+      "arguments_from_kotlin_rules": true,
+      "exit_code": 0,
+      "stderr": "",
+      "kotlin_parser_exit_code": 0,
+      "parsed_results": {
+        "result_count": 10,
+        "items": [
+          {
+            "videoId": "Nc7fT8p1UiA",
+            "title": "COPYRIGHT FREE MUSIC",
+            "channel": null,
+            "durationSeconds": null,
+            "thumbnailUrl": null,
+            "url": "https://www.youtube.com/watch?v=Nc7fT8p1UiA"
+          },
+          {
+            "videoId": "l_yCCrnDD8c",
+            "title": "royalty free music",
+            "channel": null,
+            "durationSeconds": null,
+            "thumbnailUrl": null,
+            "url": "https://www.youtube.com/watch?v=l_yCCrnDD8c"
+          },
+          {
+            "videoId": "f2m-ROeXDE8",
+            "title": "Royalty Free Music 2023",
+            "channel": null,
+            "durationSeconds": null,
+            "thumbnailUrl": null,
+            "url": "https://www.youtube.com/watch?v=f2m-ROeXDE8"
+          },
+          {
+            "videoId": "qRm5B8JOQ14",
+            "title": "Noncopyrght Streaming Gaming Royalty Free Music No Copyright Dmca Safe Stream Beats Twitch Youtube Podcast (house Chill Version)",
+            "channel": null,
+            "durationSeconds": null,
+            "thumbnailUrl": null,
+            "url": "https://www.youtube.com/watch?v=qRm5B8JOQ14"
+          },
+          {
+            "videoId": "lBkLDkLRhlo",
+            "title": "Fantasy Music Royalty Free",
+            "channel": null,
+            "durationSeconds": null,
+            "thumbnailUrl": null,
+            "url": "https://www.youtube.com/watch?v=lBkLDkLRhlo"
+          },
+          {
+            "videoId": "CMoDghyPYns",
+            "title": "Up_&_down_15 Royalty Free Music Background Music Music for Youtube Videos",
+            "channel": null,
+            "durationSeconds": null,
+            "thumbnailUrl": null,
+            "url": "https://www.youtube.com/watch?v=CMoDghyPYns"
+          },
+          {
+            "videoId": "uBr0ZvXdEmY",
+            "title": "Beethoven - Moonlight Sonata By Hot Lemon Royalty Free Music",
+            "channel": null,
+            "durationSeconds": null,
+            "thumbnailUrl": null,
+            "url": "https://www.youtube.com/watch?v=uBr0ZvXdEmY"
+          },
+          {
+            "videoId": "jAe7hFumyEc",
+            "title": "Funk_dubious_60 Royalty Free Music Background Music Music for Youtube Videos",
+            "channel": null,
+            "durationSeconds": null,
+            "thumbnailUrl": null,
+            "url": "https://www.youtube.com/watch?v=jAe7hFumyEc"
+          },
+          {
+            "videoId": "01ZpLXcqFvg",
+            "title": "Like a dancing Child in the Park - Royalty Free Music",
+            "channel": null,
+            "durationSeconds": null,
+            "thumbnailUrl": null,
+            "url": "https://www.youtube.com/watch?v=01ZpLXcqFvg"
+          },
+          {
+            "videoId": "iaMwAYV52LU",
+            "title": "Serendipity_60 Royalty Free Music Background Music Music for Youtube Videos",
+            "channel": null,
+            "durationSeconds": null,
+            "thumbnailUrl": null,
+            "url": "https://www.youtube.com/watch?v=iaMwAYV52LU"
+          }
+        ]
+      },
+      "parser_error": "",
+      "elapsed_seconds": 2.4
+    }
+  ]
+}

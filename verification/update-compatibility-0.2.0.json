@@ -1,0 +1,22 @@
+{
+  "core_schema_unchanged": true,
+  "artifacts": [
+    {
+      "abi": "arm64-v8a",
+      "same_signer": true,
+      "old_apk_unchanged": true,
+      "native_and_engine_payloads_identical": true,
+      "payloads_compared": 8,
+      "certificate_sha256": "e229f65b15ba19d8c9db42d4b8e2c46d6db13bf352ad6c7eb8ed808d522248d8"
+    },
+    {
+      "abi": "armeabi-v7a",
+      "same_signer": true,
+      "old_apk_unchanged": true,
+      "native_and_engine_payloads_identical": true,
+      "payloads_compared": 8,
+      "certificate_sha256": "e229f65b15ba19d8c9db42d4b8e2c46d6db13bf352ad6c7eb8ed808d522248d8"
+    }
+  ],
+  "device_in_place_install_tested": false
+}

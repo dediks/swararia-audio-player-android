@@ -1,0 +1,254 @@
+--- before/app/src/main/java/com/swararia/audiolab/YoutubeSearchData.kt
++++ after/app/src/main/java/com/swararia/audiolab/YoutubeSearchData.kt
+@@ -0,0 +1,104 @@
++package com.swararia.audiolab
++
++import com.fasterxml.jackson.databind.ObjectMapper
++import com.fasterxml.jackson.databind.DeserializationFeature
++import com.fasterxml.jackson.core.JsonFactory
++import com.fasterxml.jackson.core.StreamReadConstraints
++
++enum class SearchProvider(val label: String) {
++    YOUTUBE("YouTube"), YOUTUBE_MUSIC("YouTube Music")
++}
++
++data class SearchHit(
++    val videoId: String,
++    val title: String,
++    val channel: String?,
++    val durationSeconds: Long?,
++    val thumbnailUrl: String?,
++    val url: String
++)
++
++data class YoutubeSearchState(
++    val busy: Boolean = false,
++    val query: String = "",
++    val provider: SearchProvider = SearchProvider.YOUTUBE,
++    val results: List<SearchHit> = emptyList(),
++    val error: String? = null,
++    val hasSearched: Boolean = false
++)
++
++/** Tickets invalidate older/cancelled calls before any result is published. */
++class SearchGeneration {
++    private val sequence = java.util.concurrent.atomic.AtomicLong(0)
++    fun next(): Long = sequence.incrementAndGet()
++    fun isCurrent(ticket: Long): Boolean = sequence.get() == ticket
++}
++
++/** Only public, metadata-only requests are constructed here. No shell or account needed. */
++object YoutubeSearchRules {
++    const val RESULT_LIMIT = 10
++    fun validatedQuery(input: String): String {
++        require(input.none { it.isISOControl() }) { "Kata pencarian mengandung karakter yang tidak didukung." }
++        val query = input.trim()
++        require(query.isNotEmpty() && query.length <= 200) { "Isi kata pencarian, maksimal 200 karakter." }
++        return query
++    }
++    fun input(query: String, provider: SearchProvider): String {
++        val valid = validatedQuery(query)
++        return when (provider) {
++            SearchProvider.YOUTUBE -> "ytsearch$RESULT_LIMIT:$valid"
++            SearchProvider.YOUTUBE_MUSIC -> "https://music.youtube.com/search?q=${java.net.URLEncoder.encode(valid, "UTF-8")}#songs"
++        }
++    }
++    fun arguments(query: String, provider: SearchProvider): List<String> = listOf(
++        "--ignore-config", "--no-cache-dir", "--flat-playlist", "--dump-single-json", "--skip-download",
++        "--playlist-end", RESULT_LIMIT.toString(), "--socket-timeout", "8", "--retries", "0", "--extractor-retries", "0",
++        input(query, provider)
++    )
++}
++
++/** Parses metadata only; result links are rebuilt from IDs, never trusted from JSON. */
++object YoutubeSearchJson {
++    private val mapper = ObjectMapper(JsonFactory.builder()
++        .streamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(32).maxStringLength(100_000).build())
++        .build()).enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
++    private fun displayText(value: String, maxLength: Int): String {
++        val clean = value.map { if (it.isISOControl()) ' ' else it }.joinToString("").trim()
++        val end = clean.offsetByCodePoints(0, minOf(maxLength, clean.codePointCount(0, clean.length)))
++        return clean.substring(0, end)
++    }
++    private val videoIdPattern = Regex("[A-Za-z0-9_-]{11}")
++    fun parse(output: String): List<SearchHit> {
++        require(output.isNotBlank() && output.length <= 2_000_000) { "Ukuran respons pencarian tidak valid." }
++        val root = try { mapper.readTree(output) }
++        catch (failure: com.fasterxml.jackson.core.JsonProcessingException) {
++            throw IllegalArgumentException("Data hasil pencarian tidak valid.", failure)
++        }
++        require(root != null && root.isObject && root.path("entries").isArray) { "Bentuk hasil pencarian tidak dikenali." }
++        val entries = root.get("entries")
++        val hits = linkedMapOf<String, SearchHit>()
++        for (item in entries) {
++            val id = item.path("id").takeIf { it.isTextual }?.asText() ?: continue
++            if (!videoIdPattern.matches(id) || id in hits) continue
++            if (item.path("_type").asText() in setOf("playlist", "multi_video")) continue
++            if (item.path("is_live").asBoolean() || item.path("live_status").asText() in setOf("is_live", "is_upcoming")) continue
++            if (item.path("availability").asText() in setOf("private", "premium_only", "subscriber_only", "needs_auth")) continue
++            val title = item.path("title").takeIf { it.isTextual }?.asText()?.let { displayText(it, 200) }?.takeIf { it.isNotBlank() } ?: continue
++            val channel = sequenceOf("channel", "artist", "uploader").mapNotNull { key ->
++                item.get(key)?.takeIf { it.isTextual }?.asText()?.let { displayText(it, 160) }?.takeIf { it.isNotBlank() }
++            }.firstOrNull()
++            val thumbnail = item.get("thumbnail")?.takeIf { it.isTextual }?.asText()?.takeIf(ThumbnailPolicy::allowed)
++                ?: item.path("thumbnails").takeIf { it.isArray }?.asSequence()?.take(32)?.mapNotNull {
++                    it.path("url").takeIf { url -> url.isTextual }?.asText()?.takeIf(ThumbnailPolicy::allowed)
++                }?.firstOrNull()
++            hits[id] = SearchHit(
++                videoId = id, title = title, channel = channel,
++                durationSeconds = item.get("duration")?.takeIf { it.isNumber && it.asDouble().isFinite() && it.asDouble() >= 0 && it.asDouble() <= 366.0 * 24 * 60 * 60 }?.asLong(),
++                thumbnailUrl = thumbnail,
++                url = "https://www.youtube.com/watch?v=$id"
++            )
++            if (hits.size == YoutubeSearchRules.RESULT_LIMIT) break
++        }
++        return hits.values.toList()
++    }
++}
+--- before/app/src/main/java/com/swararia/audiolab/ThumbnailPolicy.kt
++++ after/app/src/main/java/com/swararia/audiolab/ThumbnailPolicy.kt
+@@ -0,0 +1,17 @@
++package com.swararia.audiolab
++
++import java.net.URI
++import java.util.Locale
++
++/** Only public first-party HTTPS image endpoints; no arbitrary network destinations. */
++object ThumbnailPolicy {
++    private val hosts = setOf("i.ytimg.com", "i1.ytimg.com", "i2.ytimg.com", "i3.ytimg.com", "i4.ytimg.com", "i9.ytimg.com", "yt3.ggpht.com", "lh3.googleusercontent.com")
++    @JvmStatic fun allowed(url: String?): Boolean {
++        if (url.isNullOrBlank() || url.length > 4096 || url.any { it.isISOControl() }) return false
++        return runCatching {
++            val uri = URI(url)
++            uri.scheme.equals("https", ignoreCase = true) && uri.userInfo == null &&
++                (uri.port == -1 || uri.port == 443) && uri.host?.lowercase(Locale.ROOT) in hosts
++        }.getOrDefault(false)
++    }
++}
+--- before/app/src/main/java/com/swararia/audiolab/YoutubeSearchRepository.kt
++++ after/app/src/main/java/com/swararia/audiolab/YoutubeSearchRepository.kt
+@@ -0,0 +1,51 @@
++package com.swararia.audiolab
++
++import android.content.Context
++import com.yausername.youtubedl_android.YoutubeDL
++import com.yausername.youtubedl_android.YoutubeDLRequest
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.currentCoroutineContext
++import kotlinx.coroutines.ensureActive
++import kotlinx.coroutines.runInterruptible
++import kotlinx.coroutines.withContext
++import kotlinx.coroutines.withTimeoutOrNull
++import java.io.IOException
++import java.util.UUID
++
++/** Metadata-only search. This does not initialize FFmpeg, download audio or write library data. */
++class YoutubeSearchRepository(context: Context) {
++    private val appContext = context.applicationContext
++
++    suspend fun search(query: String, provider: SearchProvider): List<SearchHit> {
++        val args = YoutubeSearchRules.arguments(query, provider)
++        check(!IngestStatus.state.value.busy) { "Tunggu proses audio selesai sebelum mencari." }
++        val processId = "search-${UUID.randomUUID()}"
++        try {
++            val output = withTimeoutOrNull(30_000L) {
++                runInterruptible(Dispatchers.IO) {
++                    YoutubeDL.init(appContext)
++                    if (Thread.currentThread().isInterrupted) throw InterruptedException()
++                    check(!IngestStatus.state.value.busy) { "Tunggu proses audio selesai sebelum mencari." }
++                    // Arguments are fixed by our rules and passed as a list, never through a shell.
++                    val request = YoutubeDLRequest(args.last()).addCommands(args.dropLast(1))
++                    YoutubeDL.execute(request, processId).out
++                }
++            } ?: throw IOException("Pencarian terlalu lama. Periksa koneksi lalu coba lagi.")
++            currentCoroutineContext().ensureActive()
++            return withContext(Dispatchers.Default) { YoutubeSearchJson.parse(output) }
++        } catch (cancel: CancellationException) {
++            throw cancel
++        } catch (cancel: YoutubeDL.CanceledException) {
++            throw CancellationException("Pencarian dibatalkan.").apply { initCause(cancel) }
++        } catch (interrupted: InterruptedException) {
++            throw CancellationException("Pencarian dibatalkan.").apply { initCause(interrupted) }
++        } catch (failure: com.yausername.youtubedl_android.YoutubeDLException) {
++            throw IOException("${provider.label} belum dapat diakses. Periksa koneksi atau coba lagi nanti.", failure)
++        } finally {
++            // runInterruptible interrupts the blocking wrapper (which destroys its process).
++            // This is a defensive cleanup if cancellation happened during startup.
++            runCatching { YoutubeDL.destroyProcessById(processId) }
++        }
++    }
++}
+--- before/app/src/main/java/com/swararia/audiolab/AppViewModel.kt
++++ after/app/src/main/java/com/swararia/audiolab/AppViewModel.kt
+@@ -11,9 +11,60 @@
+ import kotlinx.coroutines.flow.receiveAsFlow
+ import kotlinx.coroutines.flow.stateIn
+ import kotlinx.coroutines.launch
++import kotlinx.coroutines.Job
+ 
+ class AppViewModel(application: Application) : AndroidViewModel(application) {
+     private val library = (application as SwarariaApp).library
++    private val searchRepository = YoutubeSearchRepository(application)
++    private val searchGeneration = SearchGeneration()
++    private val searchState = MutableStateFlow(YoutubeSearchState())
++    val search = searchState.asStateFlow()
++    private var searchJob: Job? = null
++
++    fun search(query: String, provider: SearchProvider) {
++        val ticket = searchGeneration.next()
++        searchJob?.cancel()
++        searchJob = null
++        val valid = try { YoutubeSearchRules.validatedQuery(query) }
++        catch (failure: IllegalArgumentException) {
++            searchState.value = YoutubeSearchState(query = query.take(200), provider = provider,
++                error = failure.message, hasSearched = true)
++            return
++        }
++        if (IngestStatus.state.value.busy) {
++            searchState.value = YoutubeSearchState(query = valid, provider = provider,
++                error = "Tunggu proses audio selesai sebelum mencari.", hasSearched = true)
++            return
++        }
++        searchState.value = YoutubeSearchState(busy = true, query = valid, provider = provider, hasSearched = true)
++        searchJob = viewModelScope.launch {
++            try {
++                val hits = searchRepository.search(valid, provider)
++                if (searchGeneration.isCurrent(ticket)) searchState.value = searchState.value.copy(results = hits, error = null)
++            } catch (cancel: CancellationException) {
++                throw cancel
++            } catch (failure: Exception) {
++                if (searchGeneration.isCurrent(ticket)) searchState.value = searchState.value.copy(
++                    results = emptyList(), error = (failure.message ?: "Pencarian belum berhasil.").take(300))
++            } finally {
++                if (searchGeneration.isCurrent(ticket)) searchState.value = searchState.value.copy(busy = false)
++            }
++        }
++    }
++
++    fun cancelSearch() {
++        searchGeneration.next()
++        searchJob?.cancel()
++        searchJob = null
++        searchState.value = searchState.value.copy(busy = false, error = null,
++            hasSearched = searchState.value.results.isNotEmpty())
++    }
++
++    override fun onCleared() {
++        searchGeneration.next()
++        searchJob?.cancel()
++        super.onCleared()
++    }
+     val tracks = library.tracks.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+     val lastRename = library.lastRename.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+     private val busy = MutableStateFlow(false)
+--- before/app/build.gradle
++++ after/app/build.gradle
+@@ -56,6 +56,7 @@
+     implementation 'io.github.deniscerri.youtubedl-android:library:0.19.0'
+     implementation 'io.github.deniscerri.youtubedl-android:ffmpeg:0.19.0'
+     implementation platform('com.fasterxml.jackson:jackson-bom:2.20.1')
++    implementation 'com.fasterxml.jackson.core:jackson-databind' // Already bundled transitively; direct use by search parser.
+     constraints {
+         implementation('commons-io:commons-io:2.20.0') { because 'Avoid the obsolete 2.5 transitive version from the downloader wrapper' }
+     }

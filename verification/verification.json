@@ -1,0 +1,104 @@
+{
+  "generated_at_utc": "2026-11-10T15:20:09.210457+00:00",
+  "build": "debug APK; not a public/production release",
+  "unit_tests": {
+    "tests": 14,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "engine": {
+    "wrapper": "io.github.deniscerri.youtubedl-android:library:0.19.0",
+    "bundled_yt_dlp_version": "2026.10.26",
+    "source": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp",
+    "sha256": "e51e69e89489f199530f13d32a4342da3ddb2cf34842f364603a066db05afbf3",
+    "checksum_source": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/SHA2-256SUMS",
+    "reason": "Original AAR bundles 2025.09.26 but adds --js-runtimes, which that parser rejects. An app raw-resource override pins a compatible official Python zipapp; no new native runtime or host tool is installed.",
+    "verification_limit": "Host CLI parsing is tested; Android execution remains untested."
+  },
+  "artifacts": [
+    {
+      "file": "app-arm64-v8a-debug.apk",
+      "bytes": 93754383,
+      "sha256": "47999fea2c3c3cf6e789eb538fbc7c8e18acb7249e0ff4aa4619b244a24ae91e",
+      "signature_verified": true,
+      "certificate_sha256": "e229f65b15ba19d8c9db42d4b8e2c46d6db13bf352ad6c7eb8ed808d522248d8",
+      "zipalign_verified": true,
+      "native": {
+        "elf_count": 257,
+        "arm64_elf_count": 257,
+        "arm64_16kb_incompatible": [
+          {
+            "path": "lib/arm64-v8a/libffmpeg.zip.so!usr/lib/libsharpyuv.so",
+            "machine": 183,
+            "pt_load_alignments": [
+              4096,
+              4096,
+              4096,
+              4096
+            ]
+          },
+          {
+            "path": "lib/arm64-v8a/libffmpeg.zip.so!usr/lib/libwebpdecoder.so",
+            "machine": 183,
+            "pt_load_alignments": [
+              4096,
+              4096,
+              4096,
+              4096
+            ]
+          },
+          {
+            "path": "lib/arm64-v8a/libffmpeg.zip.so!usr/lib/libwebp.so",
+            "machine": 183,
+            "pt_load_alignments": [
+              4096,
+              4096,
+              4096,
+              4096
+            ]
+          },
+          {
+            "path": "lib/arm64-v8a/libffmpeg.zip.so!usr/lib/libwebpdemux.so",
+            "machine": 183,
+            "pt_load_alignments": [
+              4096,
+              4096,
+              4096
+            ]
+          },
+          {
+            "path": "lib/arm64-v8a/libffmpeg.zip.so!usr/lib/libwebpmux.so",
+            "machine": 183,
+            "pt_load_alignments": [
+              4096,
+              4096,
+              4096
+            ]
+          }
+        ],
+        "verdict": "4KB-only-ingest-prototype",
+        "device_execution_tested": false
+      }
+    },
+    {
+      "file": "app-armeabi-v7a-debug.apk",
+      "bytes": 87083213,
+      "sha256": "b33447c8c5327f140896eeee233158f442be0c144d0cdedd833c822cf569efea",
+      "signature_verified": true,
+      "certificate_sha256": "e229f65b15ba19d8c9db42d4b8e2c46d6db13bf352ad6c7eb8ed808d522248d8",
+      "zipalign_verified": true,
+      "native": {
+        "elf_count": 257,
+        "arm64_elf_count": 0,
+        "arm64_16kb_incompatible": [],
+        "verdict": "not-applicable-arm32",
+        "device_execution_tested": false
+      }
+    }
+  ],
+  "device_execution_tested": false,
+  "ui_render_tested": false,
+  "native_limit": "Five bundled FFmpeg WebP-related ARM64 libraries are 4KB aligned. Ingest checks the actual device page size and refuses non-4KB pages; import/player/organizer can still be tried. No 16KB compatibility or device success is claimed.",
+  "license_limit": "Upstream declares GPLv3 for wrapper/FFmpeg; exact corresponding native-source provenance and public-distribution compliance are not cleared."
+}

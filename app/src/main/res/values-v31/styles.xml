@@ -1,0 +1,7 @@
+<resources>
+    <style name="AppTheme" parent="AppThemeBase">
+        <item name="android:windowSplashScreenBackground">#101715</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenAnimationDuration">0</item>
+    </style>
+</resources>

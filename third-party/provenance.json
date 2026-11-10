@@ -1,0 +1,25 @@
+[
+  {
+    "file": "GPL-3.0.txt",
+    "url": "https://raw.githubusercontent.com/deniscerri/youtubedl-android/master/LICENSE",
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  {
+    "file": "library-0.19.0-sources.jar",
+    "url": "https://repo.maven.apache.org/maven2/io/github/deniscerri/youtubedl-android/library/0.19.0/library-0.19.0-sources.jar",
+    "bytes": 11557,
+    "sha256": "95dfa9f33d7e3058784c5c7153eae98525dc83e10de24ed50b4dfe8ba6ba129e"
+  },
+  {
+    "file": "ffmpeg-0.19.0-sources.jar",
+    "url": "https://repo.maven.apache.org/maven2/io/github/deniscerri/youtubedl-android/ffmpeg/0.19.0/ffmpeg-0.19.0-sources.jar",
+    "bytes": 1444,
+    "sha256": "770bc30077613ffefc22b0f09bc4904235d8f91f6b85f15bb73b295f1c40d9b6"
+  },
+  {
+    "file": "common-0.19.0-sources.jar",
+    "url": "https://repo.maven.apache.org/maven2/io/github/deniscerri/youtubedl-android/common/0.19.0/common-0.19.0-sources.jar",
+    "bytes": 2112,
+    "sha256": "6b7bb93107f1bfce3a1830503ba458ff49d9b391a337fd6cf6e1b15ebc3922e3"
+  }
+]

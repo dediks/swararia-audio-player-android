@@ -1,0 +1,17 @@
+{
+  "status": "passed",
+  "severity_counts": {
+    "Warning": 19
+  },
+  "issue_ids": {
+    "GradleDependency": 10,
+    "NewerVersionAvailable": 2,
+    "ExportedService": 1,
+    "DataExtractionRules": 1,
+    "UnusedResources": 1,
+    "UseKtx": 4
+  },
+  "command": "bash build.sh -Pandroid.experimental.lint.heapSize=384m lintDebug",
+  "exit_code": 0,
+  "first_attempt": "Optional run with reduced 256MB Gradle heap timed out; retry with the existing 512MB project heap passed."
+}

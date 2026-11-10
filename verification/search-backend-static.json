@@ -1,0 +1,14 @@
+{
+  "changed_source_files": [
+    "app/src/main/java/com/swararia/audiolab/YoutubeSearchData.kt",
+    "app/src/main/java/com/swararia/audiolab/ThumbnailPolicy.kt",
+    "app/src/main/java/com/swararia/audiolab/YoutubeSearchRepository.kt",
+    "app/src/main/java/com/swararia/audiolab/AppViewModel.kt",
+    "app/build.gradle"
+  ],
+  "heuristic_findings": [],
+  "ui_original_file_count": 8,
+  "changed_ui_files": [],
+  "core_and_old_apk_hashes_unchanged": true,
+  "not_a_security_certification": true
+}

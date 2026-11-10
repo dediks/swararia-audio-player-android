@@ -1,0 +1,37 @@
+{
+  "generated_at_utc": "2026-11-10T14:06:26.757697+00:00",
+  "phase": "search backend first, before UI/logo changes",
+  "unit_tests": {
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "lint": {
+    "Warning": 19
+  },
+  "lint_passed": true,
+  "combined_unit_lint_attempt": "failed with JVM Metaspace OOM; unit tests themselves passed",
+  "lint_retry": "separate fresh lint-only invocation passed without config/heap/package changes",
+  "live_provider_results": [
+    {
+      "provider": "YOUTUBE",
+      "exit_code": 0,
+      "kotlin_parser_exit_code": 0,
+      "result_count": 10
+    },
+    {
+      "provider": "YOUTUBE_MUSIC",
+      "exit_code": 0,
+      "kotlin_parser_exit_code": 0,
+      "result_count": 10
+    }
+  ],
+  "ui_original_files_unchanged": 8,
+  "preserved_native_storage_playback_schema": true,
+  "old_apks_unchanged": true,
+  "new_packages_installed": false,
+  "device_execution_tested": false,
+  "review_status": "passed: independent review found no concrete security/logic issues; native phone lifecycle testing remains for handoff",
+  "new_apk_available": false
+}

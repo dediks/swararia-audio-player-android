@@ -1,0 +1,4 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><shape><solid android:color="#101715" /></shape></item>
+    <item android:drawable="@drawable/swararia_logo" android:gravity="center" android:width="144dp" android:height="144dp" />
+</layer-list>

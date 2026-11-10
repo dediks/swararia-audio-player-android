@@ -1,0 +1,15 @@
+{
+  "source_recovery_archive": ".checkpoints/before-0.2.0-ui-search-source.zip",
+  "archive_members": 24,
+  "old_apks": {
+    "Swararia-Audio-Lab-0.1.0-spike-armeabi-v7a.apk": "60c8a65b5382afa7d78f3910e23964250526fe4c2884f067afc93db020c8f738",
+    "Swararia-Audio-Lab-0.1.0-spike-arm64-v8a.apk": "035fb59e1f798b8ed66ce880d22a00698826a04ad88c23f4e019c4044d49b6fe"
+  },
+  "preserve_core_sha256": {
+    "app/src/main/java/com/swararia/audiolab/MediaLibrary.kt": "08069b1cc74e95d91bc58f7c022bed06ca8b1cfc9847172c55eb6b262c1f02d7",
+    "app/src/main/java/com/swararia/audiolab/IngestService.kt": "6378f349904567c55912fad719047699bc28603344157694b4078a8c3ba4d72a",
+    "app/src/main/java/com/swararia/audiolab/PlaybackService.kt": "d9ad9ff066c653ff74325ce8167ee1c7c4b2c1a2f0da3c4b696bac3734b7ebc5",
+    "app/schemas/com.swararia.audiolab.AudioDatabase/1.json": "87816c40ddb5dc143c8f489e844185255e6c5666f2da6f1f66220dc2ee30bc26"
+  },
+  "approved_scope": "UI/logo, YouTube and YouTube Music search, update APK; no installs, no DB migration, preserve old releases"
+}

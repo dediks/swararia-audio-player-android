@@ -1,0 +1,59 @@
+{
+  "checked_at_utc": "2026-11-10T13:38:42.274643+00:00",
+  "host_only": true,
+  "android_device_tested": false,
+  "media_downloaded": false,
+  "query": "royalty free music",
+  "results": [
+    {
+      "provider": "YouTube",
+      "exit_code": 0,
+      "elapsed_seconds": 3.13,
+      "stderr": "",
+      "parsed_json": true,
+      "result_count": 3,
+      "sample_items": [
+        {
+          "id": "vqwnTNRtQ80",
+          "title": "12 Hours of Copyright Free Music - Free Background Music for YouTube Videos and Content Creators",
+          "duration": 43199
+        },
+        {
+          "id": "FNb1i7G6sPk",
+          "title": "12 Hours of Free Background Music - Copyright Free Music for Creators and Streamers [April Edition]",
+          "duration": 43140
+        },
+        {
+          "id": "TQvXEza4fPc",
+          "title": "1 hour of comfy & relaxing songs | royalty free vlog music \u2728",
+          "duration": 3533
+        }
+      ]
+    },
+    {
+      "provider": "YouTube Music",
+      "exit_code": 0,
+      "elapsed_seconds": 2.95,
+      "stderr": "",
+      "parsed_json": true,
+      "result_count": 3,
+      "sample_items": [
+        {
+          "id": "cWEE8laH_XQ",
+          "title": "The royalty free song",
+          "duration": null
+        },
+        {
+          "id": "CMoDghyPYns",
+          "title": "Up_&_down_15 Royalty Free Music Background Music Music for Youtube Videos",
+          "duration": null
+        },
+        {
+          "id": "adcj2VHSCyk",
+          "title": "Beethoven - Ecossaise By Hot Lemon Royalty Free Music",
+          "duration": null
+        }
+      ]
+    }
+  ]
+}
