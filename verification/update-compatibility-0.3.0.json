@@ -1,0 +1,29 @@
+{
+  "core_schema_unchanged": true,
+  "protected": {
+    "app/src/main/java/com/swararia/audiolab/MediaLibrary.kt": true,
+    "app/src/main/java/com/swararia/audiolab/IngestService.kt": true,
+    "app/schemas/com.swararia.audiolab.AudioDatabase/1.json": true
+  },
+  "artifacts": [
+    {
+      "abi": "arm64-v8a",
+      "same_signer": true,
+      "old_apk_unchanged": true,
+      "native_and_engine_payloads_identical": true,
+      "new_apk_sha256": "160fa2f5675f57ce7ea8feb3e2eda83f262ba02e96702fea13ff02870dedfaf9",
+      "old_apk_sha256": "47999fea2c3c3cf6e789eb538fbc7c8e18acb7249e0ff4aa4619b244a24ae91e"
+    },
+    {
+      "abi": "armeabi-v7a",
+      "same_signer": true,
+      "old_apk_unchanged": true,
+      "native_and_engine_payloads_identical": true,
+      "new_apk_sha256": "c2690b5ab2a979778648d4d11239917b88cf4f73e80070f6b55c9e97edccc71d",
+      "old_apk_sha256": "b33447c8c5327f140896eeee233158f442be0c144d0cdedd833c822cf569efea"
+    }
+  ],
+  "application_id_unchanged": true,
+  "version_code": 3,
+  "device_upgrade_tested": false
+}

@@ -1,22 +1,26 @@
 """Package verified 0.2.0 candidates without modifying any 0.1.0 release."""
 from pathlib import Path
-import hashlib, json, shutil, zipfile
+import hashlib, json, shutil, zipfile, sys
 ROOT=Path(__file__).resolve().parent
 DIST=ROOT/'dist'
-VERSION='0.2.0-spike'
+VERSION=sys.argv[1] if len(sys.argv)>1 else '0.2.0-spike'
+assert VERSION in {'0.2.0-spike','0.3.0-spike'}
+NEW=VERSION=='0.3.0-spike'
+SHORT='0.3.0' if NEW else '0.2.0'
+DIST.mkdir(exist_ok=True)
 
 def digest(path):
     with path.open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 
-review=json.loads((ROOT/'verification/ui-update-review-result.json').read_text())
+review=json.loads((ROOT/'verification'/('search-player-review-0.3.0.json' if NEW else 'ui-update-review-result.json')).read_text())
 assert review['passed'] and not review['security_concerns'] and not review['logic_errors']
 report=json.loads((ROOT/'verification/verification.json').read_text())
-compat=json.loads((ROOT/'verification/update-compatibility-0.2.0.json').read_text())
-checks=json.loads((ROOT/'verification/ui-update-checks.json').read_text())
+compat=json.loads((ROOT/f'verification/update-compatibility-{SHORT}.json').read_text())
+checks=json.loads((ROOT/'verification'/('checks-0.3.0.json' if NEW else 'ui-update-checks.json')).read_text())
 assert compat['core_schema_unchanged'] and all(a['same_signer'] and a['old_apk_unchanged'] and a['native_and_engine_payloads_identical'] for a in compat['artifacts'])
 assert not checks['lint'].get('Error',0) and not checks['lint'].get('Fatal',0)
 assert report['unit_tests']['tests']>0 and not report['unit_tests']['failures'] and not report['unit_tests']['errors']
-manifest_path=DIST/'manifest-0.2.0.json'
+manifest_path=DIST/f'manifest-{SHORT}.json'
 assert not manifest_path.exists(),'Refusing to overwrite a prepared release manifest'
 artifacts=[]
 for artifact in report['artifacts']:
@@ -49,7 +53,7 @@ with zipfile.ZipFile(archive) as check:
     assert len(names)==len(set(names))==len(files)
     for required in ['app/src/main/res/font/inter_variable.ttf','app/src/main/res/drawable-nodpi/swararia_logo.png','app/src/main/java/com/swararia/audiolab/YoutubeThumbnail.kt','app/src/main/java/com/swararia/audiolab/SwarariaUi.kt','app/src/main/assets/licenses/Inter-OFL.txt']:
         assert required in names,required
-manifest={'version':VERSION,'application_id':'com.swararia.audiolab.spike','version_code':2,
+manifest={'version':VERSION,'application_id':'com.swararia.audiolab.spike','version_code':3 if NEW else 2,
           'artifacts':artifacts,'unit_tests':report['unit_tests'],'lint':checks['lint'],
           'independent_review':review,'update_compatibility':compat,
           'source_package':{'file':archive.name,'bytes':archive.stat().st_size,'sha256':digest(archive),'files':len(files)},

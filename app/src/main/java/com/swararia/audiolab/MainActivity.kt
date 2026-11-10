@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
                 val tracks by model.tracks.collectAsStateWithLifecycle()
                 val ingest by IngestStatus.state.collectAsStateWithLifecycle()
                 val search by model.search.collectAsStateWithLifecycle()
+                val preview by model.preview.collectAsStateWithLifecycle()
                 val lastRename by model.lastRename.collectAsStateWithLifecycle()
                 val organizerBusy by model.organizerBusy.collectAsStateWithLifecycle()
                 val snackbars = remember { SnackbarHostState() }
@@ -76,6 +77,15 @@ class MainActivity : ComponentActivity() {
                 SwarariaUi(
                     tracks = tracks, controller = controller, ingest = ingest, search = search,
                     lastRename = lastRename, organizerBusy = organizerBusy, snackbarHostState = snackbars,
+                    searchActions = SearchActions(
+                        preview = preview,
+                        search = { query, provider, kind, sort -> whenOnlineIdle { model.search(query, provider, kind, sort) } },
+                        sort = { model.sortSearch(it) }, loadMore = { whenOnlineIdle { model.loadMore() } },
+                        retry = { whenOnlineIdle { model.retrySearch() } },
+                        openPlaylist = { hit -> whenOnlineIdle { model.openPlaylist(hit) } },
+                        leavePlaylist = { whenOnlineIdle { model.leavePlaylist() } },
+                        previewSong = { hit -> whenOnlineIdle { model.preview(hit) } },
+                        stopPreview = { model.cancelPreview() }, previewError = { model.previewError() }),
                     onDownload = { url, authorized -> whenOnlineIdle {
                         withNotificationPermission { whenOnlineIdle {
                             runCatching { IngestService.download(this, url, authorized) }
@@ -104,10 +114,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun whenOnlineIdle(action: () -> Unit) {
-        if (!OnlineWorkRules.canStart(model.search.value.busy, IngestStatus.state.value.busy)) {
+        if (!OnlineWorkRules.canStart(model.search.value.busy, IngestStatus.state.value.busy, model.preview.value.loading)) {
             model.message("Tunggu pencarian atau proses audio selesai terlebih dahulu.")
             return
         }
+        model.cancelPreview()
         action()
     }
 
@@ -121,6 +132,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun playTrack(track: AudioTrack, tracks: List<AudioTrack>) {
+        model.cancelPreview()
         val player = controller ?: error("Pemutar masih menghubungkan. Coba lagi sebentar.")
         check(player.isConnected) { "Pemutar terputus. Tutup dan buka aplikasi untuk menghubungkan lagi." }
         val queue = tracks.map { item ->

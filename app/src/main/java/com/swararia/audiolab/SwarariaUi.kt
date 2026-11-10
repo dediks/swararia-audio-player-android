@@ -57,6 +57,7 @@ fun SwarariaUi(
     lastRename: RenameRecord?,
     organizerBusy: Boolean,
     snackbarHostState: SnackbarHostState,
+    searchActions: SearchActions,
     onDownload: (String, Boolean) -> Unit,
     onImport: () -> Unit,
     onUpdate: () -> Unit,
@@ -130,12 +131,11 @@ fun SwarariaUi(
                 modifier = contentModifier, onAdd = { destination = 1 }, onPlay = playTrack,
                 onRename = { editing = it }, onHistory = { history = true },
                 onSettings = { settings = true },
-            ) else AddAudioPage(
-                ingest = ingest, search = search, modifier = contentModifier,
-                onDownload = { url, authorized -> if (!ingest.busy && !search.busy && authorized) onDownload(url, true) },
-                onImport = { if (!ingest.busy && !search.busy) onImport() },
+            ) else AddAudioScreen(
+                ingest = ingest, search = search, controller = controller, actions = searchActions, modifier = contentModifier,
+                onDownload = { url, authorized -> if (!ingest.busy && !search.busy && !searchActions.preview.loading && authorized) onDownload(url, true) },
+                onImport = { if (!ingest.busy && !search.busy && !searchActions.preview.loading) onImport() },
                 onCancel = { if (ingest.busy && ingest.cancelable) onCancel() },
-                onSearch = { query, provider -> if (!ingest.busy && !search.busy) onSearch(query, provider) },
                 onCancelSearch = onCancelSearch, onSettings = { settings = true },
             )
         }
@@ -146,8 +146,8 @@ fun SwarariaUi(
         }
     }
     if (history) RenameHistoryDialog(lastRename, organizerBusy, onDismiss = { history = false }, onUndo = onUndo)
-    if (settings) EngineSettingsDialog(ingest, search.busy, onDismiss = { settings = false },
-        onUpdate = { if (!ingest.busy && !search.busy) onUpdate() },
+    if (settings) EngineSettingsDialog(ingest, search.busy || searchActions.preview.loading, onDismiss = { settings = false },
+        onUpdate = { if (!ingest.busy && !search.busy && !searchActions.preview.loading) onUpdate() },
         onCancel = { if (ingest.busy && ingest.cancelable) onCancel() })
 }
 
@@ -965,6 +965,7 @@ private fun FocusedPlayer(
                 modifier = Modifier.heightIn(min = 48.dp)) {
                 Icon(UiIcons.Stop, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("Stop")
             }
+            PlaybackModeBar(controller, Modifier.fillMaxWidth())
             Surface(onClick = { queueOpen = true }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
                 modifier = Modifier.fillMaxWidth()) {
                 Row(Modifier.heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 10.dp),

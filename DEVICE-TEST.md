@@ -10,6 +10,18 @@ Tidak ada perangkat Android atau emulator pada lingkungan yang disetujui. Lolos 
 - Izin notifikasi membantu menampilkan unduhan dan pemutar. Tidak ada permintaan izin mengelola semua file.
 - Gunakan sumber audio yang dimiliki atau secara jelas mengizinkan pengunduhan. Tidak ada cookies/login, pembobolan DRM, atau bypass paywall.
 
+## Pembaruan 0.3.0 — matriks uji berikutnya
+- 0.2.0 telah dilaporkan pengguna bekerja pada Samsung M15 Android 16. Itu bukan bukti fitur 0.3.0 sudah diuji. Pasang 0.3.0 sebagai update; **jangan uninstall**. Periksa koleksi dan riwayat tetap ada.
+- Tambah audio membuka pencarian dengan YouTube Music. Coba Lagu dan Playlist pada kedua sumber, lalu buka playlist dan pilih satu lagu. Tidak ada unduh massal otomatis.
+- Semua hasil lagu yang tampil harus memiliki kanal nyata dan durasi; playlist menampilkan pembuat serta jumlah lagu bila tersedia. Hasil tidak lengkap tidak dikarang dan diberi catatan. Artis bukan pengganti nama kanal.
+- Coba relevansi/A–Z/durasi pendek-panjang; urutan hanya untuk hasil yang telah dimuat. Indikator kanal terverifikasi/kanal artis bukan bukti kepemilikan label atau izin unduh.
+- Muat lebih banyak beberapa kali, pastikan hasil lama tetap ada dan tidak dobel. Batas 50 hasil per pencarian. Batalkan saat memuat; coba ulang dan query baru.
+- Preview membutuhkan internet, maksimal 30 detik dan tidak menambah pustaka. Coba berhenti, pindah layar, tekan Home, matikan layar, mulai player lokal dan ulangi pada lagu lain. Tidak boleh ada dua audio berjalan bersamaan atau player lokal otomatis lanjut setelah preview.
+- Jaringan build terkena pembatasan anti-bot YouTube saat mengambil stream preview. Error ini ditangani; preview sukses di HP **belum terbukti**. Jangan kirim cookie/login atau URL stream bertanda tangan untuk diagnosis.
+- Pada pemutar lengkap: Loop track mengulang track yang sama; Continue melanjutkan antrean; Once menjeda sesudah satu track. Coba berganti mode, track pendek, next/previous, dan tutup/buka aplikasi. Antrean tidak boleh direset saat ganti mode.
+- Saat audio sedang diputar tekan Fade 3s: volume aplikasi turun, player dijeda, lalu volume awal kembali untuk pemutaran berikutnya. Uji juga pause/Stop/seek/next, kehilangan fokus audio dan pindah background di tengah fade. Jangan sampai volume tersangkut kecil atau audio mendadak lanjut sendiri.
+- Coba font besar dan landscape. APK/source compilation serta kontrak statis tidak membuktikan tata letak ini di HP.
+
 ## Pembaruan 0.2.0 — prioritas uji Samsung M15 Android 16
 - Pasang sebagai **update**, bukan uninstall. Periksa bahwa pustaka dan riwayat rename dari 0.1.0 masih ada. Identitas paket, signer, schema Room v1 dan byte payload engine/native sudah dibandingkan pada mesin build; pemasangan langsung di HP belum diuji.
 - Periksa logo pada ikon launcher, splash dan header. Pustaka memakai UI gelap/mint dan font Inter lokal. Artwork abstrak adalah dekorasi fallback, bukan sampul album atau gelombang audio yang diukur.

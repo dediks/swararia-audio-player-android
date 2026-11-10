@@ -12,6 +12,11 @@ class OnlineWorkRulesTest {
         assertThrows(IllegalArgumentException::class.java) { ThumbnailTransfer.read(payload.inputStream(), 0) }
     }
 
+    @Test fun previewLookupAlsoBlocksOnlineDispatch() {
+        assertFalse(OnlineWorkRules.canStart(searchBusy = false, ingestBusy = false, previewBusy = true))
+        assertTrue(OnlineWorkRules.canStart(searchBusy = false, ingestBusy = false, previewBusy = false))
+    }
+
     @Test fun startsOnlyWhenBothWorkersAreIdle() {
         assertTrue(OnlineWorkRules.canStart(searchBusy = false, ingestBusy = false))
         assertFalse(OnlineWorkRules.canStart(searchBusy = true, ingestBusy = false))

@@ -19,7 +19,7 @@ class NativeUiSourceContracts(unittest.TestCase):
         expected = [
             'tracks: List<AudioTrack>', 'controller: MediaController?', 'ingest: IngestState',
             'search: YoutubeSearchState', 'lastRename: RenameRecord?', 'organizerBusy: Boolean',
-            'snackbarHostState: SnackbarHostState', 'onDownload: (String, Boolean) -> Unit',
+            'snackbarHostState: SnackbarHostState', 'searchActions: SearchActions', 'onDownload: (String, Boolean) -> Unit',
             'onImport: () -> Unit', 'onUpdate: () -> Unit', 'onCancel: () -> Unit',
             'onPlay: (AudioTrack) -> Unit', 'onRename: (Long, String, () -> Unit) -> Unit',
             'onUndo: () -> Unit', 'onSearch: (String, SearchProvider) -> Unit',

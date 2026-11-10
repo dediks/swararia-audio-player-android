@@ -1,0 +1,22 @@
+{
+  "lint": {
+    "Warning": 15
+  },
+  "gradle_unit_tests": {
+    "tests": 23,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "plugin_fixture_tests": 8,
+  "host_live_metadata_cases": 6,
+  "host_live_metadata_all_returned_complete_records": true,
+  "apk_contract_tests": 4,
+  "upgrade_source_contract_tests": 6,
+  "device_execution_tested": false,
+  "ui_runtime_render_tested": false,
+  "preview_host_status": "Blocked by YouTube sign-in/anti-bot response; no credentials or bypass used. Phone success unverified.",
+  "native_limit_unchanged": true,
+  "new_dependencies_installed": false,
+  "github_push_performed": false
+}

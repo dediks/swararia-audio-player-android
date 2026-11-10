@@ -2,9 +2,9 @@
 
 Aplikasi Android native untuk menyiapkan, mengelola, dan memutar audio lokal. Target penggunaan: soundman dan rental sound system hajatan. Aplikasi tetap dapat memutar file lokal tanpa laptop; fitur transfer koleksi dari Swararia Desktop **belum diimplementasikan**.
 
-## Status baseline
+## Status pengembangan
 
-Source berasal dari **0.2.0-spike**, sebuah build debug/pengujian, bukan rilis produksi.
+Baseline source adalah **0.2.0-spike**. Branch pengembangan saat ini menyiapkan **0.3.0-spike**, tetap build debug/pengujian, bukan rilis produksi.
 
 - Android 10+ (minSdk 29), targetSdk 36; Kotlin/Compose, Media3, Room dan MediaStore/SAF.
 - Pustaka: pencarian lokal, urutan terbaru/A–Z, rename file dan riwayat undo.
@@ -13,9 +13,11 @@ Source berasal dari **0.2.0-spike**, sebuah build debug/pengujian, bukan rilis p
 - Logo Swararia dan font Inter lokal; artwork abstrak merupakan dekorasi fallback, bukan sampul album yang terverifikasi.
 - Tidak memerlukan server, akun, Python atau Termux di HP untuk fungsi yang sudah tersedia. Pencarian/unduhan online memerlukan internet.
 
-Pada workspace build, 14 unit test, kompilasi, build APK, kontrak APK, signature dan pemeriksaan arsip lulus. Lint: 26 warning, tidak ada Error/Fatal. Review kode independen tidak menemukan masalah keamanan/logika konkret. **Checkout bersih repository ini belum dibangun ulang.**
+0.3.0 menambahkan default YouTube Music, filter lagu/playlist, urutan hasil termuat, metadata kanal/durasi, pemuatan hasil tambahan, preview online hingga 30 detik, mode Loop/Continue/Once dan Fade 3s. Prioritas kanal memakai sinyal terverifikasi/indikasi artis, bukan bukti label asli atau hak penggunaan. Playlist dibuka untuk memilih lagu; bukan unduh massal.
 
-Pengguna melaporkan versi 0.1.0 bekerja pada Samsung M15 Android 16. Itu bukan bukti bahwa semua fitur/UI versi 0.2.0 sudah diuji di perangkat. Lihat `DEVICE-TEST.md`, `UPDATE-0.2.0.md` dan laporan `verification/`.
+Pada repository ini, build memakai toolchain/cache yang sudah ada: 23 unit test, kompilasi, kedua APK ABI, kontrak APK dan signature lulus. Lint: 15 warning, tidak ada Error/Fatal. Review independen akhir lulus sesudah perbaikan temuan awal; bukti serta batas verifikasi ada di `UPDATE-0.3.0.md` dan `verification/`.
+
+Pengguna melaporkan 0.1.0 dan 0.2.0 bekerja pada Samsung M15 Android 16. **0.3.0 belum diuji pada HP.** Pengambilan stream preview pada jaringan build dibatasi anti-bot YouTube; penanganan error tersedia, sukses pemutaran di HP belum terbukti. Lihat `DEVICE-TEST.md`.
 
 ## Batasan penting
 
