@@ -1,7 +1,14 @@
 package com.swararia.audiolab
 
 import android.os.Bundle
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -138,15 +145,19 @@ fun PlaybackModeBar(controller: MediaController?, modifier: Modifier = Modifier)
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             Box {
-                TextButton(
+                OutlinedButton(
                     onClick = { expanded = true },
                     enabled = state.modeSupported && !pending,
                     modifier = Modifier.heightIn(min = 48.dp).semantics {
                         stateDescription = state.mode?.label ?: "Unavailable"
                     },
-                ) { Text("Mode: ${state.mode?.label ?: "Unavailable"}") }
+                ) {
+                    Icon(UiIcons.Loop, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
+                    Text(state.mode?.label ?: "Mode")
+                    Spacer(Modifier.width(8.dp)); Icon(UiIcons.ChevronDown, null, Modifier.size(18.dp))
+                }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     PlaybackMode.entries.forEach { mode ->
                         DropdownMenuItem(
@@ -160,13 +171,16 @@ fun PlaybackModeBar(controller: MediaController?, modifier: Modifier = Modifier)
                     }
                 }
             }
-            TextButton(
+            OutlinedButton(
                 onClick = { send(PlaybackCommands.fade, Bundle.EMPTY) },
                 enabled = state.fadeSupported && state.playing && !state.busy && !pending,
                 modifier = Modifier.heightIn(min = 48.dp).semantics {
                     stateDescription = if (state.busy) "Fading to pause" else "Fade out and pause over 3 seconds"
                 },
-            ) { Text(if (state.busy) "Fading…" else "Fade 3s") }
+            ) {
+                Icon(UiIcons.Fade, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
+                Text(if (state.busy) "Fading…" else "Fade 3s")
+            }
         }
         val status = error ?: when {
             !state.connected -> "Playback disconnected"

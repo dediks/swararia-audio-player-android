@@ -1,0 +1,37 @@
+{
+  "version_code": 4,
+  "application_id_unchanged": true,
+  "protected_source_files_unchanged": 23,
+  "schema1_preserved": true,
+  "migration": {
+    "from": 1,
+    "to": 2,
+    "host_sql_preservation_passed": true,
+    "generated_schema_tables_match": {
+      "tracks": true,
+      "rename_history": true,
+      "download_jobs": true
+    },
+    "android_migration_runtime_tested": false
+  },
+  "artifacts": [
+    {
+      "abi": "arm64-v8a",
+      "same_signer": true,
+      "old_apk_unchanged": true,
+      "native_and_engine_payloads_identical": true,
+      "old_apk_sha256": "160fa2f5675f57ce7ea8feb3e2eda83f262ba02e96702fea13ff02870dedfaf9",
+      "new_apk_sha256": "c2d13fc614d566270f04430b436a1e214c88914038d754bf36732457c3c8ad2b"
+    },
+    {
+      "abi": "armeabi-v7a",
+      "same_signer": true,
+      "old_apk_unchanged": true,
+      "native_and_engine_payloads_identical": true,
+      "old_apk_sha256": "c2690b5ab2a979778648d4d11239917b88cf4f73e80070f6b55c9e97edccc71d",
+      "new_apk_sha256": "bfb5a531a7c5481007e60b057da496967010d847efe2d58a235d9fe7bffb6006"
+    }
+  ],
+  "device_upgrade_tested": false,
+  "no_new_dependencies": true
+}

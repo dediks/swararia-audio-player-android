@@ -107,6 +107,19 @@ internal object UiIcons {
         moveTo(8f, 5f); lineTo(5f, 5f); lineTo(5f, 21f); lineTo(19f, 21f); lineTo(19f, 5f); lineTo(16f, 5f)
         moveTo(8f, 3f); lineTo(16f, 3f); lineTo(16f, 7f); lineTo(8f, 7f); close()
     }
+    val Loop = outline("Loop") {
+        moveTo(4f, 8f); lineTo(19f, 8f); lineTo(16f, 5f)
+        moveTo(20f, 16f); lineTo(5f, 16f); lineTo(8f, 19f)
+    }
+    val Fade = outline("Fade") {
+        moveTo(3f, 5f); lineTo(7f, 5f); lineTo(14f, 16f); lineTo(21f, 19f)
+        moveTo(3f, 21f); lineTo(21f, 21f)
+    }
+    val Delete = outline("Delete") {
+        moveTo(4f, 6f); lineTo(20f, 6f); moveTo(9f, 6f); lineTo(9f, 3f); lineTo(15f, 3f); lineTo(15f, 6f)
+        moveTo(6f, 6f); lineTo(7f, 21f); lineTo(17f, 21f); lineTo(18f, 6f)
+        moveTo(10f, 10f); lineTo(10f, 17f); moveTo(14f, 10f); lineTo(14f, 17f)
+    }
     val Check = outline("Check") {
         moveTo(4f, 12f); lineTo(9f, 17f); lineTo(20f, 6f)
     }

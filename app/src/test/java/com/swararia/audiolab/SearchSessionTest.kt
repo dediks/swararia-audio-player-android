@@ -104,6 +104,7 @@ class SearchSessionTest {
             f.gateway.stream={ withContext(NonCancellable) { cleanup.await() };PreviewMedia(it.videoId,it.title,"https://example.invalid/fixture",emptyMap()) }
             f.session.preview(hit());f.session.cancelPreview();f.session.cancelPreview()
             assertTrue(f.session.preview.value.loading)
+            assertTrue(f.session.preview.value.canceling)
             assertFalse(f.session.canStartOnlineOperation())
             cleanup.complete(Unit);yield()
             assertNull(f.session.preview.value.media)
@@ -118,11 +119,100 @@ class SearchSessionTest {
             f.session.cancelPreview();assertEquals(PreviewState(),f.session.preview.value)
         }
     }
+    @Test(timeout = 5000) fun playerFailureRetainsHitAndRetryResolvesItAgain() = runBlocking {
+        Fixture().use { f ->
+            val calls=mutableListOf<SearchHit>()
+            f.gateway.stream={ calls.add(it);PreviewMedia(it.videoId,it.title,"https://example.invalid/${calls.size}",emptyMap()) }
+            f.session.preview(hit())
+            val old=f.session.preview.value.media
+            f.session.previewError()
+            assertEquals(hit(),f.session.preview.value.hit)
+            assertNotNull(f.session.preview.value.error)
+            assertNull(f.session.preview.value.media)
+            assertFalse(f.session.preview.value.loading)
+            f.session.preview(f.session.preview.value.hit!!)
+            assertEquals(listOf(hit(),hit()),calls)
+            assertNotEquals(old,f.session.preview.value.media)
+            assertNull(f.session.preview.value.error)
+        }
+    }
+
+    @Test(timeout = 5000) fun playerFailureWaitsForCleanupAndRejectsLateResolvedMedia() = runBlocking {
+        Fixture().use { f ->
+            val cleanup=CompletableDeferred<Unit>()
+            val first=hit()
+            f.gateway.stream={ withContext(NonCancellable) { cleanup.await() };PreviewMedia(it.videoId,it.title,"https://example.invalid/late",emptyMap()) }
+            f.session.preview(first);f.session.previewError()
+            assertEquals(first,f.session.preview.value.hit)
+            assertNotNull(f.session.preview.value.error)
+            assertTrue(f.session.preview.value.canceling)
+            assertFalse(f.session.canStartOnlineOperation())
+            f.session.preview(hit("bcdefghijkl"))
+            assertEquals(first,f.session.preview.value.hit)
+            cleanup.complete(Unit);yield()
+            assertEquals(first,f.session.preview.value.hit)
+            assertNotNull(f.session.preview.value.error)
+            assertNull(f.session.preview.value.media)
+            assertTrue(f.session.canStartOnlineOperation())
+            val next=hit("bcdefghijkl")
+            f.gateway.stream={ PreviewMedia(it.videoId,it.title,"https://example.invalid/new",emptyMap()) }
+            f.session.preview(next);yield()
+            assertEquals(next,f.session.preview.value.hit)
+            assertEquals(next.videoId,f.session.preview.value.media?.videoId)
+            assertNull(f.session.preview.value.error)
+        }
+    }
+
+    @Test(timeout = 5000) fun cancelAfterPlayerFailureCannotRestoreFailureOverNewRequest() = runBlocking {
+        Fixture().use { f ->
+            val cleanup=CompletableDeferred<Unit>()
+            f.gateway.stream={ withContext(NonCancellable) { cleanup.await() };error("late failure") }
+            f.session.preview(hit());f.session.previewError();f.session.cancelPreview()
+            cleanup.complete(Unit);yield()
+            assertEquals(PreviewState(),f.session.preview.value)
+            f.gateway.stream={ PreviewMedia(it.videoId,it.title,"https://example.invalid/new",emptyMap()) }
+            val next=hit("bcdefghijkl");f.session.preview(next);yield()
+            assertEquals(next,f.session.preview.value.hit)
+            assertNull(f.session.preview.value.error)
+        }
+    }
+
     @Test(timeout = 5000) fun invalidQueryDoesNotDispatchAndScopeOwnershipIsPreserved() = runBlocking {
         Fixture().use { f ->
             f.session.search(" ",SearchProvider.YOUTUBE);assertTrue(f.gateway.calls.isEmpty());assertTrue(f.messages.isNotEmpty())
             val sibling=f.scope.launch { awaitCancellation() }
             f.session.close();assertTrue(sibling.isActive)
+        }
+    }
+
+    @Test(timeout = 5000) fun leavingLoadingPlaylistWaitsForNativeCleanupBeforeRestoringParent() = runBlocking {
+        Fixture().use { f ->
+            val playlist=hit().copy(videoId="PLabcdefghijkl",kind=SearchKind.PLAYLISTS)
+            val cleanup=CompletableDeferred<Unit>()
+            f.gateway.page={ if(it.playlist==null) SearchPage(listOf(playlist),1,0) else {
+                withContext(NonCancellable) { cleanup.await() };SearchPage(listOf(hit()),1,0)
+            } }
+            f.session.search("music",SearchProvider.YOUTUBE_MUSIC,SearchKind.PLAYLISTS,SearchSort.TITLE)
+            val parent=f.session.search.value
+            f.session.openPlaylist(playlist);f.session.leavePlaylist()
+            assertTrue(f.session.search.value.busy)
+            assertFalse(f.session.canStartOnlineOperation())
+            cleanup.complete(Unit);yield()
+            assertEquals(parent,f.session.search.value)
+            assertTrue(f.session.canStartOnlineOperation())
+            assertEquals(2,f.gateway.calls.size)
+        }
+    }
+
+    @Test(timeout = 5000) fun leavingPlaylistRestoresLoadedParentAndSortWithoutAnotherRequest() = runBlocking {
+        Fixture().use { f ->
+            val playlist=hit().copy(videoId="PLabcdefghijkl",title="Collection",kind=SearchKind.PLAYLISTS)
+            f.gateway.page={ SearchPage(if(it.playlist==null)listOf(playlist) else listOf(hit()),1,0) }
+            f.session.search("music",SearchProvider.YOUTUBE_MUSIC,SearchKind.PLAYLISTS,SearchSort.TITLE)
+            val parent=f.session.search.value
+            f.session.openPlaylist(playlist);f.session.leavePlaylist()
+            assertEquals(parent,f.session.search.value)
+            assertEquals(2,f.gateway.calls.size)
         }
     }
 

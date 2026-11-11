@@ -8,4 +8,6 @@ interface AudioLibraryRepository {
     val lastRename: Flow<RenameRecord?>
     suspend fun rename(trackId: Long, requestedTitle: String): String
     suspend fun undoLastRename(): String
+    suspend fun delete(trackId: Long)
+    suspend fun attachArtwork(trackId: Long, thumbnailUrl: String?): AudioTrack?
 }

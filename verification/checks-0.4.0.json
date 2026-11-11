@@ -1,0 +1,174 @@
+{
+  "generated_at_utc": "2026-11-11T14:35:33.888463+00:00",
+  "passed": true,
+  "commands": [
+    {
+      "command": [
+        "bash",
+        "build.sh",
+        "testDebugUnitTest",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-01.log"
+    },
+    {
+      "command": [
+        "bash",
+        "build.sh",
+        "lintDebug",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-02.log"
+    },
+    {
+      "command": [
+        "bash",
+        "build.sh",
+        "assembleDebug",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-03.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_architecture.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-04.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_search.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-05.log"
+    },
+    {
+      "command": [
+        "python",
+        "verification/run_data_checks.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-06.log"
+    },
+    {
+      "command": [
+        "python",
+        "verification/run_batch_checks.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-07.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_core.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-08.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_ui_rules.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-09.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_ui_source_contracts.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-10.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_ui_integration.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-11.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_architecture_wiring.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-12.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_upgrade_03.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-13.log"
+    },
+    {
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "test_music_metadata_plugin",
+        "-v"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-14.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_engine_payload.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-15.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_apk_contract.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-16.log"
+    },
+    {
+      "command": [
+        "python",
+        "verify_artifacts.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-17.log"
+    },
+    {
+      "command": [
+        "python",
+        "verify_update_04.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4-gate-18.log"
+    }
+  ],
+  "unit_tests": {
+    "tests": 74,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "lint": {
+    "Warning": 31
+  },
+  "app_source_fingerprint_sha256": "44705dd74f32ea8b18b72d28bc4c5e2098c1707a733508534d79738eda78f2e7",
+  "offline_builds": true,
+  "device_execution_tested": false,
+  "ui_runtime_render_tested": false,
+  "native_ingest_execution_tested": false,
+  "preview_latency_measured_on_device": false
+}

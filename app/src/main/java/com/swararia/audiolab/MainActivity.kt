@@ -17,6 +17,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
@@ -26,6 +27,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var model: AppViewModel
     private var pendingPermissionAction: (() -> Unit)? = null
     private var controller by mutableStateOf<MediaController?>(null)
+    private var deletionPort: PlaybackDeletion.Queue? = null
+    private var deletionListener: Player.Listener? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         val action = pendingPermissionAction
@@ -57,6 +60,8 @@ class MainActivity : ComponentActivity() {
                 val preview by model.preview.collectAsStateWithLifecycle()
                 val lastRename by model.lastRename.collectAsStateWithLifecycle()
                 val organizerBusy by model.organizerBusy.collectAsStateWithLifecycle()
+                val operationBusy by model.operationBusy.collectAsStateWithLifecycle()
+                val jobs by model.jobs.collectAsStateWithLifecycle()
                 val snackbars = remember { SnackbarHostState() }
                 LaunchedEffect(model) { model.messages.collect { snackbars.showSnackbar(it) } }
                 LaunchedEffect(tracks, controller) {
@@ -83,13 +88,14 @@ class MainActivity : ComponentActivity() {
                         sort = { model.sortSearch(it) }, loadMore = { whenOnlineIdle { model.loadMore() } },
                         retry = { whenOnlineIdle { model.retrySearch() } },
                         openPlaylist = { hit -> whenOnlineIdle { model.openPlaylist(hit) } },
-                        leavePlaylist = { whenOnlineIdle { model.leavePlaylist() } },
-                        previewSong = { hit -> whenOnlineIdle { model.preview(hit) } },
+                        leavePlaylist = { model.leavePlaylist() },
+                        previewSong = { hit -> whenOnlineIdle { if (pauseForPreview()) model.preview(hit) } },
                         stopPreview = { model.cancelPreview() }, previewError = { model.previewError() }),
                     onDownload = { url, authorized -> whenOnlineIdle {
                         withNotificationPermission { whenOnlineIdle {
-                            runCatching { IngestService.download(this, url, authorized) }
-                                .onFailure { model.message(it.message ?: "Unduhan tidak dapat dimulai.") }
+                            model.enqueueDownloads(listOf(DownloadRequest(url, "Audio dari link")), authorized) {
+                                IngestService.startBatch(this, it)
+                            }
                         } }
                     } },
                     onImport = { whenOnlineIdle { chooseAudio.launch(arrayOf("audio/*")) } },
@@ -108,6 +114,27 @@ class MainActivity : ComponentActivity() {
                     onUndo = { model.undoRename() },
                     onSearch = { query, provider -> whenOnlineIdle { model.search(query, provider) } },
                     onCancelSearch = { model.cancelSearch() },
+                    upgrade = UpgradeUiActions(
+                        jobs = jobs, operationBusy = operationBusy,
+                        onDownloadBatch = { hits, authorized -> whenOnlineIdle {
+                            withNotificationPermission { whenOnlineIdle {
+                                model.enqueueDownloads(hits.filter { it.kind == SearchKind.SONGS }.map {
+                                    DownloadRequest(it.url, it.title, it.thumbnailUrl)
+                                }, authorized) { IngestService.startBatch(this, it) }
+                            } }
+                        } },
+                        onCancelBatch = {
+                            val batchId = model.ingest.value.batchId ?: model.jobs.value.firstOrNull()?.batchId
+                            if (batchId != null) model.cancelQueuedBatch(batchId)
+                            if (model.ingest.value.busy && model.ingest.value.batchId != null) IngestService.cancel(this)
+                        },
+                        onRetryFailed = { id -> whenOnlineIdle {
+                            withNotificationPermission { whenOnlineIdle {
+                                model.retryDownloads(id) { IngestService.startBatch(this, it) }
+                            } }
+                        } },
+                        onDelete = { track, done -> deleteTrack(track, done) },
+                    ),
                 )
             }
         }
@@ -126,20 +153,69 @@ class MainActivity : ComponentActivity() {
         val future = MediaController.Builder(this, SessionToken(this, ComponentName(this, PlaybackService::class.java))).buildAsync()
         controllerFuture = future
         future.addListener({
-            if (!isDestroyed) runCatching { future.get() }.onSuccess { controller = it }
+            if (!isDestroyed) runCatching { future.get() }.onSuccess { player ->
+                controller = player
+                val port = object : PlaybackDeletion.Queue {
+                    override fun snapshot(): List<String>? =
+                        if (player.isConnected && player.isCommandAvailable(Player.COMMAND_GET_TIMELINE))
+                            (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId } else null
+                    override fun removeAt(index: Int): Boolean {
+                        if (!player.isConnected || !player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return false
+                        player.removeMediaItem(index)
+                        return true
+                    }
+                }
+                deletionPort = port
+                model.playbackDeletion.connect(port)
+                val listener = object : Player.Listener {
+                    override fun onEvents(player: Player, events: Player.Events) {
+                        model.playbackDeletion.reconcile()
+                    }
+                }
+                deletionListener = listener
+                player.addListener(listener)
+            }
                 .onFailure { model.message("Pemutar belum terhubung: ${it.cause?.message ?: it.message.orEmpty()}") }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun pauseForPreview(): Boolean {
+        val player = controller
+        if (player == null || !player.isConnected || !player.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) {
+            model.message("Player belum terhubung. Coba lagi sebentar."); return false
+        }
+        player.pause()
+        return true
+    }
+
+    private fun deleteTrack(track: AudioTrack, done: () -> Unit) {
+        if (!model.canStartOnlineOperation()) { model.message("Tunggu proses yang sedang berjalan."); return }
+        val player = controller
+        if (player == null || !player.isConnected) { model.message("Player belum terhubung. Coba lagi."); return }
+        val queued = (0 until player.mediaItemCount).any { player.getMediaItemAt(it).mediaId == track.id.toString() }
+        if (queued && !player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) {
+            model.message("Queue player belum dapat diperbarui."); return
+        }
+        if (player.currentMediaItem?.mediaId == track.id.toString()) {
+            if (!player.isCommandAvailable(Player.COMMAND_STOP) || !player.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) {
+                model.message("Hentikan audio sebelum Delete."); return
+            }
+            player.pause(); player.stop()
+        }
+        model.delete(track.id, done)
     }
 
     private fun playTrack(track: AudioTrack, tracks: List<AudioTrack>) {
         model.cancelPreview()
         val player = controller ?: error("Pemutar masih menghubungkan. Coba lagi sebentar.")
         check(player.isConnected) { "Pemutar terputus. Tutup dan buka aplikasi untuk menghubungkan lagi." }
-        val queue = tracks.map { item ->
+        check(model.playbackDeletion.canPlay(track.id)) { "Audio sedang atau sudah dihapus." }
+        val playable = tracks.filter { model.playbackDeletion.canPlay(it.id) }
+        val queue = playable.map { item ->
             MediaItem.Builder().setMediaId(item.id.toString()).setUri(Uri.parse(item.uri))
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(UiPresentation.title(item.displayName)).build()).build()
         }
-        player.setMediaItems(queue, tracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0), 0)
+        player.setMediaItems(queue, playable.indexOfFirst { it.id == track.id }.coerceAtLeast(0), 0)
         player.prepare(); player.play()
     }
 
@@ -155,6 +231,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        deletionPort?.let { model.playbackDeletion.disconnect(it) }
+        deletionPort = null
+        deletionListener?.let { controller?.removeListener(it) }
+        deletionListener = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null; controller = null
         super.onDestroy()

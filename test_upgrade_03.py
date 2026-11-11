@@ -14,6 +14,14 @@ class UpgradeWiring(unittest.TestCase):
         code=(SRC/'AddAudioScreen.kt').read_text()
         self.assertIn('onClick = actions.retry',code)
 
+    def test_mode_control_stays_service_backed_with_compact_dropdown(self):
+        code=(SRC/'PlaybackControls.kt').read_text()
+        for needle in ['DropdownMenu(', 'UiIcons.ChevronDown', 'UiIcons.Loop', 'UiIcons.Fade',
+                       'target.isSessionCommandAvailable(command)', 'withTimeout(5000L)',
+                       'send(PlaybackCommands.setMode', 'send(PlaybackCommands.fade',
+                       'state.fadeSupported && state.playing && !state.busy && !pending']:
+            self.assertIn(needle, code)
+
     def test_playback_polling_is_foreground_scoped(self):
         code=(SRC/'PlaybackControls.kt').read_text()
         self.assertIn('repeatOnLifecycle(Lifecycle.State.STARTED)',code)

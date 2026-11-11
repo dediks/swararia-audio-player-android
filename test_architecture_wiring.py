@@ -16,6 +16,34 @@ class Boundaries(unittest.TestCase):
         self.assertIn('AppViewModelFactory(',code)
         self.assertIn('model.canStartOnlineOperation()',code)
         self.assertNotIn('IngestStatus.',code)
+    def test_explicit_deletion_owner_is_retained_and_bound_to_current_connection(self):
+        vm=(SRC/'AppViewModel.kt').read_text()
+        activity=(SRC/'MainActivity.kt').read_text()
+        self.assertIn('val playbackDeletion = PlaybackDeletion()', vm)
+        self.assertIn('playbackDeletion.delete(id) { library.delete(id) }', vm)
+        self.assertIn('model.playbackDeletion.connect(port)', activity)
+        self.assertIn('model.playbackDeletion.disconnect(it)', activity)
+        self.assertIn('model.playbackDeletion.reconcile()', activity)
+        self.assertIn('player.removeMediaItem(index)', activity)
+        delete=activity.split('private fun deleteTrack(',1)[1].split('private fun playTrack(',1)[0]
+        self.assertNotIn('controller?.', delete)
+        self.assertIn('model.delete(track.id, done)', delete)
+        play=activity.split('private fun playTrack(',1)[1].split('private fun withNotificationPermission(',1)[0]
+        self.assertIn('check(model.playbackDeletion.canPlay(track.id))', play)
+        self.assertIn('tracks.filter { model.playbackDeletion.canPlay(it.id) }', play)
+        self.assertNotIn('removeMediaItem',activity.split('LaunchedEffect(tracks, controller)',1)[1].split('SwarariaUi(',1)[0])
+
+    def test_preview_error_keeps_retry_connected_and_invalidates_url(self):
+        vm=(SRC/'AppViewModel.kt').read_text()
+        ui=(SRC/'SearchPreviewPlayer.kt').read_text()
+        root=(SRC/'SwarariaUi.kt').read_text()
+        self.assertIn('let(searchRepository::invalidatePreview)', vm)
+        self.assertIn('session.previewError()', vm)
+        self.assertIn('player.stop(); error()', ui)
+        self.assertIn('state.error?.let', ui)
+        self.assertIn('TextButton(onClick = onRetry, enabled = !state.loading)', ui)
+        self.assertIn('searchActions.previewSong', root)
+
     def test_platform_composition_is_separate_from_storage_logic(self):
         code=(SRC/'AppContainer.kt').read_text()
         self.assertIn('audio-library-spike.db',code)

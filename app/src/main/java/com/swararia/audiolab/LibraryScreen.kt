@@ -34,6 +34,8 @@ internal fun LibraryPage(
     onRename: (AudioTrack) -> Unit,
     onHistory: () -> Unit,
     onSettings: () -> Unit,
+    onDelete: (AudioTrack) -> Unit,
+    onImport: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var alphabetical by rememberSaveable { mutableStateOf(false) }
@@ -54,9 +56,9 @@ internal fun LibraryPage(
         item(key = "library-header") {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Pustaka", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold,
+                    Text("Library", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f))
-                    GlyphButton(UiIcons.Plus, "Tambah audio", onAdd, Modifier.size(52.dp), filled = true)
+                    BrandLogo(32.dp)
                     Box {
                         GlyphButton(UiIcons.More, "Menu Pustaka", { appMenu = true })
                         DropdownMenu(expanded = appMenu, onDismissRequest = { appMenu = false }) {
@@ -69,18 +71,18 @@ internal fun LibraryPage(
                         }
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BrandLogo(24.dp)
-                    Text("Swararia · Audio tersimpan di HP", style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Cari audio") },
+                OutlinedTextField(value = query, onValueChange = { query = it }, placeholder = { Text("Cari di Library") },
                     leadingIcon = { Icon(UiIcons.Search, null) },
                     trailingIcon = if (query.isNotEmpty()) ({ GlyphButton(UiIcons.Close, "Hapus pencarian pustaka", { query = "" }) }) else null,
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp), colors = searchFieldColors(),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FilterChip(selected = true, onClick = {}, label = { Text("Semua") })
+                    OutlinedButton(onClick = onImport, enabled = !ingest.busy && !search.busy && !organizerBusy) {
+                        Icon(UiIcons.Import, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Import")
+                    }
+                }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(if (query.isBlank()) "${tracks.size} audio" else "${visible.size} dari ${tracks.size} audio",
                         style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -127,7 +129,7 @@ internal fun LibraryPage(
         }
         items(visible, key = { it.id }) { track ->
             LibraryAudioRow(track, selected = track.id.toString() == currentId, connected = connected,
-                renameEnabled = !organizerBusy, onPlay = { onPlay(track) }, onRename = { onRename(track) })
+                renameEnabled = !organizerBusy, onPlay = { onPlay(track) }, onRename = { onRename(track) }, onDelete = { onDelete(track) })
         }
     }
 }
@@ -149,6 +151,7 @@ private fun LibraryAudioRow(
     renameEnabled: Boolean,
     onPlay: () -> Unit,
     onRename: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(18.dp),
@@ -159,9 +162,9 @@ private fun LibraryAudioRow(
                 Row(Modifier.weight(1f).clickable(enabled = connected, onClickLabel = "Putar ${UiPresentation.title(track.displayName)}",
                     onClick = onPlay).padding(start = 8.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    TrackArtwork(track.id, Modifier.size(56.dp).clip(RoundedCornerShape(7.dp)))
+                    TrackArtwork(track.artworkKey, Modifier.size(48.dp).clip(RoundedCornerShape(7.dp)))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(UiPresentation.title(track.displayName), style = MaterialTheme.typography.titleMedium,
+                        Text(UiPresentation.title(track.displayName), style = MaterialTheme.typography.titleSmall,
                             color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(UiPresentation.metadata(track.displayName, track.durationMs), style = MaterialTheme.typography.bodyMedium,
@@ -171,8 +174,10 @@ private fun LibraryAudioRow(
                 Box {
                     GlyphButton(UiIcons.More, "Menu audio ${UiPresentation.title(track.displayName)}", { menu = true })
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Ubah nama") }, leadingIcon = { Icon(UiIcons.Rename, null) },
+                        DropdownMenuItem(text = { Text("Rename") }, leadingIcon = { Icon(UiIcons.Rename, null) },
                             enabled = renameEnabled, onClick = { menu = false; onRename() })
+                        DropdownMenuItem(text = { Text("Delete", color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(UiIcons.Delete, null) },
+                            enabled = renameEnabled, onClick = { menu = false; onDelete() })
                     }
                 }
             }

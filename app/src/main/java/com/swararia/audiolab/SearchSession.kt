@@ -19,6 +19,7 @@ class SearchSession(
     private val searchState = MutableStateFlow(YoutubeSearchState())
     val search = searchState.asStateFlow()
     private var searchJob: Job? = null
+    private var playlistParent: YoutubeSearchState? = null
     private val previewGeneration = SearchGeneration()
     private val previewState = MutableStateFlow(PreviewState())
     val preview = previewState.asStateFlow()
@@ -39,14 +40,36 @@ class SearchSession(
             append = current.loadedThrough > 0, playlistId = current.playlistId, playlistTitle = current.playlistTitle)
     }
     fun openPlaylist(hit: SearchHit) {
-        if (hit.kind != SearchKind.PLAYLISTS) return
+        if (hit.kind != SearchKind.PLAYLISTS || !canStartOnlineOperation()) return
         val current = searchState.value
+        if (current.playlistId == null) playlistParent = current
         startSearch(current.query, current.provider, SearchKind.SONGS, current.sort,
             playlistId = hit.videoId, playlistTitle = hit.title)
     }
     fun leavePlaylist() {
         val current = searchState.value
-        startSearch(current.query, current.provider, SearchKind.PLAYLISTS, SearchSort.RELEVANCE)
+        val parent = playlistParent
+        if (parent == null) {
+            startSearch(current.query, current.provider, SearchKind.PLAYLISTS, SearchSort.RELEVANCE)
+            return
+        }
+        val ticket = searchGeneration.next()
+        val pendingSearch = searchJob
+        val pendingPreview = previewJob
+        pendingSearch?.cancel()
+        cancelPreview()
+        fun restore() {
+            if (searchGeneration.isCurrent(ticket)) {
+                searchJob = null
+                playlistParent = null
+                searchState.value = parent
+            }
+        }
+        if (pendingSearch?.isCompleted != false && pendingPreview?.isCompleted != false) restore()
+        else {
+            searchState.value = current.copy(busy = true, loadingMore = false, error = null)
+            scope.launch { pendingSearch?.join(); pendingPreview?.join(); restore() }
+        }
     }
     fun sortSearch(sort: SearchSort) { searchState.value = searchState.value.copy(sort = sort) }
 
@@ -60,6 +83,7 @@ class SearchSession(
         if (playlistId != null && runCatching { YoutubeSearchRules.validatedPlaylistId(playlistId) }.isFailure) {
             reportMessage("Playlist tidak valid."); return
         }
+        if (playlistId == null && !append) playlistParent = null
         cancelPreview()
         val previous = searchState.value
         val offset = if (append) previous.loadedThrough else 0
@@ -113,12 +137,13 @@ class SearchSession(
         if (hit.kind != SearchKind.SONGS || !canStartOnlineOperation()) return
         val previous = previewJob
         val ticket = previewGeneration.next()
-        previewState.value = PreviewState(loading = true, hit = hit)
+        val started = System.nanoTime()
+        previewState.value = PreviewState(loading = true, hit = hit, requestStartedNanos = started)
         previewJob = scope.launch {
             previous?.cancelAndJoin()
             try {
                 val media = searchRepository.preview(hit)
-                if (previewGeneration.isCurrent(ticket)) previewState.value = PreviewState(hit = hit, media = media)
+                if (previewGeneration.isCurrent(ticket)) previewState.value = PreviewState(hit = hit, media = media, requestStartedNanos = started)
             } catch (cancel: CancellationException) { throw cancel }
               catch (failure: Exception) {
                 if (previewGeneration.isCurrent(ticket)) previewState.value = PreviewState(hit = hit,
@@ -134,7 +159,7 @@ class SearchSession(
         val job = previewJob
         job?.cancel()
         if (job != null && !job.isCompleted) {
-            previewState.value = PreviewState(loading = true, hit = previewState.value.hit)
+            previewState.value = PreviewState(loading = true, hit = previewState.value.hit, canceling = true)
             scope.launch {
                 job.join()
                 if (previewGeneration.isCurrent(ticket)) { previewJob = null; previewState.value = PreviewState() }
@@ -142,8 +167,21 @@ class SearchSession(
         } else { previewJob = null; previewState.value = PreviewState() }
     }
     fun previewError() {
-        cancelPreview()
-        reportMessage("Preview tidak dapat diputar. Sumber mungkin membatasi akses. Coba lagi atau pilih lagu lain.")
+        val hit = previewState.value.hit ?: return
+        val ticket = previewGeneration.next()
+        val job = previewJob
+        val failure = "Preview tidak dapat diputar. Sumber mungkin membatasi akses. Coba lagi atau pilih lagu lain."
+        job?.cancel()
+        val cleaning = job != null && !job.isCompleted
+        previewState.value = PreviewState(hit = hit, error = failure, loading = cleaning, canceling = cleaning)
+        if (cleaning) scope.launch {
+            job?.join()
+            if (previewGeneration.isCurrent(ticket)) {
+                previewJob = null
+                previewState.value = PreviewState(hit = hit, error = failure)
+            }
+        } else previewJob = null
+        reportMessage(failure)
     }
 
     fun close() {

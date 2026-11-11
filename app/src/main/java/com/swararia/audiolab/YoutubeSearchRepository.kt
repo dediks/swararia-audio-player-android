@@ -1,6 +1,7 @@
 package com.swararia.audiolab
 
 import android.content.Context
+import android.net.ConnectivityManager
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.*
@@ -15,6 +16,11 @@ import javax.net.ssl.HttpsURLConnection
 /** Metadata only. No FFmpeg initialization or library/MediaStore writes. */
 class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Boolean) : AudioSearchRepository {
     private val appContext = context.applicationContext
+    private val previewResolver = PreviewResolver(
+        extract = { id -> executeMetadata(OnlinePreviewRules.arguments(id), "preview", 30_000L) },
+        networkKey = { appContext.getSystemService(ConnectivityManager::class.java)?.activeNetwork?.networkHandle },
+        timing = { cached, ms -> android.util.Log.d("SwarariaTiming", "preview_resolve_ms=$ms cache_hit=$cached") },
+    )
     private val channelCache = object : LinkedHashMap<String, String>(128, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 128
     }
@@ -62,10 +68,9 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
 
     override suspend fun preview(hit: SearchHit): PreviewMedia {
         require(hit.kind == SearchKind.SONGS) { "Buka playlist lalu pilih satu lagu untuk preview." }
-        val output = executeMetadata(OnlinePreviewRules.arguments(hit.videoId), "preview", 30_000L)
-        currentCoroutineContext().ensureActive()
-        return OnlinePreviewRules.parse(output, hit.videoId, hit.title)
+        return previewResolver.resolve(hit)
     }
+    override fun invalidatePreview(videoId: String) = previewResolver.invalidate(videoId)
 
     private suspend fun executeMetadata(args: List<String>, prefix: String, timeout: Long): String {
         check(!ingestBusy()) { "Tunggu proses audio selesai terlebih dahulu." }

@@ -11,9 +11,11 @@ class AppContainer(context: Context) {
     private val appContext = context.applicationContext
     val ingestState = IngestStatus.state // Adapter to the existing foreground service; process-local, not a durable queue.
     val database: AudioDatabase by lazy {
-        Room.databaseBuilder(appContext, AudioDatabase::class.java, "audio-library-spike.db").build()
+        Room.databaseBuilder(appContext, AudioDatabase::class.java, "audio-library-spike.db")
+            .addMigrations(AudioMigrations.MIGRATION_1_2).build()
     }
     val library: MediaLibrary by lazy { MediaLibrary(appContext, database) }
+    val downloadQueue: DownloadQueueRepository by lazy { RoomDownloadQueueRepository(database) }
     val searchRepository: AudioSearchRepository by lazy {
         YoutubeSearchRepository(appContext, { ingestState.value.busy })
     }
@@ -30,6 +32,6 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass == AppViewModel::class.java) { "Unsupported ViewModel: ${modelClass.name}" }
         @Suppress("UNCHECKED_CAST")
-        return AppViewModel(container.library, container.searchRepository, container.ingestState) as T
+        return AppViewModel(container.library, container.searchRepository, container.ingestState, container.downloadQueue) as T
     }
 }

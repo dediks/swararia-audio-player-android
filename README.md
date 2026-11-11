@@ -4,7 +4,7 @@ Aplikasi Android native untuk menyiapkan, mengelola, dan memutar audio lokal. Ta
 
 ## Status pengembangan
 
-Baseline source adalah **0.2.0-spike**. Branch pengembangan saat ini menyiapkan **0.3.0-spike**, tetap build debug/pengujian, bukan rilis produksi.
+Baseline source publik adalah **0.2.0-spike**. Branch lokal `feature/ux-library-downloads-0.4` menyiapkan **0.4.0-spike**, tetap build debug/pengujian, bukan rilis produksi. Tidak ada push otomatis.
 
 - Android 10+ (minSdk 29), targetSdk 36; Kotlin/Compose, Media3, Room dan MediaStore/SAF.
 - Pustaka: pencarian lokal, urutan terbaru/A–Z, rename file dan riwayat undo.
@@ -14,6 +14,8 @@ Baseline source adalah **0.2.0-spike**. Branch pengembangan saat ini menyiapkan 
 - Tidak memerlukan server, akun, Python atau Termux di HP untuk fungsi yang sudah tersedia. Pencarian/unduhan online memerlukan internet.
 
 0.3.0 menambahkan default YouTube Music, filter lagu/playlist, urutan hasil termuat, metadata kanal/durasi, pemuatan hasil tambahan, preview online hingga 30 detik, mode Loop/Continue/Once dan Fade 3s. Prioritas kanal memakai sinyal terverifikasi/indikasi artis, bukan bukti label asli atau hak penggunaan. Playlist dibuka untuk memilih lagu; bukan unduh massal.
+
+0.4.0 memperbarui UI Search/Playlist/Library dan satu playback surface, Preview hingga dua menit, artwork asli yang tersedia dengan cache offline, multiselect lagu termuat, queue download berurutan/persisten, Cancel batch/Retry failed, serta Delete salinan terkelola. Room bermigrasi 1→2 tanpa reset tracks/rename history. Detail instalasi, acceptance HP, bukti verifikasi dan batas rollback: `UPDATE-0.4.0.md`. Build/host tests bukan bukti runtime di HP.
 
 Branch `refactor/architecture-foundation` merapikan dependency/state dan memisahkan UI tanpa menerapkan mockup baru. Pada repository ini, build memakai toolchain/cache yang sudah ada: 33 unit test, kompilasi, kedua APK ABI, kontrak APK dan signature lulus. Lint: 15 warning, tidak ada Error/Fatal. Batas dan alur pengembangan dijelaskan di `ARCHITECTURE.md` serta `CONTRIBUTING.md`. Review versi 0.3.0 lulus sesudah perbaikan temuan awal; review refactor juga lulus dan dicatat terpisah pada `verification/architecture-review.json`.
 

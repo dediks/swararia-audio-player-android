@@ -1,6 +1,9 @@
 package com.swararia.audiolab
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -12,6 +15,90 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun DeleteAudioDialog(track: AudioTrack, busy: Boolean, onDismiss: () -> Unit,
+    onDelete: (AudioTrack, () -> Unit) -> Unit) {
+    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            Text("Delete audio?", style = MaterialTheme.typography.headlineMedium)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TrackArtwork(track.artworkKey, Modifier.size(52.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(UiPresentation.title(track.displayName), style = MaterialTheme.typography.titleMedium)
+                    Text(track.displayName, style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Text("File salinan yang dikelola aplikasi di HP akan dihapus permanen. Sumber import asli tetap aman.")
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Cancel") }
+                Button(onClick = { if (!busy) onDelete(track, onDismiss) }, enabled = !busy,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Delete") }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun DownloadLinkDialog(busy: Boolean, onDismiss: () -> Unit, onDownload: (String) -> Unit) {
+    var url by remember { mutableStateOf("") }
+    var authorized by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val validUrl = remember(url) { runCatching { DownloadQueueRules.validatedPublicSourceUrl(url) }.getOrNull() }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Download link") },
+        text = {
+            Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(value = url, onValueChange = { url = it; authorized = false }, enabled = !busy,
+                    label = { Text("YouTube / YT Music link") }, modifier = Modifier.fillMaxWidth(), maxLines = 3,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    trailingIcon = { GlyphButton(UiIcons.Paste, "Paste link", {
+                        clipboard.getText()?.text?.let { url = it.trim(); authorized = false }
+                    }, enabled = !busy) })
+                if (url.isNotBlank() && validUrl == null) Text("Gunakan link video publik YouTube / YT Music, bukan Playlist atau link bertoken.", color = MaterialTheme.colorScheme.error)
+                RightsConsent(authorized, { authorized = it }, !busy)
+            }
+        }, confirmButton = { TextButton(onClick = {
+            if (!busy && authorized && validUrl != null) { authorized = false; onDownload(validUrl) }
+        }, enabled = !busy && authorized && validUrl != null) { Text("Download") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+@Composable
+private fun RightsConsent(checked: Boolean, change: (Boolean) -> Unit, enabled: Boolean) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = checked, onCheckedChange = change, enabled = enabled)
+        Text("Saya memiliki izin untuk download audio ini.", style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f))
+    }
+}
+
+/** Fresh composition for every request: rights are never remembered across downloads. */
+@Composable
+internal fun DownloadConsentDialog(hits: List<SearchHit>, busy: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    var authorized by remember { mutableStateOf(false) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Download (${hits.size})?") },
+        text = {
+            Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                hits.forEach { hit ->
+                    Column {
+                        Text(hit.title, style = MaterialTheme.typography.titleSmall)
+                        Text(hit.channel.orEmpty(), style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                RightsConsent(authorized, { authorized = it }, !busy)
+            }
+        }, confirmButton = {
+            TextButton(onClick = { if (authorized && !busy) { authorized = false; onConfirm() } }, enabled = authorized && !busy) { Text("Download") }
+        }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
 
 @Composable
 internal fun RenameAudioDialog(

@@ -10,7 +10,17 @@ Tidak ada perangkat Android atau emulator pada lingkungan yang disetujui. Lolos 
 - Izin notifikasi membantu menampilkan unduhan dan pemutar. Tidak ada permintaan izin mengelola semua file.
 - Gunakan sumber audio yang dimiliki atau secara jelas mengizinkan pengunduhan. Tidak ada cookies/login, pembobolan DRM, atau bypass paywall.
 
-## Pembaruan 0.3.0 — matriks uji berikutnya
+## Pembaruan 0.4.0 — kandidat saat ini, belum diuji di HP
+- Gunakan acceptance checklist lengkap di `UPDATE-0.4.0.md`. Bagian 0.3/0.2 di bawah adalah riwayat, bukan batas fitur 0.4.
+- Update tanpa uninstall/clear data; Room1→2 harus menjaga koleksi dan riwayat rename. Downgrade APK bukan rollback database.
+- Preview kini maksimal dua menit; satu playback surface, seek aktual, error/Retry, cache RAM singkat dan stop saat background. Hasil tes host bukan bukti audio/latensi di HP.
+- Batch hanya lagu yang dipilih dari hasil termuat, dengan consent baru. Coba cancel saat transfer dan saat finalisasi, retry failed, serta membuka ulang setelah proses dihentikan. Salinan yang sudah selesai tidak boleh diunduh lagi akibat recovery.
+- Uji penyimpanan pending→visible di MediaStore dan recovery journal, termasuk ruang penuh/error provider. Pemeriksaan memakai ukuran descriptor sebenarnya, bukan ukuran metadata yang bisa terlambat.
+- Putar layar saat Delete masih berjalan, lalu cek player queue dan Library. Sumber import asli tetap ada. File salinan yang benar-benar dihapus tidak memiliki Undo.
+- Download link mendukung video publik YouTube/YT Music, bukan direct stream, Playlist atau link bertoken. Jangan kirim signed URL/header untuk diagnosis.
+- Pada 0.4, Cancel batch tetap dapat diminta ketika item saat ini berada di fase terlindungi; item itu bisa selesai dahulu, sedangkan item menunggu dibatalkan. Tidak ada transfer pause/resume otomatis.
+
+## Pembaruan 0.3.0 — matriks historis
 - 0.2.0 telah dilaporkan pengguna bekerja pada Samsung M15 Android 16. Itu bukan bukti fitur 0.3.0 sudah diuji. Pasang 0.3.0 sebagai update; **jangan uninstall**. Periksa koleksi dan riwayat tetap ada.
 - Tambah audio membuka pencarian dengan YouTube Music. Coba Lagu dan Playlist pada kedua sumber, lalu buka playlist dan pilih satu lagu. Tidak ada unduh massal otomatis.
 - Semua hasil lagu yang tampil harus memiliki kanal nyata dan durasi; playlist menampilkan pembuat serta jumlah lagu bila tersedia. Hasil tidak lengkap tidak dikarang dan diberi catatan. Artis bukan pengganti nama kanal.

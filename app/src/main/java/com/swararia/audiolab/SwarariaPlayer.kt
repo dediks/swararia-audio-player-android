@@ -153,7 +153,7 @@ internal fun MiniPlayer(current: AudioTrack?, playback: SessionPlayback, control
         Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
             Row(Modifier.fillMaxWidth().heightIn(min = 60.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                TrackArtwork(current?.id ?: playback.mediaId?.toLongOrNull(), Modifier.size(48.dp).clip(RoundedCornerShape(7.dp)))
+                TrackArtwork(current?.artworkKey, Modifier.size(48.dp).clip(RoundedCornerShape(7.dp)))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(playbackTitle(current, playback), style = MaterialTheme.typography.titleSmall,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -196,19 +196,8 @@ internal fun FocusedPlayer(
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 GlyphButton(UiIcons.Back, "Kembali", onBack)
-                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(when {
-                        playback.buffering -> "MENYIAPKAN AUDIO"
-                        playback.playing -> "SEDANG DIPUTAR"
-                        playback.mediaId != null -> "PEMUTAR AUDIO"
-                        else -> "PEMUTAR"
-                    }, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        BrandLogo(20.dp); Text("Swararia", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
+                Text("Now playing", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                BrandLogo(32.dp)
                 Box {
                     GlyphButton(UiIcons.More, "Menu pemutar", { menu = true })
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -219,12 +208,13 @@ internal fun FocusedPlayer(
                     }
                 }
             }
-            TrackArtwork(current?.id ?: playback.mediaId?.toLongOrNull(),
+            Text("AUDIO LOKAL", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            TrackArtwork(current?.artworkKey,
                 Modifier.size(coverSize).clip(RoundedCornerShape(24.dp)))
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(playbackTitle(current, playback), style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.SemiBold, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                Text(current?.let { "${UiPresentation.metadata(it.displayName, playback.durationMs ?: it.durationMs)} · Audio lokal" }
+                Text(current?.let { "${it.displayName.substringAfterLast('.', "Audio").uppercase()} · Disimpan di HP" }
                     ?: playbackStatus(playback), style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -277,7 +267,7 @@ internal fun FocusedPlayer(
                 Row(Modifier.heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Icon(UiIcons.Queue, null, tint = MaterialTheme.colorScheme.primary)
-                    Text("Antrean", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    Text("Queue", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     Text("${playback.queue.size} audio", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp))
                 }
@@ -291,7 +281,7 @@ internal fun FocusedPlayer(
 @Composable
 private fun QueueDialog(tracks: List<AudioTrack>, playback: SessionPlayback, controller: MediaController?, onDismiss: () -> Unit) {
     val byId = remember(tracks) { tracks.associateBy { it.id.toString() } }
-    AlertDialog(onDismissRequest = onDismiss, icon = { Icon(UiIcons.Queue, null) }, title = { Text("Antrean · ${playback.queue.size} audio") },
+    AlertDialog(onDismissRequest = onDismiss, icon = { Icon(UiIcons.Queue, null) }, title = { Text("Queue · ${playback.queue.size} audio") },
         text = {
             if (playback.queue.isEmpty()) Text("Antrean sesi pemutar belum tersedia. Pilih audio dari Pustaka.")
             else LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

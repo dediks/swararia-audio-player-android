@@ -15,7 +15,7 @@ class SearchUpgradeTest {
         }
         assertThrows(IllegalArgumentException::class.java) { OnlinePreviewRules.parse(root,"aqz-KE-bpKQ","Other") }
         assertTrue(OnlinePreviewRules.arguments("BaW_jenozKc").contains("--skip-download"))
-        assertEquals(30_000L,OnlinePreviewRules.PREVIEW_MS)
+        assertEquals(120_000L,OnlinePreviewRules.PREVIEW_MS)
     }
 
     @Test fun artistIsNotInventedAsChannelAndPlaylistLinksAreCanonical() {
