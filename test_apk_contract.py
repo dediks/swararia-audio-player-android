@@ -35,10 +35,10 @@ class AndroidPackageContract(unittest.TestCase):
         with zipfile.ZipFile(APK) as z:
             dex=b''.join(z.read(n) for n in z.namelist() if n.startswith('classes') and n.endswith('.dex'))
             self.assertIn(b'Lcom/swararia/audiolab/PlaybackService;',dex)
-    def test_organizer_screen_and_persistent_rename_history_are_in_the_apk(self):
+    def test_live_rename_ui_and_persistent_rename_history_are_in_the_apk(self):
         with zipfile.ZipFile(APK) as z:
             dex=b''.join(z.read(n) for n in z.namelist() if n.startswith('classes') and n.endswith('.dex'))
-        self.assertTrue(b'Lcom/swararia/audiolab/OrganizerScreenKt;' in dex, 'Organizer screen is not packaged yet')
+        self.assertIn(b'Lcom/swararia/audiolab/SwarariaDialogsKt;', dex, 'Live rename UI facade is missing')
         self.assertIn(b'Lcom/swararia/audiolab/RenameRecord;',dex)
     def test_update_contains_native_search_branding_and_no_design_annotations(self):
         aapt=ROOT/'.toolchain/android-sdk/build-tools/36.0.0/aapt2'

@@ -47,12 +47,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        model = ViewModelProvider(this)[AppViewModel::class.java]
+        model = ViewModelProvider(this, AppViewModelFactory((application as SwarariaApp).container))[AppViewModel::class.java]
         connectPlayer()
         setContent {
             AudioTheme {
                 val tracks by model.tracks.collectAsStateWithLifecycle()
-                val ingest by IngestStatus.state.collectAsStateWithLifecycle()
+                val ingest by model.ingest.collectAsStateWithLifecycle()
                 val search by model.search.collectAsStateWithLifecycle()
                 val preview by model.preview.collectAsStateWithLifecycle()
                 val lastRename by model.lastRename.collectAsStateWithLifecycle()
@@ -114,7 +114,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun whenOnlineIdle(action: () -> Unit) {
-        if (!OnlineWorkRules.canStart(model.search.value.busy, IngestStatus.state.value.busy, model.preview.value.loading)) {
+        if (!model.canStartOnlineOperation()) {
             model.message("Tunggu pencarian atau proses audio selesai terlebih dahulu.")
             return
         }

@@ -1,6 +1,5 @@
 package com.swararia.audiolab
 
-import android.app.Application
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
@@ -20,57 +19,12 @@ import java.io.File
 import java.io.InputStream
 import java.util.Locale
 
-@Entity(tableName = "tracks", indices = [Index(value = ["uri"], unique = true)])
-data class AudioTrack(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val uri: String,
-    val displayName: String,
-    val sizeBytes: Long,
-    val durationMs: Long?,
-    val addedAt: Long = System.currentTimeMillis()
-)
-
-@Entity(tableName = "rename_history")
-data class RenameRecord(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val trackId: Long,
-    val fromName: String,
-    val toName: String,
-    val changedAt: Long = System.currentTimeMillis()
-)
-
-@Dao
-interface TrackDao {
-    @Query("SELECT * FROM tracks ORDER BY addedAt DESC, id DESC")
-    fun observeAll(): Flow<List<AudioTrack>>
-    @Insert suspend fun insert(track: AudioTrack): Long
-    @Query("SELECT * FROM tracks WHERE id = :id") suspend fun find(id: Long): AudioTrack?
-    @Update suspend fun updateTrack(track: AudioTrack)
-    @Query("SELECT * FROM rename_history ORDER BY id DESC LIMIT 1")
-    fun observeLastRename(): Flow<RenameRecord?>
-    @Query("SELECT * FROM rename_history ORDER BY id DESC LIMIT 1") suspend fun lastRename(): RenameRecord?
-    @Insert suspend fun insertRename(record: RenameRecord): Long
-    @Query("DELETE FROM rename_history WHERE id = :id") suspend fun removeRename(id: Long)
-}
-
-@Database(entities = [AudioTrack::class, RenameRecord::class], version = 1, exportSchema = true)
-abstract class AudioDatabase : RoomDatabase() {
-    abstract fun tracks(): TrackDao
-}
-
-class SwarariaApp : Application() {
-    val database: AudioDatabase by lazy {
-        Room.databaseBuilder(this, AudioDatabase::class.java, "audio-library-spike.db").build()
-    }
-    val library: MediaLibrary by lazy { MediaLibrary(this, database) }
-}
-
 /** Only owns copies created by this APK; no broad storage permission is used. */
-class MediaLibrary(private val context: Context, private val database: AudioDatabase) {
-    val tracks: Flow<List<AudioTrack>> = database.tracks().observeAll()
-    val lastRename: Flow<RenameRecord?> = database.tracks().observeLastRename()
+class MediaLibrary(private val context: Context, private val database: AudioDatabase) : AudioLibraryRepository {
+    override val tracks: Flow<List<AudioTrack>> = database.tracks().observeAll()
+    override val lastRename: Flow<RenameRecord?> = database.tracks().observeLastRename()
 
-    suspend fun rename(trackId: Long, requestedTitle: String): String = withContext(Dispatchers.IO) {
+    override suspend fun rename(trackId: Long, requestedTitle: String): String = withContext(Dispatchers.IO) {
         val track = database.tracks().find(trackId) ?: error("Audio tidak ada di library.")
         val uri = Uri.parse(track.uri)
         val oldName = actualName(uri)
@@ -89,7 +43,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         changed
     }
 
-    suspend fun undoLastRename(): String = withContext(Dispatchers.IO) {
+    override suspend fun undoLastRename(): String = withContext(Dispatchers.IO) {
         val record = database.tracks().lastRename() ?: error("Belum ada perubahan nama yang dapat dibatalkan.")
         val track = database.tracks().find(record.trackId) ?: error("Audio sudah tidak ada di library.")
         val uri = Uri.parse(track.uri)

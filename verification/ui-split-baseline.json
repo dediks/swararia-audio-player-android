@@ -1,0 +1,39 @@
+{
+  "baseline_commit": "e96b931e2214006dfb956a004f662b895dc77340",
+  "normalization": "Top-level declaration text including annotations and signature; strip surrounding whitespace and leading declaration visibility only. Package/imports excluded. Bodies otherwise byte-preserved (UTF-8, LF).",
+  "declaration_sha256": {
+    "SwarariaUi": "727f45567c58ba1be003aedc2515fa7960735612144c729f12d4508c5a0fa13d",
+    "LibraryPage": "de7d1d8dd4b8e4b7e9da1d8db3729964e493b2c93833768395dcbf3b58b3b56e",
+    "searchFieldColors": "d3ae8a34c996216124593cb2f4158b72f8c3fabc72664ec73296df3ab413e07e",
+    "LibraryAudioRow": "0164738454d002a59a26c6443c90ad33a2037d9ea7641071a223ba8a7ae2fe26",
+    "RenameAudioDialog": "dd25b93e7b936775ecf95c4624f2019fcdbaf7a5803516d1e564aac891f36a97",
+    "RenameHistoryDialog": "49dad13f6e570f036041dda72c076ef43e5dff6d3243f79afead23f7d4e3bef0",
+    "DiagnosticsDialog": "4274d2978c35308be7ff18ff9d5062bfab39bc7bf0f5ac5c54ff18cda591de2b",
+    "EngineSettingsDialog": "f3da59e4b6a4556344fba91e602f119e5ba9d9cbaaaa8ab299d82c763c0a56f3",
+    "SessionQueueItem": "b2f383319b8d8cad50ed57d023729717b1ce71e20d3fadec8fa99248eef7f98e",
+    "SessionPlayback": "2d633556accbd527e9bb04904418da236cbf21ef1ffd127359b25b5420b48ea3",
+    "readSwarariaPlayback": "6f64782f25be8c262e1db43de8441928e0b417448927b6e07fadd7d2075a29da",
+    "rememberSwarariaPlayback": "75368ccdb4fcf163b4da68cb3c2edfbb7bd0907ef0185e1cd69e63cbb011b396",
+    "connectedCommand": "d9f28935dd611b7c2986f2450936c1bb59d7de75dd2ad30f7971c1c897348dde",
+    "playbackRequestsPause": "4466d604af084229185c2d9bd594f28fd80b5f64a0ea42653ad1f98c79620ef9",
+    "toggleSwarariaPlayback": "7e5ad0a901d8f8452ecdc09ab3690db0e3cbb0aec0cb47e300f8d475903b01ae",
+    "playbackTitle": "7dfdc921771a1ee6aae4c2d3f13addc31c34517f5c59ecf2ec5b2391fec1898d",
+    "playbackStatus": "f3e0f948a6310e37e20627944b3982a3994cb21894114d14c9d3c5c2afa0bf7f",
+    "MiniPlayer": "aba236724bb98e3a7400099b93b61c75513575659a3debb7e6785263e30573d0",
+    "FocusedPlayer": "299321acf7b059f57bceed9bf3532782e78e6171cb1135ae3a8f86fb1fc156fc",
+    "QueueDialog": "2f0364acf5efe05eb4d0783681c7fdf2691588991d8cd9b04a4a2574d0334a87",
+    "navigationColors": "c73c312472275e0ad554b36afd9d0396edfa86f1b2577001c76ff736204aa187",
+    "BrandLogo": "153b1946e00fdf0ce4702dd00a8145f934be298e651aefdfd4c6056e700a355f",
+    "TrackArtwork": "e00dc7574da065417fad7c8069bd1a261fd51c1f7c394565b9962fecd7feebf0",
+    "GlyphButton": "0d340758521ec48425a43bc2d8ce8ba644fbf1618ddeddbbdcc390f27c991f14",
+    "EmptyMessage": "237eabd46f367fa75c3b3cacdd6ee6b9ab6dedaeec0e939b9e92508b8e71d4cb",
+    "SwarariaFont": "183a34f2126d090923d9970797cc64d955a16a59be628bef4ac672857303b339",
+    "SwarariaTypography": "5599ef26328e2b048cdbbc7a13bb46e8bfacead14c6f832fd15f3a59c98c4a69",
+    "AudioTheme": "2c943ad87b108de65d42fa155090b814f7c50f3b89a4efcd8e8b90fc40701c27"
+  },
+  "byte_identical_files": {
+    "AddAudioScreen.kt": "b2289e621fcf7a5831ca23022f1996e3610cd1f4155429798269c25ca763135c",
+    "PlaybackControls.kt": "534b32f5aedd36bb5da47f1caa4e6206d12e281e216d13df82f6c5cb27ad8d8d",
+    "SearchPreviewPlayer.kt": "4373f2f4a23c96713b25e24b425e202de8dc892397da63504f9c40530ea5c883"
+  }
+}

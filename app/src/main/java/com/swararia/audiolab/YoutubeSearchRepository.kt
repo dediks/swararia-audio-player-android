@@ -12,10 +12,8 @@ import java.net.URL
 import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
 
-data class SearchPage(val hits: List<SearchHit>, val rawCount: Int, val incompleteCount: Int)
-
 /** Metadata only. No FFmpeg initialization or library/MediaStore writes. */
-class YoutubeSearchRepository(context: Context) {
+class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Boolean) : AudioSearchRepository {
     private val appContext = context.applicationContext
     private val channelCache = object : LinkedHashMap<String, String>(128, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 128
@@ -24,8 +22,8 @@ class YoutubeSearchRepository(context: Context) {
     suspend fun search(query: String, provider: SearchProvider): List<SearchHit> =
         searchPage(query, provider, SearchKind.SONGS).hits
 
-    suspend fun searchPage(query: String, provider: SearchProvider, kind: SearchKind,
-        offset: Int = 0, playlistId: String? = null): SearchPage = withTimeoutOrNull(60_000L) {
+    override suspend fun searchPage(query: String, provider: SearchProvider, kind: SearchKind,
+        offset: Int, playlistId: String?): SearchPage = withTimeoutOrNull(60_000L) {
         val base = YoutubeSearchRules.arguments(query, provider, kind, offset, playlistId)
         val plugin = withContext(Dispatchers.IO) { pluginDirectory() }
         val args = base.dropLast(1) + listOf("--no-plugin-dirs", "--plugin-dirs", plugin.absolutePath, base.last())
@@ -62,7 +60,7 @@ class YoutubeSearchRepository(context: Context) {
         SearchPage(complete, YoutubeSearchJson.entryCount(output), enriched.size - complete.size)
     } ?: throw IOException("Pencarian terlalu lama. Coba lagi saat koneksi lebih stabil.")
 
-    suspend fun preview(hit: SearchHit): PreviewMedia {
+    override suspend fun preview(hit: SearchHit): PreviewMedia {
         require(hit.kind == SearchKind.SONGS) { "Buka playlist lalu pilih satu lagu untuk preview." }
         val output = executeMetadata(OnlinePreviewRules.arguments(hit.videoId), "preview", 30_000L)
         currentCoroutineContext().ensureActive()
@@ -70,14 +68,14 @@ class YoutubeSearchRepository(context: Context) {
     }
 
     private suspend fun executeMetadata(args: List<String>, prefix: String, timeout: Long): String {
-        check(!IngestStatus.state.value.busy) { "Tunggu proses audio selesai terlebih dahulu." }
+        check(!ingestBusy()) { "Tunggu proses audio selesai terlebih dahulu." }
         val processId = "$prefix-${UUID.randomUUID()}"
         try {
             return withTimeoutOrNull(timeout) {
                 runInterruptible(Dispatchers.IO) {
                     YoutubeDL.init(appContext)
                     if (Thread.currentThread().isInterrupted) throw InterruptedException()
-                    check(!IngestStatus.state.value.busy) { "Tunggu proses audio selesai terlebih dahulu." }
+                    check(!ingestBusy()) { "Tunggu proses audio selesai terlebih dahulu." }
                     val request = YoutubeDLRequest(args.last()).addCommands(args.dropLast(1))
                     YoutubeDL.execute(request, processId).out
                 }

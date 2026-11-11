@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parent
 SRC=ROOT/'app/src/main/java/com/swararia/audiolab'
 class UpgradeWiring(unittest.TestCase):
     def test_retry_keeps_playlist_scope_and_page(self):
-        vm=(SRC/'AppViewModel.kt').read_text()
+        vm=(SRC/'SearchSession.kt').read_text()
         self.assertIn('fun retrySearch()',vm)
         retry=vm.split('fun retrySearch()',1)[1].split('fun openPlaylist',1)[0]
         for value in ['current.query, current.provider, current.kind, current.sort', 'append = current.loadedThrough > 0',
@@ -29,7 +29,7 @@ class UpgradeWiring(unittest.TestCase):
         self.assertIn('controller?.removeListener(mainListener)',code)
 
     def test_playback_controls_are_visible_in_focused_player(self):
-        root=(SRC/'SwarariaUi.kt').read_text().split('private fun FocusedPlayer(',1)[1]
+        root=(SRC/'SwarariaPlayer.kt').read_text().split('internal fun FocusedPlayer(',1)[1]
         self.assertIn('PlaybackModeBar(controller',root)
 
     def test_new_search_and_preview_are_connected_to_activity(self):
@@ -37,7 +37,7 @@ class UpgradeWiring(unittest.TestCase):
         root=(SRC/'SwarariaUi.kt').read_text()
         self.assertIn('searchActions = SearchActions(',activity)
         self.assertIn('model.preview.collectAsStateWithLifecycle()',activity)
-        self.assertIn('model.preview.value.loading',activity)
+        self.assertIn('model.canStartOnlineOperation()',activity)
         self.assertIn('AddAudioScreen(',root)
         player=SRC/'SearchPreviewPlayer.kt'
         self.assertTrue(player.is_file(),'Lifecycle-scoped online preview player is missing')

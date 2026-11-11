@@ -15,9 +15,9 @@ Baseline source adalah **0.2.0-spike**. Branch pengembangan saat ini menyiapkan 
 
 0.3.0 menambahkan default YouTube Music, filter lagu/playlist, urutan hasil termuat, metadata kanal/durasi, pemuatan hasil tambahan, preview online hingga 30 detik, mode Loop/Continue/Once dan Fade 3s. Prioritas kanal memakai sinyal terverifikasi/indikasi artis, bukan bukti label asli atau hak penggunaan. Playlist dibuka untuk memilih lagu; bukan unduh massal.
 
-Pada repository ini, build memakai toolchain/cache yang sudah ada: 23 unit test, kompilasi, kedua APK ABI, kontrak APK dan signature lulus. Lint: 15 warning, tidak ada Error/Fatal. Review independen akhir lulus sesudah perbaikan temuan awal; bukti serta batas verifikasi ada di `UPDATE-0.3.0.md` dan `verification/`.
+Branch `refactor/architecture-foundation` merapikan dependency/state dan memisahkan UI tanpa menerapkan mockup baru. Pada repository ini, build memakai toolchain/cache yang sudah ada: 33 unit test, kompilasi, kedua APK ABI, kontrak APK dan signature lulus. Lint: 15 warning, tidak ada Error/Fatal. Batas dan alur pengembangan dijelaskan di `ARCHITECTURE.md` serta `CONTRIBUTING.md`. Review versi 0.3.0 lulus sesudah perbaikan temuan awal; review refactor juga lulus dan dicatat terpisah pada `verification/architecture-review.json`.
 
-Pengguna melaporkan 0.1.0 dan 0.2.0 bekerja pada Samsung M15 Android 16. **0.3.0 belum diuji pada HP.** Pengambilan stream preview pada jaringan build dibatasi anti-bot YouTube; penanganan error tersedia, sukses pemutaran di HP belum terbukti. Lihat `DEVICE-TEST.md`.
+Pengguna melaporkan 0.1.0, 0.2.0, dan fungsi 0.3.0 bekerja pada Samsung M15 Android 16, tetapi UX 0.3.0 perlu diperbaiki. Laporan itu bukan verifikasi independen setiap fitur/kasus. **Build refactor belum diuji pada HP.** Pengambilan stream preview pada jaringan build dibatasi anti-bot YouTube; penanganan error tersedia. Lihat `DEVICE-TEST.md`.
 
 ## Batasan penting
 

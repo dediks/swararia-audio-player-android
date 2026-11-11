@@ -16,9 +16,9 @@ class UiIntegrationContracts(unittest.TestCase):
         self.assertIn('SwarariaUi(', code)
         self.assertIn('model.search.collectAsStateWithLifecycle()',code)
         self.assertIn('onCancelSearch = { model.cancelSearch() }',code)
-        self.assertIn('model.search.value.busy',code)
-        self.assertIn('IngestStatus.state.value.busy',code)
-        self.assertIn('OnlineWorkRules.canStart',code)
+        self.assertIn('model.canStartOnlineOperation()',code)
+        self.assertIn('model.ingest.collectAsStateWithLifecycle()',code)
+        self.assertIn('AppViewModelFactory(',code)
         self.assertGreaterEqual(code.count('whenOnlineIdle {'),7)
         self.assertNotIn('Scaffold(',code)
 

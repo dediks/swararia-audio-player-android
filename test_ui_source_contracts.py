@@ -2,6 +2,21 @@
 from pathlib import Path
 import re
 import unittest
+import hashlib
+import json
+
+
+def declarations(code):
+    """Slice this UI's top-level declarations, retaining annotations and bodies."""
+    pattern = r'(?m)^(?:@[^\n]+\n)*(?:(?:private|internal|public|inline|data) )*(?:fun|class|val) (\w+)'
+    matches = list(re.finditer(pattern, code))
+    return {m[1]: code[m.start():matches[i + 1].start() if i + 1 < len(matches) else len(code)].strip()
+            for i, m in enumerate(matches)}
+
+
+def declaration_hash(code):
+    normalized = re.sub(r'(?m)^(private|internal|public) ', '', code).strip()
+    return hashlib.sha256(normalized.encode()).hexdigest()
 
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / 'app/src/main/java/com/swararia/audiolab'
@@ -12,6 +27,49 @@ class NativeUiSourceContracts(unittest.TestCase):
         target = SRC / 'SwarariaUi.kt'
         self.assertTrue(target.is_file(), 'Approved native UI root is missing')
         return target.read_text()
+
+    def test_active_declarations_equal_baseline_and_protected_files_are_byte_identical(self):
+        baseline = json.loads((ROOT / 'verification/ui-split-baseline.json').read_text())
+        found = {}
+        for path in SRC.glob('*.kt'):
+            for name, body in declarations(path.read_text()).items():
+                if name in baseline['declaration_sha256']:
+                    self.assertNotIn(name, found, 'Duplicate active declaration: ' + name)
+                    found[name] = declaration_hash(body)
+        self.assertEqual(found, baseline['declaration_sha256'])
+        for name, digest in baseline['byte_identical_files'].items():
+            self.assertEqual(hashlib.sha256((SRC / name).read_bytes()).hexdigest(), digest, name)
+
+    def test_ui_split_has_narrow_entry_points_and_no_dead_screens(self):
+        expected = {
+            'SwarariaUi.kt': {'SwarariaUi', 'navigationColors'},
+            'LibraryScreen.kt': {'LibraryPage', 'searchFieldColors', 'LibraryAudioRow'},
+            'SwarariaDialogs.kt': {'RenameAudioDialog', 'RenameHistoryDialog', 'DiagnosticsDialog', 'EngineSettingsDialog'},
+            'SwarariaPlayer.kt': {'SessionQueueItem', 'SessionPlayback', 'readSwarariaPlayback',
+                'rememberSwarariaPlayback', 'connectedCommand', 'playbackRequestsPause',
+                'toggleSwarariaPlayback', 'playbackTitle', 'playbackStatus', 'MiniPlayer', 'FocusedPlayer', 'QueueDialog'},
+            'UiComponents.kt': {'BrandLogo', 'TrackArtwork', 'GlyphButton', 'EmptyMessage'},
+            'AppUi.kt': {'SwarariaFont', 'SwarariaTypography', 'AudioTheme'},
+        }
+        internal = {'LibraryPage', 'RenameAudioDialog', 'RenameHistoryDialog', 'EngineSettingsDialog',
+                    'SessionQueueItem', 'SessionPlayback', 'rememberSwarariaPlayback',
+                    'toggleSwarariaPlayback', 'MiniPlayer', 'FocusedPlayer',
+                    'BrandLogo', 'TrackArtwork', 'GlyphButton', 'EmptyMessage'}
+        for filename, names in expected.items():
+            with self.subTest(file=filename):
+                path = SRC / filename
+                self.assertTrue(path.is_file(), filename + ' is missing')
+                code = path.read_text()
+                self.assertTrue(code.startswith('package com.swararia.audiolab\n'))
+                actual = declarations(code)
+                self.assertEqual(set(actual), names)
+                for name, body in actual.items():
+                    if name in {'SwarariaUi', 'AudioTheme'}:
+                        continue
+                    visibility = 'internal' if name in internal else 'private'
+                    self.assertRegex(body, r'(?m)^' + visibility + r' (?:inline )?(?:data class|fun|val) ' + name + r'\b')
+        for filename in ['PlayerScreen.kt', 'OrganizerScreen.kt']:
+            self.assertFalse((SRC / filename).exists(), 'Dead screen must be removed: ' + filename)
 
     def test_root_preserves_integration_api_and_two_destinations(self):
         code = self.source()
@@ -36,48 +94,52 @@ class NativeUiSourceContracts(unittest.TestCase):
             self.assertNotIn(annotation, code)
 
     def test_library_uses_real_metadata_and_validated_actual_filename_for_rename(self):
-        code = self.source()
-        self.assertIn('private fun LibraryPage(', code)
+        code = (SRC / 'LibraryScreen.kt').read_text() + (SRC / 'SwarariaDialogs.kt').read_text()
+        self.assertIn('internal fun LibraryPage(', code)
         self.assertIn('tracks.filter', code)
         self.assertIn('compareByDescending<AudioTrack> { it.addedAt }', code)
         self.assertIn('UiPresentation.title(track.displayName)', code)
         self.assertIn('UiPresentation.metadata(track.displayName, track.durationMs)', code)
-        self.assertIn('private fun RenameAudioDialog(', code)
+        self.assertIn('internal fun RenameAudioDialog(', code)
         self.assertIn('track.displayName.substringBeforeLast', code)
         self.assertIn('LibraryRules.renamedDisplayName(track.displayName, title)', code)
         self.assertIn('onRename(track.id, title, onDismiss)', code)
-        self.assertIn('private fun RenameHistoryDialog(', code)
+        self.assertIn('internal fun RenameHistoryDialog(', code)
         self.assertIn('record.fromName', code)
         self.assertIn('record.toName', code)
         self.assertIn('onClick = onUndo', code)
 
     def test_search_and_paste_require_fresh_consent_and_share_exclusion_guards(self):
-        code = self.source()
+        code = (SRC / 'AddAudioScreen.kt').read_text()
         required = [
-            'private fun AddAudioPage(', 'private fun SearchDownloadDialog(',
-            'var authorized by remember { mutableStateOf(false) }',
-            'url = it; authorized = false', 'onDownload(hit.url, true)',
-            'selectedHit = hit', 'YoutubeThumbnail(hit.thumbnailUrl, hit.title',
-            'val canStart = !ingest.busy && !search.busy',
+            'fun AddAudioScreen(', 'var consent by remember { mutableStateOf(false) }',
+            'url = it; consent = false', 'url = it.trim(); consent = false',
+            'mode = 1; consent = false', 'mode = 0; consent = false',
+            'if (idle && consent && validUrl != null) { consent = false; onDownload(validUrl, true) }',
+            'selected = hit', 'YoutubeThumbnail(hit.thumbnailUrl, hit.title',
+            'val idle = !ingest.busy && !search.busy && !actions.preview.loading',
             'YoutubeSearchRules.validatedQuery(query)', 'onCancelSearch',
-            'hit.channel ?: provider.label', 'Durasi belum tersedia',
-            'LibraryRules.validatedHttpsUrl(url)', 'Text("Tautan")', 'Text("Cari")',
+            'LibraryRules.validatedHttpsUrl(url)', 'ConsentLine(consent, { consent = it }, idle)',
         ]
         for needle in required:
-            self.assertTrue(needle in code, 'Missing add/search safeguard: ' + needle)
-        consent = code.split('private fun SearchDownloadDialog(', 1)[1].split('\n@Composable', 1)[0]
-        self.assertTrue('enabled = canStart && authorized' in consent)
+            self.assertIn(needle, code, 'Missing live add/search safeguard: ' + needle)
+        consent = code.split('selected?.let { hit -> key(hit.videoId) {', 1)[1].split('\n@Composable', 1)[0]
+        for needle in ['var authorized by remember { mutableStateOf(false) }',
+                       'if (authorized && idle) { selected = null; onDownload(hit.url, true) }',
+                       'enabled = authorized && idle', 'onDismissRequest = { selected = null }']:
+            self.assertIn(needle, consent)
+        self.assertNotIn('rememberSaveable', consent)
         self.assertNotIn('LaunchedEffect', consent)
         self.assertNotIn('SearchHit(', code)
 
     def test_playback_observation_is_lifecycle_scoped_and_queue_is_controller_order(self):
-        code = self.source()
+        code = (SRC / 'SwarariaPlayer.kt').read_text()
         for needle in [
             'repeatOnLifecycle(Lifecycle.State.STARTED)', 'p.addListener(listener)', 'p.removeListener(listener)',
             'snapshotFlow { state.playing }.collectLatest', 'if (!p.isConnected)',
-            'p.getMediaItemAt(index)', 'p.mediaItemCount', 'private fun toggleSwarariaPlayback(',
-            'p.prepare()', 'p.play()', 'p.pause()', 'private fun FocusedPlayer(',
-            'private fun MiniPlayer(', 'private fun QueueDialog(',
+            'p.getMediaItemAt(index)', 'p.mediaItemCount', 'internal fun toggleSwarariaPlayback(',
+            'p.prepare()', 'p.play()', 'p.pause()', 'internal fun FocusedPlayer(',
+            'internal fun MiniPlayer(', 'private fun QueueDialog(',
             'remember(playback.mediaId, playback.currentIndex)', 'playback.queue.size',
             'Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM', 'p.currentMediaItem?.mediaId == playback.mediaId',
         ]:
@@ -94,7 +156,7 @@ class NativeUiSourceContracts(unittest.TestCase):
         self.assertTrue('typography =' in code)
 
     def test_stopped_and_ended_playback_resume_without_extra_pause_or_queue_reset(self):
-        code = self.source()
+        code = (SRC / 'SwarariaPlayer.kt').read_text()
         predicate = code.split('private fun playbackRequestsPause(', 1)
         self.assertTrue(len(predicate) == 2, 'Stopped/ended session needs a distinct resume action')
         predicate = predicate[1].split('\nprivate fun ', 1)[0]
@@ -104,7 +166,7 @@ class NativeUiSourceContracts(unittest.TestCase):
         self.assertTrue('if (p.currentMediaItemIndex == entry.index) toggleSwarariaPlayback(p)' in code)
 
     def test_unknown_duration_has_no_filled_seek_indicator_and_ended_is_not_paused(self):
-        code = self.source()
+        code = (SRC / 'SwarariaPlayer.kt').read_text()
         self.assertTrue('val displayed = if (playback.durationMs == null) 0f else' in code,
                         'Unknown duration must not appear to be 100% complete')
         self.assertTrue('playback.ended -> "Selesai · Audio lokal"' in code,
