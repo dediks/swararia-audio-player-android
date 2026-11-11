@@ -11,9 +11,9 @@ deps=[jar(d.find('m:groupId',ns).text,d.find('m:artifactId',ns).text,d.find('m:v
 ann=jar('org.jetbrains','annotations','23.0.0')
 cp=os.pathsep.join([jar('org.jetbrains.kotlin','kotlin-stdlib','2.2.21'),jar('junit','junit','4.13.2'),jar('org.hamcrest','hamcrest-core','1.3'),ann,jar('org.jetbrains.kotlinx','kotlinx-coroutines-core-jvm','1.10.2'),jar('androidx.room','room-common-jvm','2.8.4')]+[jar('com.fasterxml.jackson.core',n,v) for n,v in [('jackson-databind','2.20.1'),('jackson-core','2.20.1'),('jackson-annotations','2.20')]])
 base=ROOT/'app/src/main/java/com/swararia/audiolab'
-names=['YoutubeSearchData.kt','ThumbnailPolicy.kt','OnlinePreviewData.kt','OnlineWorkRules.kt','SearchContracts.kt','SearchSession.kt','PreviewUrlCache.kt','PreviewResolver.kt','DownloadRequest.kt','DownloadJob.kt','DownloadQueueContracts.kt','UpgradeOperations.kt','PlaybackDeletion.kt']
+names=['YoutubeSearchData.kt','ThumbnailPolicy.kt','OnlinePreviewData.kt','OnlineWorkRules.kt','SearchContracts.kt','SearchSession.kt','PreviewUrlCache.kt','PreviewResolver.kt','DownloadRequest.kt','DownloadJob.kt','DownloadQueueContracts.kt','UpgradeOperations.kt','PlaybackDeletion.kt','PreviewSession.kt']
 tests=ROOT/'app/src/test/java/com/swararia/audiolab'
-test_sources=[tests/n for n in ['SearchSessionTest.kt','PreviewUrlCacheTest.kt','PreviewResolverTest.kt','UpgradeOperationsTest.kt','PlaybackDeletionTest.kt'] if (tests/n).is_file()]
+test_sources=[tests/n for n in ['SearchSessionTest.kt','PreviewUrlCacheTest.kt','PreviewResolverTest.kt','UpgradeOperationsTest.kt','PlaybackDeletionTest.kt','PreviewSessionTest.kt'] if (tests/n).is_file()]
 sources=[base/n for n in names if (base/n).is_file()]+test_sources
 java=str(ROOT/'.toolchain/jdk/bin/java')
 with tempfile.TemporaryDirectory(prefix='architecture-jvm-',dir=ROOT/'.cache/tmp') as out:

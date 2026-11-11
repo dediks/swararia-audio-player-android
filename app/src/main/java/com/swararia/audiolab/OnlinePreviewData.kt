@@ -5,7 +5,7 @@ import java.net.URI
 data class PreviewMedia(val videoId: String, val title: String, val url: String, val headers: Map<String, String>)
 data class PreviewState(val loading: Boolean = false, val hit: SearchHit? = null,
     val media: PreviewMedia? = null, val error: String? = null,
-    val canceling: Boolean = false, val requestStartedNanos: Long = 0L)
+    val canceling: Boolean = false, val requestStartedNanos: Long = 0L, val phase: String = "")
 
 /** A preview resolves a stream, never downloads/publishes a library file. */
 object OnlinePreviewRules {

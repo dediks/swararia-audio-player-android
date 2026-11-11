@@ -41,7 +41,7 @@ fun SwarariaUi(
     val pages = rememberSaveableStateHolder()
     val playback = rememberSwarariaPlayback(controller)
     val current = tracks.firstOrNull { it.id.toString() == playback.mediaId }
-    val previewActive = searchActions.preview.let { it.loading || it.media != null || it.error != null }
+    val previewActive = searchActions.preview.let { it.hit != null || it.loading || it.media != null || it.error != null }
     val onlineBusy = ingest.busy || upgrade.operationBusy || search.busy || searchActions.preview.loading
     val navigate: (Int) -> Unit = { target ->
         if (target != destination || fullPlayer) searchActions.stopPreview()

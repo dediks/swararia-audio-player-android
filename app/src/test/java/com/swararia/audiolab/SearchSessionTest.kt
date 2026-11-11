@@ -101,7 +101,7 @@ class SearchSessionTest {
     @Test(timeout = 5000) fun previewCancellationKeepsBusyUntilCleanupAndDropsLateMedia() = runBlocking {
         Fixture().use { f ->
             val cleanup=CompletableDeferred<Unit>()
-            f.gateway.stream={ withContext(NonCancellable) { cleanup.await() };PreviewMedia(it.videoId,it.title,"https://example.invalid/fixture",emptyMap()) }
+            f.gateway.stream={ withContext(NonCancellable) { cleanup.await() };PreviewMedia(it.videoId,it.title,"https://rr.googlevideo.com/videoplayback?fixture=fixture",emptyMap()) }
             f.session.preview(hit());f.session.cancelPreview();f.session.cancelPreview()
             assertTrue(f.session.preview.value.loading)
             assertTrue(f.session.preview.value.canceling)
@@ -115,14 +115,14 @@ class SearchSessionTest {
         Fixture().use { f ->
             f.gateway.stream={ error("unavailable") };f.session.preview(hit())
             assertFalse(f.session.preview.value.loading)
-            assertEquals("unavailable",f.session.preview.value.error)
+            assertEquals("Preview tidak tersedia dari sumber ini.",f.session.preview.value.error)
             f.session.cancelPreview();assertEquals(PreviewState(),f.session.preview.value)
         }
     }
     @Test(timeout = 5000) fun playerFailureRetainsHitAndRetryResolvesItAgain() = runBlocking {
         Fixture().use { f ->
             val calls=mutableListOf<SearchHit>()
-            f.gateway.stream={ calls.add(it);PreviewMedia(it.videoId,it.title,"https://example.invalid/${calls.size}",emptyMap()) }
+            f.gateway.stream={ calls.add(it);PreviewMedia(it.videoId,it.title,"https://rr.googlevideo.com/videoplayback?fixture=${calls.size}",emptyMap()) }
             f.session.preview(hit())
             val old=f.session.preview.value.media
             f.session.previewError()
@@ -141,7 +141,7 @@ class SearchSessionTest {
         Fixture().use { f ->
             val cleanup=CompletableDeferred<Unit>()
             val first=hit()
-            f.gateway.stream={ withContext(NonCancellable) { cleanup.await() };PreviewMedia(it.videoId,it.title,"https://example.invalid/late",emptyMap()) }
+            f.gateway.stream={ withContext(NonCancellable) { cleanup.await() };PreviewMedia(it.videoId,it.title,"https://rr.googlevideo.com/videoplayback?fixture=late",emptyMap()) }
             f.session.preview(first);f.session.previewError()
             assertEquals(first,f.session.preview.value.hit)
             assertNotNull(f.session.preview.value.error)
@@ -155,7 +155,7 @@ class SearchSessionTest {
             assertNull(f.session.preview.value.media)
             assertTrue(f.session.canStartOnlineOperation())
             val next=hit("bcdefghijkl")
-            f.gateway.stream={ PreviewMedia(it.videoId,it.title,"https://example.invalid/new",emptyMap()) }
+            f.gateway.stream={ PreviewMedia(it.videoId,it.title,"https://rr.googlevideo.com/videoplayback?fixture=new",emptyMap()) }
             f.session.preview(next);yield()
             assertEquals(next,f.session.preview.value.hit)
             assertEquals(next.videoId,f.session.preview.value.media?.videoId)
@@ -170,7 +170,7 @@ class SearchSessionTest {
             f.session.preview(hit());f.session.previewError();f.session.cancelPreview()
             cleanup.complete(Unit);yield()
             assertEquals(PreviewState(),f.session.preview.value)
-            f.gateway.stream={ PreviewMedia(it.videoId,it.title,"https://example.invalid/new",emptyMap()) }
+            f.gateway.stream={ PreviewMedia(it.videoId,it.title,"https://rr.googlevideo.com/videoplayback?fixture=new",emptyMap()) }
             val next=hit("bcdefghijkl");f.session.preview(next);yield()
             assertEquals(next,f.session.preview.value.hit)
             assertNull(f.session.preview.value.error)

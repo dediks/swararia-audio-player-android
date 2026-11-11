@@ -156,10 +156,12 @@ class IngestService : Service() {
             synchronized(phaseLock) { interruptible = true; checkNotCanceled() }
             control.progress(null, "Menyiapkan mesin")
             report("Menyiapkan Python dan FFmpeg di HP...", null)
+            val engineStarted = System.nanoTime()
             YoutubeDL.init(applicationContext)
             val pageSize = android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE)
             check(pageSize == 4096L) { "Perangkat membutuhkan mesin yang mendukung halaman memori 16 KB." }
             FFmpeg.init(applicationContext)
+            android.util.Log.d("SwarariaTiming", "download_engine_init_ms=${((System.nanoTime() - engineStarted) / 1_000_000L).coerceAtLeast(0)}")
             currentCoroutineContext().ensureActive()
             checkNotCanceled()
             updateVersion()
@@ -187,10 +189,17 @@ class IngestService : Service() {
             var lastStage = ""
             var budgetExceeded = false
             control.progress(null, "Mengunduh audio")
+            val executeStarted = System.nanoTime()
+            var firstProgressRecorded = false
             try {
                 YoutubeDL.execute(request, id) { percentage, _, _ ->
                     // Native line deliberately discarded, not logged, shown, or persisted.
                     val actual = percentage.takeIf { it.isFinite() && it >= 0 }?.coerceIn(0f, 100f)
+                    if (!firstProgressRecorded && actual != null) {
+                        firstProgressRecorded = true
+                        // First valid yt-dlp progress callback, NOT a network-first-byte measurement.
+                        android.util.Log.d("SwarariaTiming", "download_execute_to_first_progress_ms=${((System.nanoTime() - executeStarted) / 1_000_000L).coerceAtLeast(0)}")
+                    }
                     val postprocess = actual != null && actual >= 100f
                     val stage = if (postprocess) "Menyelesaikan audio" else "Mengunduh audio"
                     synchronized(phaseLock) {

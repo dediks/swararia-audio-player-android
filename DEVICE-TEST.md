@@ -10,7 +10,13 @@ Tidak ada perangkat Android atau emulator pada lingkungan yang disetujui. Lolos 
 - Izin notifikasi membantu menampilkan unduhan dan pemutar. Tidak ada permintaan izin mengelola semua file.
 - Gunakan sumber audio yang dimiliki atau secara jelas mengizinkan pengunduhan. Tidak ada cookies/login, pembobolan DRM, atau bypass paywall.
 
-## Pembaruan 0.4.0 — kandidat saat ini, belum diuji di HP
+## Pembaruan 0.4.1 — kandidat saat ini, belum diuji di HP
+- Checklist lengkap: `UPDATE-0.4.1.md`. Pasang sebagai update, tanpa uninstall/clear data; schema tetap v2.
+- Uji Home dan lock segera saat Resolving, kemudian saat Preview sudah berbunyi. Uji Cancel notifikasi, Pause/Play, rotasi, reconnect, cap 120 detik, single audio dan queue lokal kembali paused.
+- Catat tap→audio pertama dan pengulangan segera, serta label tahap yang paling lama. Log timing baru bukan bukti latensi sudah membaik; tidak perlu mengirim raw log/signed URL/credential.
+- Force-stop/OS kill bukan jaminan continuity. Home/lock berbeda dari navigasi eksplisit Back/pindah halaman yang masih dapat menghentikan Preview.
+
+## Pembaruan 0.4.0 — matriks historis
 - Gunakan acceptance checklist lengkap di `UPDATE-0.4.0.md`. Bagian 0.3/0.2 di bawah adalah riwayat, bukan batas fitur 0.4.
 - Update tanpa uninstall/clear data; Room1→2 harus menjaga koleksi dan riwayat rename. Downgrade APK bukan rollback database.
 - Preview kini maksimal dua menit; satu playback surface, seek aktual, error/Retry, cache RAM singkat dan stop saat background. Hasil tes host bukan bukti audio/latensi di HP.

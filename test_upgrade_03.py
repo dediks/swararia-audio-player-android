@@ -26,15 +26,19 @@ class UpgradeWiring(unittest.TestCase):
         code=(SRC/'PlaybackControls.kt').read_text()
         self.assertIn('repeatOnLifecycle(Lifecycle.State.STARTED)',code)
 
-    def test_background_event_stops_player_without_waiting_for_ui_state_collection(self):
+    def test_background_preview_is_not_owned_by_composition(self):
         code=(SRC/'SearchPreviewPlayer.kt').read_text()
-        self.assertIn('activePreviewPlayer?.stop()',code)
+        self.assertNotIn('ON_STOP',code)
+        self.assertNotIn('ExoPlayer',code)
+        self.assertNotIn('release()',code)
+        self.assertIn('PreviewSession(', (SRC/'PlaybackService.kt').read_text())
 
-    def test_preview_stops_when_main_player_resumes(self):
-        code=(SRC/'SearchPreviewPlayer.kt').read_text()
-        self.assertIn('override fun onIsPlayingChanged',code)
-        self.assertIn('controller?.addListener(mainListener)',code)
-        self.assertIn('controller?.removeListener(mainListener)',code)
+    def test_local_replacement_restores_before_changing_single_service_player(self):
+        code=(SRC/'PlaybackService.kt').read_text()
+        self.assertIn('override fun onPlayerCommandRequest',code)
+        self.assertIn('Player.COMMAND_CHANGE_MEDIA_ITEMS, Player.COMMAND_SET_MEDIA_ITEM',code)
+        self.assertIn('finishPreview()',code)
+        self.assertEqual(1,code.count('ExoPlayer.Builder('))
 
     def test_playback_controls_are_visible_in_focused_player(self):
         root=(SRC/'SwarariaPlayer.kt').read_text().split('internal fun FocusedPlayer(',1)[1]
@@ -48,8 +52,8 @@ class UpgradeWiring(unittest.TestCase):
         self.assertIn('model.canStartOnlineOperation()',activity)
         self.assertIn('AddAudioScreen(',root)
         player=SRC/'SearchPreviewPlayer.kt'
-        self.assertTrue(player.is_file(),'Lifecycle-scoped online preview player is missing')
+        self.assertTrue(player.is_file(),'Controller-backed Preview presentation is missing')
         code=player.read_text()
-        for needle in ['Lifecycle.Event.ON_STOP','release()','OnlinePreviewRules.PREVIEW_MS','controller.pause()', 'STATE_ENDED']:
+        for needle in ['repeatOnLifecycle(Lifecycle.State.STARTED)','OnlinePreviewRules.PREVIEW_MS','player.pause()', 'onDispose { player?.removeListener(listener) }']:
             self.assertIn(needle,code)
 if __name__=='__main__':unittest.main(verbosity=2)

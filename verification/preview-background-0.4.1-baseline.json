@@ -1,0 +1,14 @@
+{
+  "base_commit": "246e1462cf531fad47b98a4a16447db2aa09b018",
+  "branch": "feature/preview-background-latency-0.4.1",
+  "snapshot": "/home/ubuntu/projects/swararia-audio-player-android/.checkpoints/before-preview-background-0.4.1.zip",
+  "members": 197,
+  "sha256": "a0e91bef25e1a87b8c36997513588f73580ad225921d7586a9ca02139aeb235a",
+  "approved_scope": ["service-owned Preview with background and notification transport", "one active audio and120s cap", "preserve paused local queue and controls", "numeric stage timing and truthful loading", "measured investigation before latency tuning"],
+  "user_observation": {"preview_tap_to_audio_approx_seconds":15,"background_behavior":"app minimizes normally but Preview audio stops"},
+  "pinned_media3_evidence": {"version":"1.8.0","method":"javap -constants against cached runtime JAR","default_buffer_for_playback_ms":1000,"default_buffer_after_rebuffer_ms":2000,"default_min_buffer_ms":50000,"default_max_buffer_ms":50000,"interpretation":"Playback startup threshold is1s of buffered media, not the entire clip and not a1s wall-clock guarantee. Min/max buffering targets are separate from startup."},
+  "new_dependencies": false,
+  "push_allowed": false,
+  "physical_device_available": false,
+  "signed_url_persistence_allowed": false
+}

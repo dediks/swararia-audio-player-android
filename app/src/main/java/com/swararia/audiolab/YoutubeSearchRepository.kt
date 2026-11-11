@@ -78,11 +78,15 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
         try {
             return withTimeoutOrNull(timeout) {
                 runInterruptible(Dispatchers.IO) {
+                    val initStarted = System.nanoTime()
                     YoutubeDL.init(appContext)
+                    android.util.Log.d("SwarariaTiming", "metadata_engine_init_ms=${((System.nanoTime() - initStarted) / 1_000_000L).coerceAtLeast(0)}")
                     if (Thread.currentThread().isInterrupted) throw InterruptedException()
                     check(!ingestBusy()) { "Tunggu proses audio selesai terlebih dahulu." }
                     val request = YoutubeDLRequest(args.last()).addCommands(args.dropLast(1))
-                    YoutubeDL.execute(request, processId).out
+                    val executeStarted = System.nanoTime()
+                    try { YoutubeDL.execute(request, processId).out }
+                    finally { android.util.Log.d("SwarariaTiming", "metadata_execute_ms=${((System.nanoTime() - executeStarted) / 1_000_000L).coerceAtLeast(0)}") }
                 }
             } ?: throw IOException("Sumber merespons terlalu lama. Coba lagi nanti.")
         } catch (cancel: CancellationException) { throw cancel }

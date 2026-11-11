@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
                         retry = { whenOnlineIdle { model.retrySearch() } },
                         openPlaylist = { hit -> whenOnlineIdle { model.openPlaylist(hit) } },
                         leavePlaylist = { model.leavePlaylist() },
-                        previewSong = { hit -> whenOnlineIdle { if (pauseForPreview()) model.preview(hit) } },
+                        previewSong = { hit -> withNotificationPermission { whenOnlineIdle { if (pauseForPreview()) model.preview(hit) } } },
                         stopPreview = { model.cancelPreview() }, previewError = { model.previewError() }),
                     onDownload = { url, authorized -> whenOnlineIdle {
                         withNotificationPermission { whenOnlineIdle {
@@ -150,7 +150,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun connectPlayer() {
-        val future = MediaController.Builder(this, SessionToken(this, ComponentName(this, PlaybackService::class.java))).buildAsync()
+        val future = MediaController.Builder(this, SessionToken(this, ComponentName(this, PlaybackService::class.java)))
+            .setListener(object : MediaController.Listener {
+                override fun onDisconnected(player: MediaController) {
+                    if (controller !== player || isDestroyed) return
+                    deletionPort?.let { model.playbackDeletion.disconnect(it) }
+                    deletionPort = null
+                    deletionListener?.let(player::removeListener); deletionListener = null
+                    controller = null
+                    val stale = controllerFuture; controllerFuture = null
+                    stale?.let(MediaController::releaseFuture)
+                    window.decorView.postDelayed({ if (!isDestroyed) connectPlayer() }, 1000L)
+                }
+            }).buildAsync()
         controllerFuture = future
         future.addListener({
             if (!isDestroyed) runCatching { future.get() }.onSuccess { player ->
@@ -202,7 +214,16 @@ class MainActivity : ComponentActivity() {
             }
             player.pause(); player.stop()
         }
-        model.delete(track.id, done)
+        // Hidden saved local context lives in the service during Preview. Remove the explicit ID
+        // there BEFORE durable deletion, so restoring after end/error cannot resurrect it.
+        val forgotten = player.sendCustomCommand(PreviewProtocol.forget, Bundle().apply {
+            putString(PreviewProtocol.ID, track.id.toString())
+        })
+        forgotten.addListener({
+            if (runCatching { forgotten.get().resultCode }.getOrNull() == androidx.media3.session.SessionResult.RESULT_SUCCESS)
+                model.delete(track.id, done)
+            else model.message("Queue player belum dapat diperbarui. Coba Delete lagi.")
+        }, ContextCompat.getMainExecutor(this))
     }
 
     private fun playTrack(track: AudioTrack, tracks: List<AudioTrack>) {

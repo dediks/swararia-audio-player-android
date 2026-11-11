@@ -12,9 +12,10 @@ class AppViewModel(
     private val searchRepository: AudioSearchRepository,
     val ingest: StateFlow<IngestState>,
     private val downloadQueue: DownloadQueueRepository,
+    previewPlayback: PreviewPlayback? = null,
 ) : ViewModel() {
     private val session: SearchSession = SearchSession(searchRepository, viewModelScope,
-        { ingest.value.busy || busy.value || operations.busy.value }, ::message)
+        { ingest.value.busy || busy.value || operations.busy.value }, ::message, previewPlayback)
     val search = session.search
     val preview = session.preview
     fun canStartOnlineOperation() = session.canStartOnlineOperation()

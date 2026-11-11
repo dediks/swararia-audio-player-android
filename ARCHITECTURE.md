@@ -1,4 +1,16 @@
-# Architecture foundation refactor
+# Architecture
+
+## Current Preview ownership (0.4.1 candidate)
+
+`AppViewModel/SearchSession → PreviewPlayback/PreviewRemote → app-only MediaSession commands → PlaybackService/PreviewSession → AudioSearchRepository`
+
+- Search/pagination stays ViewModel-scoped. Preview resolution and the single ExoPlayer are service-scoped; controller release/Compose disposal must not cancel service work.
+- Preview temporarily borrows the local player, clips media to 120 seconds, forces repeat off, and restores the saved local queue/position/mode paused after stop/end/error. Explicit deleted IDs are removed from saved context before durable deletion.
+- Only public video identity/title, phase, request identity and sanitized failure state cross session metadata. Signed source/header stay in ephemeral repository/service RAM and are not placed in controller MediaItem URIs or logs.
+- Numeric timing distinguishes engine initialization, native execution, source resolution and prepare/ready/playing. Host tests/source contracts/API compile are not device lifecycle or latency evidence. See `UPDATE-0.4.1.md`.
+- No dependency, persistence schema or native payload change. The following foundation-refactor sections are historical evidence, not a claim that all later source stayed byte-identical.
+
+## Historical architecture foundation refactor
 
 Status: implementation, local integration checks and independent final review passed. Behavior-preserving refactor before the approved visual redesign. Baseline `e96b931e2214006dfb956a004f662b895dc77340`, branch `refactor/architecture-foundation`. Recovery snapshot: `.checkpoints/before-architecture-refactor.zip`; source and untracked mockups preserved. No new packages, database migration, app ID/version/signing/engine change, UI upgrade, Delete, batch queue, artwork persistence, streaming optimization or GitHub publication.
 

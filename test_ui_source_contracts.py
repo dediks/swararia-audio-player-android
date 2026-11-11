@@ -79,16 +79,20 @@ class NativeUiSourceContracts(unittest.TestCase):
         self.assertIn('Text("Rename")', row)
         self.assertIn('Text("Delete", color = MaterialTheme.colorScheme.error)', row)
 
-    def test_preview_is_actual_state_seekable_and_lifecycle_authoritative(self):
+    def test_preview_is_actual_state_seekable_and_service_owned(self):
         code = source('SearchPreviewPlayer.kt')
-        for text in ['OnlinePreviewRules.PREVIEW_MS', 'Lifecycle.Event.ON_STOP',
-                     'activePreviewPlayer?.stop()', 'release()', 'controller.pause()',
-                     'Player.STATE_BUFFERING', 'player.currentPosition', 'Slider(',
-                     'player.seekTo(', 'player.pause()', 'player.play()',
-                     'remember(context)', 'setMediaItem', 'STATE_ENDED']:
+        for text in ['OnlinePreviewRules.PREVIEW_MS', 'MediaController?',
+                     'repeatOnLifecycle(Lifecycle.State.STARTED)',
+                     'onDispose { player?.removeListener(listener) }',
+                     'target.currentPosition', 'Slider(', 'player?.seekTo(',
+                     'player.pause()', 'player.play()']:
             self.assertIn(text, code)
-        self.assertNotIn('30 detik', code)
-        self.assertNotIn('controller.play()', code)
+        for forbidden in ['Lifecycle.Event.ON_STOP', 'ExoPlayer', 'release()', '30 detik']:
+            self.assertNotIn(forbidden, code)
+        service = source('PlaybackService.kt')
+        for text in ['Player.STATE_BUFFERING', 'Player.STATE_ENDED', 'setMediaSource',
+                     'setEndPositionMs(OnlinePreviewRules.PREVIEW_MS)']:
+            self.assertIn(text, service)
 
     def test_playback_guards_queue_and_lifecycle_survive(self):
         code = source('SwarariaPlayer.kt')
