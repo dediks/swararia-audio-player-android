@@ -1,0 +1,211 @@
+{
+  "passed": true,
+  "app_source_fingerprint_sha256": "8dc0ae84779c894446eb36e6708a4ba02f9a770b5dc06dc768e63e2eff0d4f50",
+  "commands": [
+    {
+      "command": [
+        "bash",
+        "build.sh",
+        "testDebugUnitTest",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-01.log"
+    },
+    {
+      "command": [
+        "bash",
+        "build.sh",
+        "lintDebug",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-02.log"
+    },
+    {
+      "command": [
+        "bash",
+        "build.sh",
+        "assembleDebug",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-03.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_architecture.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-04.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_search.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-05.log"
+    },
+    {
+      "command": [
+        "python",
+        "verification/run_data_checks.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-06.log"
+    },
+    {
+      "command": [
+        "python",
+        "verification/run_batch_checks.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-07.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_core.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-08.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_ui_rules.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-09.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_ui_source_contracts.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-10.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_ui_integration.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-11.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_architecture_wiring.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-12.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_upgrade_03.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-13.log"
+    },
+    {
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "test_music_metadata_plugin",
+        "-v"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-14.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_engine_payload.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-15.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_apk_contract.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-16.log"
+    },
+    {
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "verification.test_preview_background",
+        "-v"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-17.log"
+    },
+    {
+      "command": [
+        "python",
+        "verification/run_preview_checks.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-18.log"
+    },
+    {
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "verification.test_desktop_remote_wiring",
+        "-v"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-19.log"
+    },
+    {
+      "command": [
+        "python",
+        "verification/run_desktop_remote_checks.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-20.log"
+    },
+    {
+      "command": [
+        "python",
+        "verify_artifacts.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/remote-0.5-gate-21.log"
+    }
+  ],
+  "device_execution_tested": false,
+  "windows_runtime_tested": false,
+  "historical_failure": "verification/checks-0.5-pre-version-check.json",
+  "version_check_update": "APK contract expected5/0.4.1; updated only literals to approved6/0.5.0. No application change.",
+  "unit_tests": {
+    "tests": 88,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "lint": {
+    "Warning": 34
+  },
+  "update_compatibility": "verification/update-compatibility-0.5.json",
+  "artifact_sha256": {
+    "app-arm64-v8a-debug.apk": "4991404e955b59ce4a48882165f9d980958ae746cd21a4f1f07e6dc49e6383c8",
+    "app-armeabi-v7a-debug.apk": "9c12b128965673fd22cb6b68ba7cd4b10a6c1f9d66205a650933e706696c9037"
+  },
+  "generated_at_utc": "2026-11-12T10:14:49.816573+00:00",
+  "offline_builds": true,
+  "desktop_wire_integration_passed": true,
+  "real_device_ui_render_tested": false
+}

@@ -14,7 +14,7 @@ import sys
 ROOT = Path(__file__).resolve().parent
 DIST = ROOT / 'dist'
 VERSION = sys.argv[1] if len(sys.argv) > 1 else '0.1.0-spike'
-assert VERSION in {'0.1.0-spike', '0.2.0-spike', '0.3.0-spike', '0.4.0-spike', '0.4.1-spike'}, 'Unsupported release version'
+assert VERSION in {'0.1.0-spike', '0.2.0-spike', '0.3.0-spike', '0.4.0-spike', '0.4.1-spike', '0.5.0-spike'}, 'Unsupported release version'
 APK = DIST / f'Swararia-Audio-Lab-{VERSION}-arm64-v8a.apk'
 ARCHIVE = APK.with_suffix('.zip')
 PART_BYTES = 48_000_000

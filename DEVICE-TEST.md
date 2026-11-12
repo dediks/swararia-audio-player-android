@@ -10,7 +10,16 @@ Tidak ada perangkat Android atau emulator pada lingkungan yang disetujui. Lolos 
 - Izin notifikasi membantu menampilkan unduhan dan pemutar. Tidak ada permintaan izin mengelola semua file.
 - Gunakan sumber audio yang dimiliki atau secara jelas mengizinkan pengunduhan. Tidak ada cookies/login, pembobolan DRM, atau bypass paywall.
 
-## Pembaruan 0.4.1 — kandidat saat ini, belum diuji di HP
+## Pembaruan 0.5.0 — prioritas uji Remote HP–PC
+- Ikuti `UPDATE-0.5.0.md`; pasang sebagai update tanpa uninstall/clear data. Koleksi, rename history, signer dan schema2 harus tetap ada.
+- Desktop harus menjalankan Native Remote v1 terbaru; installer/browser HTTP lama belum cukup. Aktifkan HTTPS dari PC, buat invite, tempel teks pairing ke tab Remote dan approve pada PC. Jangan mengirim kode/QR/token melalui Telegram.
+- Pilih track di PC. Uji judul/status dan Play/Pause/Stop: suara harus keluar di PC, bukan HP. Jangan menandai sukses hanya karena Accepted/Pending; tunggu hasil dan amati player/audio PC.
+- View-only harus menonaktifkan kontrol; revoke/expiry/sertifikat baru harus menolak sesi lama. Tidak boleh mengulang POST otomatis ketika respons hilang atau jaringan tersambung kembali.
+- Uji rotasi, Remote→tab lain, Back, Home/lock, Wi-Fi terputus dan restart PC. Disconnect/Home bukan Stop otomatis. Identitas output HP/Desktop harus jelas; Preview HP yang sedang aktif tidak berhenti hanya karena membuka/menutup Remote.
+- Uji font besar, landscape, keyboard dan paste kode. QR desktop berisi teks, bukan URL; kemampuan scanner eksternal menyalin teks perlu dicek pada HP. Tidak ada scanner/izin kamera baru dalam APK.
+- Ulangi Library offline, rename/undo, queue, Download/Delete dan Preview background. Host/JVM/compile/signature checks bukan bukti acceptance perangkat ini.
+
+## Pembaruan 0.4.1 — matriks historis
 - Checklist lengkap: `UPDATE-0.4.1.md`. Pasang sebagai update, tanpa uninstall/clear data; schema tetap v2.
 - Uji Home dan lock segera saat Resolving, kemudian saat Preview sudah berbunyi. Uji Cancel notifikasi, Pause/Play, rotasi, reconnect, cap 120 detik, single audio dan queue lokal kembali paused.
 - Catat tap→audio pertama dan pengulangan segera, serta label tahap yang paling lama. Log timing baru bukan bukti latensi sudah membaik; tidak perlu mengirim raw log/signed URL/credential.

@@ -31,6 +31,7 @@ fun SwarariaUi(
     onSearch: (String, SearchProvider) -> Unit,
     onCancelSearch: () -> Unit,
     upgrade: UpgradeUiActions,
+    desktopRemote: DesktopRemoteSession,
 ) {
     var destination by rememberSaveable { mutableIntStateOf(0) }
     var fullPlayer by rememberSaveable { mutableStateOf(false) }
@@ -44,7 +45,7 @@ fun SwarariaUi(
     val previewActive = searchActions.preview.let { it.hit != null || it.loading || it.media != null || it.error != null }
     val onlineBusy = ingest.busy || upgrade.operationBusy || search.busy || searchActions.preview.loading
     val navigate: (Int) -> Unit = { target ->
-        if (target != destination || fullPlayer) searchActions.stopPreview()
+        if (target != 3 && destination != 3 && (target != destination || fullPlayer)) searchActions.stopPreview()
         fullPlayer = false
         destination = target
     }
@@ -57,7 +58,7 @@ fun SwarariaUi(
     }
     LaunchedEffect(previewActive) { if (previewActive) fullPlayer = false }
     BackHandler(enabled = fullPlayer || destination != 0 || previewActive) {
-        searchActions.stopPreview()
+        if (destination != 3) searchActions.stopPreview()
         if (fullPlayer) fullPlayer = false else destination = 0
     }
     Scaffold(
@@ -67,6 +68,8 @@ fun SwarariaUi(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
+                if (destination == 3 && (previewActive || playback.mediaId != null))
+                    Text("Pemutar HP • terpisah dari Desktop", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
                 // One slot: preview always replaces, never accompanies, local audio.
                 if (previewActive) SearchPreviewPlayer(searchActions.preview, controller,
                     searchActions.stopPreview, searchActions.previewError,
@@ -82,6 +85,8 @@ fun SwarariaUi(
                         icon = { Icon(UiIcons.Search, null) }, label = { Text("Search") }, colors = navigationColors())
                     NavigationBarItem(selected = destination == 2, onClick = { navigate(2) },
                         icon = { Icon(UiIcons.Download, null) }, label = { Text("Downloads") }, colors = navigationColors())
+                    NavigationBarItem(selected = destination == 3, onClick = { navigate(3) },
+                        icon = { Icon(UiIcons.Link, null) }, label = { Text("Remote") }, colors = navigationColors())
                 }
             }
         },
@@ -111,6 +116,7 @@ fun SwarariaUi(
                     onImport = { if (!onlineBusy) onImport() },
                     onCancel = { if (ingest.busy && ingest.cancelable) onCancel() },
                     onCancelSearch = onCancelSearch, onSettings = { settings = true })
+                3 -> DesktopRemoteScreen(desktopRemote, contentModifier)
                 else -> DownloadsScreen(upgrade, ingest, contentModifier, onSettings = { settings = true },
                     onCancelIngest = { if (ingest.busy && ingest.cancelable) onCancel() })
             }

@@ -114,6 +114,7 @@ class MainActivity : ComponentActivity() {
                     onUndo = { model.undoRename() },
                     onSearch = { query, provider -> whenOnlineIdle { model.search(query, provider) } },
                     onCancelSearch = { model.cancelSearch() },
+                    desktopRemote = model.desktopRemote,
                     upgrade = UpgradeUiActions(
                         jobs = jobs, operationBusy = operationBusy,
                         onDownloadBatch = { hits, authorized -> whenOnlineIdle {

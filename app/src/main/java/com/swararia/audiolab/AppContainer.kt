@@ -20,6 +20,7 @@ class AppContainer(context: Context) {
         YoutubeSearchRepository(appContext, { ingestState.value.busy })
     }
     fun previewPlayback(): PreviewPlayback = PreviewRemote(appContext)
+    fun desktopRemoteApi(): DesktopRemoteApi = DesktopRemoteHttpsApi()
 }
 
 class SwarariaApp : Application() {
@@ -33,6 +34,6 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass == AppViewModel::class.java) { "Unsupported ViewModel: ${modelClass.name}" }
         @Suppress("UNCHECKED_CAST")
-        return AppViewModel(container.library, container.searchRepository, container.ingestState, container.downloadQueue, container.previewPlayback()) as T
+        return AppViewModel(container.library, container.searchRepository, container.ingestState, container.downloadQueue, container.previewPlayback(), container.desktopRemoteApi()) as T
     }
 }

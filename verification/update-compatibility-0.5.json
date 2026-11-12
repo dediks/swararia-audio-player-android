@@ -1,0 +1,33 @@
+{
+  "version": "0.5.0-spike",
+  "version_code": 6,
+  "source_base": "87932e8812bb594fc13de38f8c907e964b7037a6",
+  "application_id_unchanged": true,
+  "database_schema_unchanged": true,
+  "database_version": 2,
+  "new_migration_required": false,
+  "manifest_permissions_and_services_unchanged": true,
+  "no_new_dependencies": true,
+  "protected_source_files_unchanged": 87,
+  "artifacts": [
+    {
+      "abi": "arm64-v8a",
+      "same_signer": true,
+      "old_apk_unchanged": true,
+      "native_and_engine_payloads_identical": true,
+      "remote_client_classes_packaged": true,
+      "old_apk_sha256": "1f4e3b05d0e3d46a5632868ff7c0e1fe3a1c83e0c95ee6f5d5efe945a7c18c1c",
+      "new_apk_sha256": "4991404e955b59ce4a48882165f9d980958ae746cd21a4f1f07e6dc49e6383c8"
+    },
+    {
+      "abi": "armeabi-v7a",
+      "same_signer": true,
+      "old_apk_unchanged": true,
+      "native_and_engine_payloads_identical": true,
+      "remote_client_classes_packaged": true,
+      "old_apk_sha256": "4ced475085af2656e0ac3f8a79b04463da7980f26504311dad904fec82283ea4",
+      "new_apk_sha256": "9c12b128965673fd22cb6b68ba7cd4b10a6c1f9d66205a650933e706696c9037"
+    }
+  ],
+  "device_upgrade_tested": false
+}

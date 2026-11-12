@@ -1,8 +1,8 @@
 {
-  "generated_at_utc": "2026-11-11T22:59:37.633960+00:00",
+  "generated_at_utc": "2026-11-12T10:14:14.114392+00:00",
   "build": "debug APK; not a public/production release",
   "unit_tests": {
-    "tests": 79,
+    "tests": 88,
     "failures": 0,
     "errors": 0,
     "skipped": 0
@@ -19,8 +19,8 @@
   "artifacts": [
     {
       "file": "app-arm64-v8a-debug.apk",
-      "bytes": 94187637,
-      "sha256": "1f4e3b05d0e3d46a5632868ff7c0e1fe3a1c83e0c95ee6f5d5efe945a7c18c1c",
+      "bytes": 94301365,
+      "sha256": "4991404e955b59ce4a48882165f9d980958ae746cd21a4f1f07e6dc49e6383c8",
       "signature_verified": true,
       "certificate_sha256": "e229f65b15ba19d8c9db42d4b8e2c46d6db13bf352ad6c7eb8ed808d522248d8",
       "zipalign_verified": true,
@@ -83,8 +83,8 @@
     },
     {
       "file": "app-armeabi-v7a-debug.apk",
-      "bytes": 87516463,
-      "sha256": "4ced475085af2656e0ac3f8a79b04463da7980f26504311dad904fec82283ea4",
+      "bytes": 87630191,
+      "sha256": "9c12b128965673fd22cb6b68ba7cd4b10a6c1f9d66205a650933e706696c9037",
       "signature_verified": true,
       "certificate_sha256": "e229f65b15ba19d8c9db42d4b8e2c46d6db13bf352ad6c7eb8ed808d522248d8",
       "zipalign_verified": true,
