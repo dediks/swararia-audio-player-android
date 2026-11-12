@@ -1,0 +1,9 @@
+{
+  "scope": "Tracked added lines plus new Kotlin/Python files",
+  "matches": {
+    "hardcoded_secret": 0,
+    "shell_true": 0,
+    "dangerous_eval": 0,
+    "unsafe_pickle": 0
+  }
+}

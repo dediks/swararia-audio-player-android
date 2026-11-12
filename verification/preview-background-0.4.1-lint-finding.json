@@ -1,0 +1,11 @@
+{
+  "scope": "Media3 1.8.0 SessionResult code bridge: compiler/lint findings during 0.4.1 release gate",
+  "attempts": [
+    {"form": "Raw Int helper result in a multi-branch callback", "compiler_unit": "passed", "lint": "WrongConstant at SessionResult(result,stateExtras())", "evidence": "verification/preview-background-0.4.1-lint-pass1.log"},
+    {"form": "SessionResult.Code on the member function", "compiler_unit": "failed: target is TYPE_USE, not member function", "lint": "not reached", "evidence": "verification/preview-background-0.4.1-compile-pass2.log"},
+    {"form": "Correct Kotlin TYPE_USE on helper return and local result", "direct_real_api_compile": "passed", "compiler_unit": "passed", "lint": "WrongConstant still reported for the integer bridge", "evidence": "verification/preview-background-0.4.1-lint-pass3.log"}
+  ],
+  "final_approach": "Return framework SessionResult directly from beginPreview, preserve the same result codes/public extras and app-only START authorization, and use canonical SessionError.ERROR_* constants. Actual lint rejected four direct constructor calls using legacy SessionResult.RESULT_ERROR_* aliases; cached Media3 javap verified equal numeric values for canonical replacements. No lint suppression or disabled check.",
+  "final_verification": "See checks-0.4.1.json for the actual final gate result; this finding record does not claim success ahead of it.",
+  "device_execution_tested": false
+}

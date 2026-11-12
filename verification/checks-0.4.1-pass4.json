@@ -1,0 +1,25 @@
+{
+  "passed": false,
+  "commands": [
+    {
+      "command": [
+        "bash",
+        "build.sh",
+        "testDebugUnitTest",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-01.log"
+    },
+    {
+      "command": [
+        "bash",
+        "build.sh",
+        "lintDebug",
+        "--offline"
+      ],
+      "exit_code": 1,
+      "log": "verification/upgrade-0.4.1-gate-02.log"
+    }
+  ]
+}

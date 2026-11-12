@@ -1,0 +1,15 @@
+{
+  "passed": false,
+  "scope": "Pending MediaStore publication adapter",
+  "finding": "Pending files cannot rely on indexed MediaStore.SIZE before visibility; collection lookup must explicitly include pending items.",
+  "evidence": {
+    "primary_source": "https://android.googlesource.com/platform/packages/providers/MediaProvider/+/refs/heads/main/src/com/android/providers/media/MediaProvider.java",
+    "retrieval": "HTTPS Gitiles TEXT fetched and base64-decoded with Python urllib; actual source inspected",
+    "pending_onclose": "MediaProvider attaches the metadata OnCloseListener only when !isPending && forWrite (retrieved source lines10068-10071).",
+    "collection_default": "Default pending/trash query match is MATCH_EXCLUDE (retrieved source lines6083-6090).",
+    "application_adapter": "MediaLibrary.publicationStore.inspect used cursor SIZE before makeVisible; locate queried the ordinary collection without pending inclusion."
+  },
+  "required_fix": "Read actual owned descriptor.statSize using a closed read-only ParcelFileDescriptor, reject unknown negative sizes; include pending rows in exact marker lookup while preserving path/id/owner checks.",
+  "status": "Focused second fix cycle delegated to separate context deleg_87dabd79. Do not package until fixed and re-reviewed.",
+  "device_execution_tested": false
+}

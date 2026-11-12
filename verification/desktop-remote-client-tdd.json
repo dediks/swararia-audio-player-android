@@ -1,0 +1,89 @@
+{
+  "status": "historical_TDD_checkpoints_with_parent_final_evidence",
+  "base": "87932e8812bb594fc13de38f8c907e964b7037a6",
+  "command": "bash build.sh testDebugUnitTest --tests '*DesktopRemote*' --offline",
+  "checkpoints": [
+    {
+      "slice": "strict pairing and JSON",
+      "red": "compile failed: missing DesktopRemotePairing/Json/Failure",
+      "green": "BUILD SUCCESSFUL; protocol tests passed",
+      "red_log": "/home/ubuntu/.hermes/cache/scratch/desktop-remote-red-protocol.log",
+      "green_log": "/home/ubuntu/.hermes/cache/scratch/desktop-remote-green-protocol.log"
+    },
+    {
+      "slice": "certificate pin/validity/self-signature/IP SAN",
+      "red": "compile failed: missing DesktopRemoteTrustManager",
+      "green": "BUILD SUCCESSFUL; TLS trust-manager tests passed",
+      "red_log": "/home/ubuntu/.hermes/cache/scratch/desktop-remote-red-tls.log",
+      "green_log": "/home/ubuntu/.hermes/cache/scratch/desktop-remote-green-tls.log"
+    },
+    {
+      "slice": "RAM state owner/foreground lifecycle/commands plus UI compilation",
+      "red": "compile failed: missing DesktopRemoteSession",
+      "green": "BUILD SUCCESSFUL; actual Android compileDebugKotlin and eight targeted JVM tests",
+      "red_log": "/home/ubuntu/.hermes/cache/scratch/desktop-remote-red-session.log",
+      "green_log": "/home/ubuntu/.hermes/cache/scratch/desktop-remote-green-session-ui.log"
+    },
+    {
+      "slice": "block repeated commands while accepted/pending",
+      "red": "eight tests completed; acceptedIsNotAppliedUntilGetAcknowledges assertion failed",
+      "green": "BUILD SUCCESSFUL; eight tests zero failures/errors/skips",
+      "red_log": "/home/ubuntu/.hermes/cache/scratch/desktop-remote-red-outstanding.log",
+      "green_log": "/home/ubuntu/.hermes/cache/scratch/desktop-remote-green-candidate.log"
+    }
+  ],
+  "verified": [
+    "Actual Android production compilation including Compose Remote screen",
+    "git diff --check passed",
+    "Desktop repository git status clean",
+    "No dependencies, manifest, schema, player/service/storage changes; version fields only in build.gradle"
+  ],
+  "scope": "ANDROID ONLY; no stage/commit/push/install; parent baseline JSON untouched",
+  "implementation_checkpoint_junit": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "suites": [
+      "DesktopRemoteProtocolTest",
+      "DesktopRemoteSessionTest",
+      "DesktopRemoteTlsTest"
+    ]
+  },
+  "implementation_checkpoint_limits": [
+    "No real HTTPS desktop integration or physical Android device run performed by implementer; parent owns these gates",
+    "TLS tests exercise real public X509 fixtures and trust manager including incorrect IP SAN, not platform hostname-verifier handshake execution",
+    "Session tests use injected port with real state owner, not real network",
+    "Dedicated session expiry, read-cancellation and transport saturation tests are not yet comprehensive",
+    "Transport has four-second connect/read timeouts and 16KiB body bound, but no absolute total wall-clock deadline against a slow-drip peer",
+    "RAM secrets are forgotten, not securely zeroized; manual paste/external clipboard is user-owned",
+    "Existing platform-tools-not-installed, JVM metaspace, Gradle-deprecation and clipboard-deprecation build warnings remain"
+  ],
+  "final_junit": {
+    "remote_tests": 9,
+    "full_suite_tests": 88,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "parent_additional_red_green": [
+    {
+      "slice": "slow-drip total request budget",
+      "red": "Real wire probe failed: Client lacks bounded total slow-drip deadline",
+      "green": "Same real Kotlin/Desktop HTTPS probe passes after request-scoped withTimeout8000 and cancellation cleanup"
+    },
+    {
+      "slice": "composition root ownership",
+      "red": "Source contract failed: DesktopRemoteHttpsApi constructed as VM default",
+      "green": "Required injected DesktopRemoteApi; root remains only production construction point"
+    }
+  ],
+  "parent_wire_evidence": "verification/remote-0.5-gate-20.log",
+  "parent_final_checks": "verification/checks-0.5.json",
+  "limits": [
+    "JVM wire probe verifies actual transport+desktop API but not physical Android network/TLS/lifecycle/layout or Windows audio.",
+    "Test-only loopback constructor reflection and process fault injection never weaken production pairing or modify desktop source.",
+    "RAM not securely zeroized; no built-in QR scanner; external scanner clipboard is user-owned.",
+    "Installed-app upgrade and rollback must still be tested on the target phone."
+  ]
+}

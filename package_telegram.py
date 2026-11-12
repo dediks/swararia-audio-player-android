@@ -14,7 +14,7 @@ import sys
 ROOT = Path(__file__).resolve().parent
 DIST = ROOT / 'dist'
 VERSION = sys.argv[1] if len(sys.argv) > 1 else '0.1.0-spike'
-assert VERSION in {'0.1.0-spike', '0.2.0-spike'}, 'Unsupported release version'
+assert VERSION in {'0.1.0-spike', '0.2.0-spike', '0.3.0-spike', '0.4.0-spike', '0.4.1-spike', '0.5.0-spike'}, 'Unsupported release version'
 APK = DIST / f'Swararia-Audio-Lab-{VERSION}-arm64-v8a.apk'
 ARCHIVE = APK.with_suffix('.zip')
 PART_BYTES = 48_000_000
@@ -24,7 +24,7 @@ def sha256(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
-manifest_name = 'manifest.json' if VERSION == '0.1.0-spike' else 'manifest-0.2.0.json'
+manifest_name = 'manifest.json' if VERSION == '0.1.0-spike' else f"manifest-{VERSION.removesuffix('-spike')}.json"
 manifest = json.loads((DIST / manifest_name).read_text())
 expected = next(item for item in manifest['artifacts'] if item['file'] == APK.name)
 assert APK.is_file() and APK.stat().st_size == expected['bytes']
@@ -92,7 +92,7 @@ result = {
     'phone_tested': False,
     'known_limit': 'Online ingest currently requires 4KB memory pages; 16KB ingest is unsupported.'
 }
-parts_manifest = 'telegram-parts.json' if VERSION == '0.1.0-spike' else 'telegram-parts-0.2.0.json'
+parts_manifest = 'telegram-parts.json' if VERSION == '0.1.0-spike' else f"telegram-parts-{VERSION.removesuffix('-spike')}.json"
 with (DIST / parts_manifest).open('x') as output:
     json.dump(result, output, indent=2)
     output.write('\n')

@@ -17,8 +17,8 @@ cp=os.pathsep.join([artifact('org.jetbrains.kotlin','kotlin-stdlib','2.2.21'),ar
 java=str(ROOT/'.toolchain/jdk/bin/java')
 main=ROOT/'app/src/main/java/com/swararia/audiolab'
 tests=ROOT/'app/src/test/java/com/swararia/audiolab'
-sources=[main/n for n in ['YoutubeSearchData.kt','ThumbnailPolicy.kt'] if (main/n).exists()]
-test_sources=[tests/n for n in ['YoutubeSearchTest.kt','YoutubeSearchRulesTest.kt','ThumbnailPolicyTest.kt'] if (tests/n).exists()]
+sources=[main/n for n in ['YoutubeSearchData.kt','ThumbnailPolicy.kt','OnlinePreviewData.kt'] if (main/n).exists()]
+test_sources=[tests/n for n in ['YoutubeSearchTest.kt','YoutubeSearchRulesTest.kt','ThumbnailPolicyTest.kt','SearchUpgradeTest.kt'] if (tests/n).exists()]
 utilities=[tests/'SearchMetadataProbe.kt'] if (tests/'SearchMetadataProbe.kt').is_file() else []
 assert test_sources
 with tempfile.TemporaryDirectory(prefix='search-jvm-',dir=ROOT/'.cache/tmp') as out:
@@ -27,22 +27,40 @@ with tempfile.TemporaryDirectory(prefix='search-jvm-',dir=ROOT/'.cache/tmp') as 
     jvm=[java,'-Xmx128m','-cp',out+os.pathsep+cp]
     result=subprocess.call(jvm+['org.junit.runner.JUnitCore']+['com.swararia.audiolab.'+p.stem for p in test_sources])
     if result or '--live' not in sys.argv:raise SystemExit(result)
-    live_dir=ROOT/'.cache/search-probe';live_dir.mkdir(exist_ok=True)
+    live_dir=ROOT/'.cache/search-probe-03';live_dir.mkdir(exist_ok=True)
     reports=[]
-    for provider in ['YOUTUBE','YOUTUBE_MUSIC']:
-        args=json.loads(subprocess.check_output(jvm+['com.swararia.audiolab.SearchMetadataProbe','arguments',provider,'royalty free music'],text=True))
+    import urllib.request, urllib.parse
+    from concurrent.futures import ThreadPoolExecutor
+    def enrich(entry):
+        if entry.get('channel') or not entry.get('id'):return entry
+        address='https://www.youtube.com/oembed?format=json&url='+urllib.parse.quote('https://www.youtube.com/watch?v='+entry['id'],safe='')
+        try:
+            req=urllib.request.Request(address,headers={'User-Agent':'Mozilla/5.0'})
+            with urllib.request.urlopen(req,timeout=7) as response: data=json.loads(response.read(100001))
+            if data.get('author_name'):entry={**entry,'channel':data['author_name']}
+        except Exception:pass
+        return entry
+    cases=[(p,k,o,'') for p in ['YOUTUBE_MUSIC','YOUTUBE'] for k in ['SONGS','PLAYLISTS'] for o in ([0,10] if k=='SONGS' and p=='YOUTUBE_MUSIC' else [0])]
+    for provider,kind,offset,playlist in cases:
+        args=json.loads(subprocess.check_output(jvm+['com.swararia.audiolab.SearchMetadataProbe','arguments',provider,'royalty free music',kind,str(offset),playlist],text=True))
+        args=args[:-1]+['--no-plugin-dirs','--plugin-dirs',str(ROOT/'app/src/main/assets'),args[-1]]
         started=time.monotonic()
-        record={'provider':provider,'arguments_from_kotlin_rules':True}
+        record={'provider':provider,'kind':kind,'offset':offset,'playlist_contents':bool(playlist),'arguments_from_kotlin_rules':True}
         try:
             process=subprocess.run([sys.executable,str(ROOT/'app/src/main/res/raw/ytdlp')]+args,capture_output=True,text=True,timeout=35,cwd=live_dir)
-            record.update({'exit_code':process.returncode,'stderr':process.stderr[-1800:]})
+            record.update({'exit_code':process.returncode,'stderr':process.stderr[-600:]})
             if process.returncode==0:
-                raw=live_dir/(provider.lower()+'.json');raw.write_text(process.stdout)
-                parsed=subprocess.run(jvm+['com.swararia.audiolab.SearchMetadataProbe','parse',str(raw)],capture_output=True,text=True,timeout=15)
-                record.update({'kotlin_parser_exit_code':parsed.returncode,'parsed_results':json.loads(parsed.stdout) if parsed.returncode==0 else None,'parser_error':parsed.stderr[-1200:]})
+                data=json.loads(process.stdout)
+                if kind=='SONGS':
+                    with ThreadPoolExecutor(max_workers=3) as pool:data['entries']=list(pool.map(enrich,data.get('entries',[])))
+                raw=live_dir/f'{provider.lower()}-{kind.lower()}-{offset}.json';raw.write_text(json.dumps(data))
+                parsed=subprocess.run(jvm+['com.swararia.audiolab.SearchMetadataProbe','parse',str(raw),kind],capture_output=True,text=True,timeout=15)
+                record.update({'kotlin_parser_exit_code':parsed.returncode,'parsed_results':json.loads(parsed.stdout) if parsed.returncode==0 else None,'parser_error':parsed.stderr[-600:]})
+                if provider=='YOUTUBE_MUSIC' and kind=='PLAYLISTS' and parsed.returncode==0:
+                    cases.append((provider,'SONGS',0,json.loads(parsed.stdout)['items'][0]['videoId']))
         except subprocess.TimeoutExpired:record['timed_out']=True
         record['elapsed_seconds']=round(time.monotonic()-started,2);reports.append(record)
     summary={'checked_at_utc':datetime.now(timezone.utc).isoformat(),'host_only':True,'android_device_tested':False,'media_downloaded':False,'results':reports}
-    (ROOT/'verification/search-e2e-live-0.2.0.json').write_text(json.dumps(summary,indent=2)+'\n')
-    print(json.dumps(summary,indent=2))
-    raise SystemExit(0 if all(x.get('kotlin_parser_exit_code')==0 for x in reports) else 1)
+    (ROOT/'verification/search-e2e-live-0.3.0.json').write_text(json.dumps(summary,indent=2)+'\n')
+    print(json.dumps([{k:r[k] for k in ['provider','kind','offset','exit_code','kotlin_parser_exit_code','elapsed_seconds'] if k in r}|{'counts':{k:v for k,v in (r.get('parsed_results') or {}).items() if k!='items'}} for r in reports],indent=2))
+    raise SystemExit(0 if all(x.get('kotlin_parser_exit_code')==0 and x.get('parsed_results',{}).get('complete_count',0)>0 for x in reports) else 1)

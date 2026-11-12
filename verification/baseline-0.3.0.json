@@ -1,0 +1,13 @@
+{
+  "base_commit": "adf7c655325ba5308c43f00b455bde4556b0e8bf",
+  "source_snapshot": "/home/ubuntu/projects/swararia-audio-player-android/.checkpoints/before-0.3.0-source.zip",
+  "snapshot_sha256": "fc140ceeb3f728059965596f888d85e81a84d996fdfbbd6a104e230dd77e779d",
+  "snapshot_members": 105,
+  "old_toolchain_reused": true,
+  "new_dependencies_installed": false,
+  "protected": {
+    "app/src/main/java/com/swararia/audiolab/MediaLibrary.kt": "08069b1cc74e95d91bc58f7c022bed06ca8b1cfc9847172c55eb6b262c1f02d7",
+    "app/src/main/java/com/swararia/audiolab/IngestService.kt": "6378f349904567c55912fad719047699bc28603344157694b4078a8c3ba4d72a",
+    "app/schemas/com.swararia.audiolab.AudioDatabase/1.json": "87816c40ddb5dc143c8f489e844185255e6c5666f2da6f1f66220dc2ee30bc26"
+  }
+}

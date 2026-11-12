@@ -19,6 +19,6 @@ with zipfile.ZipFile(archive) as z:
     assert z.testzip() is None
     assert len(z.namelist())==len(files)==len(set(z.namelist()))
     assert all(not any(part in EXCLUDED for part in Path(n).parts) and not n.endswith(('.keystore','.jks','.apk')) for n in z.namelist())
-    assert all(n in z.namelist() for n in ['README.md','DEVICE-TEST.md','app/build.gradle','app/src/main/AndroidManifest.xml','app/src/main/res/raw/ytdlp','engine-lock.json','app/src/main/java/com/swararia/audiolab/OrganizerScreen.kt'])
+    assert all(n in z.namelist() for n in ['README.md','DEVICE-TEST.md','app/build.gradle','app/src/main/AndroidManifest.xml','app/src/main/res/raw/ytdlp','engine-lock.json','app/src/main/java/com/swararia/audiolab/LibraryScreen.kt'])
 with archive.open('rb') as f:digest=hashlib.file_digest(f,'sha256').hexdigest()
 print(json.dumps({'path':str(archive),'files':len(files),'bytes':archive.stat().st_size,'sha256':digest},indent=2))

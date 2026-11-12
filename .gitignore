@@ -1,3 +1,6 @@
+.toolchain
+.cache
+.checkpoints/
 .toolchain/
 .cache/
 .gradle/

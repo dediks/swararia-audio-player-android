@@ -1,0 +1,197 @@
+{
+  "passed": true,
+  "commands": [
+    {
+      "command": [
+        "bash",
+        "build.sh",
+        "testDebugUnitTest",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-01.log"
+    },
+    {
+      "command": [
+        "bash",
+        "build.sh",
+        "lintDebug",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-02.log"
+    },
+    {
+      "command": [
+        "bash",
+        "build.sh",
+        "assembleDebug",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-03.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_architecture.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-04.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_search.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-05.log"
+    },
+    {
+      "command": [
+        "python",
+        "verification/run_data_checks.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-06.log"
+    },
+    {
+      "command": [
+        "python",
+        "verification/run_batch_checks.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-07.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_core.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-08.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_ui_rules.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-09.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_ui_source_contracts.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-10.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_ui_integration.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-11.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_architecture_wiring.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-12.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_upgrade_03.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-13.log"
+    },
+    {
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "test_music_metadata_plugin",
+        "-v"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-14.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_engine_payload.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-15.log"
+    },
+    {
+      "command": [
+        "python",
+        "test_apk_contract.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-16.log"
+    },
+    {
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "verification.test_preview_background",
+        "-v"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-17.log"
+    },
+    {
+      "command": [
+        "python",
+        "verification/run_preview_checks.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-18.log"
+    },
+    {
+      "command": [
+        "python",
+        "verify_artifacts.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-19.log"
+    },
+    {
+      "command": [
+        "python",
+        "verify_update_041.py"
+      ],
+      "exit_code": 0,
+      "log": "verification/upgrade-0.4.1-gate-20.log"
+    }
+  ],
+  "generated_at_utc": "2026-11-11T22:59:39.358146+00:00",
+  "unit_tests": {
+    "tests": 79,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "lint": {
+    "Warning": 33
+  },
+  "app_source_fingerprint_sha256": "a6f85652b93785403364d7fca5316238ad738dbb8823cd94edfaa7af7d4e30bb",
+  "artifact_sha256": {
+    "app-arm64-v8a-debug.apk": "1f4e3b05d0e3d46a5632868ff7c0e1fe3a1c83e0c95ee6f5d5efe945a7c18c1c",
+    "app-armeabi-v7a-debug.apk": "4ced475085af2656e0ac3f8a79b04463da7980f26504311dad904fec82283ea4"
+  },
+  "offline_builds": true,
+  "device_execution_tested": false,
+  "ui_runtime_render_tested": false,
+  "native_ingest_execution_tested": false,
+  "preview_latency_measured_on_device": false
+}

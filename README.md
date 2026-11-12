@@ -2,20 +2,28 @@
 
 Aplikasi Android native untuk menyiapkan, mengelola, dan memutar audio lokal. Target penggunaan: soundman dan rental sound system hajatan. Aplikasi tetap dapat memutar file lokal tanpa laptop; fitur transfer koleksi dari Swararia Desktop **belum diimplementasikan**.
 
-## Status baseline
+## Status pengembangan
 
-Source berasal dari **0.2.0-spike**, sebuah build debug/pengujian, bukan rilis produksi.
+Baseline source publik terakhir yang diverifikasi adalah **0.2.0-spike**. Baseline lokal **0.4.1-spike** ada pada `87932e8`. Branch `feature/android-desktop-remote-0.5` menambahkan kandidat **0.5.0-spike**: tab Remote, 21 gate/88 unit tests dan review runtime independen lulus; uji HP–PC nyata tetap diperlukan. Ini build debug/pengujian, bukan rilis produksi. Tidak ada push otomatis. Detail update/pairing: `UPDATE-0.5.0.md`.
 
 - Android 10+ (minSdk 29), targetSdk 36; Kotlin/Compose, Media3, Room dan MediaStore/SAF.
 - Pustaka: pencarian lokal, urutan terbaru/A–Z, rename file dan riwayat undo.
 - Mini-player, pemutar lengkap, antrean dan background media session.
 - Tambah audio melalui tautan HTTPS berizin, pencarian metadata YouTube/YouTube Music, atau impor salinan file lokal.
 - Logo Swararia dan font Inter lokal; artwork abstrak merupakan dekorasi fallback, bukan sampul album yang terverifikasi.
-- Tidak memerlukan server, akun, Python atau Termux di HP untuk fungsi yang sudah tersedia. Pencarian/unduhan online memerlukan internet.
+- Fungsi lokal tidak memerlukan server, akun, Python atau Termux di HP. Pencarian/unduhan online memerlukan internet. Desktop Remote membutuhkan PC dengan Native Remote v1 aktif dan jaringan LAN yang sama; bukan pemindahan engine desktop ke HP.
 
-Pada workspace build, 14 unit test, kompilasi, build APK, kontrak APK, signature dan pemeriksaan arsip lulus. Lint: 26 warning, tidak ada Error/Fatal. Review kode independen tidak menemukan masalah keamanan/logika konkret. **Checkout bersih repository ini belum dibangun ulang.**
+0.3.0 menambahkan default YouTube Music, filter lagu/playlist, urutan hasil termuat, metadata kanal/durasi, pemuatan hasil tambahan, preview online hingga 30 detik, mode Loop/Continue/Once dan Fade 3s. Prioritas kanal memakai sinyal terverifikasi/indikasi artis, bukan bukti label asli atau hak penggunaan. Playlist dibuka untuk memilih lagu; bukan unduh massal.
 
-Pengguna melaporkan versi 0.1.0 bekerja pada Samsung M15 Android 16. Itu bukan bukti bahwa semua fitur/UI versi 0.2.0 sudah diuji di perangkat. Lihat `DEVICE-TEST.md`, `UPDATE-0.2.0.md` dan laporan `verification/`.
+0.4.0 memperbarui UI Search/Playlist/Library dan satu playback surface, Preview hingga dua menit, artwork asli yang tersedia dengan cache offline, multiselect lagu termuat, queue download berurutan/persisten, Cancel batch/Retry failed, serta Delete salinan terkelola. Room bermigrasi 1→2 tanpa reset tracks/rename history. Detail instalasi, acceptance HP, bukti verifikasi dan batas rollback: `UPDATE-0.4.0.md`. Build/host tests bukan bukti runtime di HP.
+
+0.4.1 memindahkan resolusi/player Preview ke service, menambahkan notifikasi awal yang dapat dibatalkan, reconnect controller, pemulihan queue lokal paused, serta numeric startup timing. Cap tetap 120 detik; tidak ada dependency/schema baru. Pengguna melaporkan Preview bisa di-minimize; lock/rotasi dan perbaikan latensi belum diverifikasi lengkap. Detail dan acceptance historis: `UPDATE-0.4.1.md`; hasil di `verification/checks-0.4.1.json`.
+
+0.5.0 memakai ulang Compose, komponen/ikon/tema, manual DI, Coroutines, Jackson dan HTTPS bawaan untuk client Remote. Pairing/pin sertifikat dan token session berada di RAM; Play/Pause/Stop mengendalikan output PC, bukan streaming ke HP. Tidak ada dependency/permission/schema baru. Prototype scanner QR baru tidak ditambahkan; gunakan teks pairing dari PC, jangan kirim secret lewat chat. Desktop source Native Remote v1 diperlukan; installer/browser remote HTTP lama tidak otomatis kompatibel. Gate aktual: `verification/checks-0.5.json`; probe mandiri: `python verification/run_desktop_remote_checks.py` dengan checkout desktop dan Python test-nya tersedia. JVM wire tests bukan bukti runtime Android/Windows/audio fisik.
+
+Branch `refactor/architecture-foundation` merapikan dependency/state dan memisahkan UI tanpa menerapkan mockup baru. Pada repository ini, build memakai toolchain/cache yang sudah ada: 33 unit test, kompilasi, kedua APK ABI, kontrak APK dan signature lulus. Lint: 15 warning, tidak ada Error/Fatal. Batas dan alur pengembangan dijelaskan di `ARCHITECTURE.md` serta `CONTRIBUTING.md`. Review versi 0.3.0 lulus sesudah perbaikan temuan awal; review refactor juga lulus dan dicatat terpisah pada `verification/architecture-review.json`.
+
+Pengguna melaporkan 0.1.0, 0.2.0, dan fungsi 0.3.0 bekerja pada Samsung M15 Android 16, tetapi UX 0.3.0 perlu diperbaiki. Laporan itu bukan verifikasi independen setiap fitur/kasus. **Build refactor belum diuji pada HP.** Pengambilan stream preview pada jaringan build dibatasi anti-bot YouTube; penanganan error tersedia. Lihat `DEVICE-TEST.md`.
 
 ## Batasan penting
 

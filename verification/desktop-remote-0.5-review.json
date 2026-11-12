@@ -1,0 +1,141 @@
+{
+  "passed": true,
+  "security_concerns": [],
+  "logic_errors": [],
+  "review_delegation": "deleg_35ebca6c",
+  "reviewed_base_commit": "87932e8812bb594fc13de38f8c907e964b7037a6",
+  "app_source_fingerprint_sha256": "8dc0ae84779c894446eb36e6708a4ba02f9a770b5dc06dc768e63e2eff0d4f50",
+  "reviewed_candidate_code_fingerprint": "22c3c8c784918aa081a60bb654d8580a847a430d35e64397c69b646de86f14de",
+  "scope": "Composed runtime/wire review plus separately inspected literal-only APK expectation and transfer-version delta; no application-source changes after runtime review.",
+  "summary": "Independent review found no blocking security or logic errors. Pinning/IP SAN precede secrets; network size/idle/total bounds and cancellation cleanup; generation/visibility guards, no replay; independent phone playback ownership. Reviewer inspected actual source and passed13 read-only source contracts.",
+  "suggestions": [
+    "TDD initial8-test checkpoint and pre-deadline limits must be labeled historical and final evidence updated; parent completed this documentation correction.",
+    "Physical Android LAN/TLS, rotation/background, layout, Windows runtime and real audio acceptance remain required."
+  ],
+  "parent_verification": {
+    "independent_gate_commands": 21,
+    "full_unit_tests": {
+      "tests": 88,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "remote_targeted_unit_tests": 9,
+    "lint": {
+      "Warning": 34,
+      "Error": 0,
+      "Fatal": 0
+    },
+    "actual_kotlin_to_desktop_https_wire_passed": true,
+    "wire_audio_master_simulated_and_rejects_not_fake_applied": true,
+    "old_signer_schema_native_engine_preserved": true,
+    "reports": [
+      "verification/checks-0.5.json",
+      "verification/update-compatibility-0.5.json"
+    ]
+  },
+  "device_execution_tested": false,
+  "windows_runtime_tested": false,
+  "source_publication_performed": false,
+  "release_literals_review_scope": "APK expected-version and Telegram version allowlist are tracked separately; this verdict is not a claim of reviewing unbounded later modifications.",
+  "review_records": [
+    {
+      "delegation": "deleg_35ebca6c",
+      "scope": "Full Android/runtime and host wire code",
+      "passed": true
+    },
+    {
+      "delegation": "deleg_352ee196",
+      "scope": "test_apk_contract expected6/0.5 and package_telegram versionallowlist only",
+      "passed": true
+    }
+  ],
+  "release_literal_review_pending": false,
+  "release_literal_sha256": {
+    "test_apk_contract.py": "cf99bb28a81b979225264eaabede8f88167d1d3b1d2b7675cec613ef12c0c014",
+    "package_telegram.py": "751e6bc2912e78f969e6cb24b3a4283266a24156ac49b1b38485d250e6386ddd"
+  },
+  "reviewed_code_rows": [
+    {
+      "path": "app/build.gradle",
+      "bytes": 2537,
+      "sha256": "1072808020bfdcc96931dc09335ea13992ea9444ea08c597ded91aae1a197f98"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/AppContainer.kt",
+      "bytes": 1969,
+      "sha256": "20ba08004d7a5dbee8e791dc200b3aff7b9018ea8335d4eab2049c775d044c98"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/AppViewModel.kt",
+      "bytes": 4545,
+      "sha256": "43cd1811a9d2c3c8d5c5609ebec86cb963b8d930a426c32b825cd8550a9fa094"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/DesktopRemoteHttpsApi.kt",
+      "bytes": 9924,
+      "sha256": "0baa7cb64c9bf46d7df807be5dda2ed0f0968e67390e85f0a6b7513fcc34abf9"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/DesktopRemoteProtocol.kt",
+      "bytes": 7628,
+      "sha256": "c58387bf64a9247d445e3faa7ef9631280f9d40d32562161a652cde07dec2ac3"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/DesktopRemoteScreen.kt",
+      "bytes": 5508,
+      "sha256": "a7ffd832e67901e3574ca3e9d0996adcc498e9908e6da194aa3d845464e55060"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/DesktopRemoteSession.kt",
+      "bytes": 9340,
+      "sha256": "7308cd79868e86448d3e9dfe9b76bef6d15c9f46a2480588f9dc61047ceef321"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/MainActivity.kt",
+      "bytes": 14671,
+      "sha256": "b1d899343962e80c30a5494149e3ad742ddcf0badfebc418148f225badf0cf08"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/SwarariaUi.kt",
+      "bytes": 8430,
+      "sha256": "3c8d93bdc906fd4467c5ec10cbf393a7a87fadadc36b13fa988fcfc705e5ce21"
+    },
+    {
+      "path": "app/src/test/java/com/swararia/audiolab/DesktopRemoteProtocolTest.kt",
+      "bytes": 1631,
+      "sha256": "45bbbdbfa4532f3402eea92235b300d3e079b880f631f17de8e69ff614d9ff64"
+    },
+    {
+      "path": "app/src/test/java/com/swararia/audiolab/DesktopRemoteSessionTest.kt",
+      "bytes": 6354,
+      "sha256": "81c7bd6ebe956f2d624fca8198bdbc6412f21011febafe3a817d6cca3081ca44"
+    },
+    {
+      "path": "app/src/test/java/com/swararia/audiolab/DesktopRemoteTlsTest.kt",
+      "bytes": 2256,
+      "sha256": "649389a0c7c368ece50f9f575569f5df9be6b21cc28fe0a1deabacf06dad18cf"
+    },
+    {
+      "path": "verification/DesktopRemoteWireProbe.kt",
+      "bytes": 6263,
+      "sha256": "791f3a38a2399ff4af9993b7aedd7de6a10be3d4076a9a862635fc2bd6b09405"
+    },
+    {
+      "path": "verification/desktop_remote_fixture.py",
+      "bytes": 4393,
+      "sha256": "837bfe4d649613cdfa9b69b3d05fcbeb97c28709c6d81140e170d9cd24025c9f"
+    },
+    {
+      "path": "verification/run_desktop_remote_checks.py",
+      "bytes": 2922,
+      "sha256": "e89401f61fdab4d25b421b7f7c4c0f645b691caaac2a8ed72a7618b72b5f334e"
+    },
+    {
+      "path": "verification/test_desktop_remote_wiring.py",
+      "bytes": 1374,
+      "sha256": "63a68d6d0119e05e2757de76d2cf8f7968193bcf549c0d81d28f8f85b32a2987"
+    }
+  ],
+  "desktop_source_unchanged": true
+}

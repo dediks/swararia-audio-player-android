@@ -1,13 +1,6 @@
 package com.swararia.audiolab
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.ExperimentalTextApi
@@ -15,7 +8,6 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @OptIn(ExperimentalTextApi::class)
@@ -66,65 +58,4 @@ fun AudioTheme(content: @Composable () -> Unit) {
         errorContainer = Color(0xFF4B2526), onErrorContainer = Color(0xFFFFDAD6),
         inverseSurface = Color(0xFFF1F5EF), inverseOnSurface = Color(0xFF19231F), inversePrimary = Color(0xFF236B53),
     ), typography = SwarariaTypography, content = content)
-}
-
-@Composable
-fun AppHeader() {
-    Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 22.dp, vertical = 16.dp)) {
-        Text("SWARARIA", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold)
-        Text("Audio Lab", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-        Text("Uji coba • Proses di HP, tanpa backend", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-fun IngestScreen(state: IngestState, trackCount: Int, modifier: Modifier = Modifier,
-                 onDownload: (String, Boolean) -> Unit, onImport: () -> Unit,
-                 onUpdate: () -> Unit, onCancel: () -> Unit) {
-    var url by rememberSaveable { mutableStateOf("") }
-    var authorized by rememberSaveable { mutableStateOf(false) }
-    var about by remember { mutableStateOf(false) }
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("Tambah audio", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        Text("Unduh dari URL berizin atau salin audio milikmu dari HP.", style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        OutlinedTextField(value = url, onValueChange = { url = it }, enabled = !state.busy,
-            label = { Text("URL HTTPS") }, placeholder = { Text("https://…") },
-            modifier = Modifier.fillMaxWidth(), maxLines = 3)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = authorized, onCheckedChange = { authorized = it }, enabled = !state.busy)
-            Text("Saya memiliki izin untuk mengunduh audio ini.", style = MaterialTheme.typography.bodyMedium)
-        }
-        Button(onClick = { onDownload(url, authorized) }, enabled = !state.busy && authorized && url.isNotBlank(),
-            modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text("Unduh ke HP") }
-        OutlinedButton(onClick = onImport, enabled = !state.busy,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Impor audio dari HP") }
-        OutlinedCard(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(state.stage, style = MaterialTheme.typography.titleSmall,
-                    color = if (state.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
-                if (state.busy) {
-                    if (state.progress != null) LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth())
-                    else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-                if (state.detail.isNotBlank()) SelectionContainer {
-                    Text(state.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (state.busy && state.cancelable) TextButton(onClick = onCancel) { Text("Batalkan") }
-            }
-        }
-        Text("Library: $trackCount file • Music/SwarariaAudioLab/", style = MaterialTheme.typography.bodySmall)
-        HorizontalDivider()
-        Text("Mesin yt-dlp: ${state.engineVersion}", style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(onClick = onUpdate, enabled = !state.busy) { Text("Perbarui yt-dlp") }
-        Text("Opsional: mengambil versi stabil dari GitHub resmi. Diperlukan internet; tidak memasang Termux.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        TextButton(onClick = { about = true }) { Text("Tentang uji coba") }
-        Spacer(Modifier.height(16.dp))
-    }
-    if (about) AlertDialog(onDismissRequest = { about = false }, title = { Text("APK uji coba") },
-        text = { Text("File disalin ke folder Music/SwarariaAudioLab. Impor tidak mengubah file asli. Pemrosesan memakai engine di HP; URL dan pembaruan membutuhkan internet. Tidak ada akun, server pendamping, atau analitik aplikasi. Engine downloader/FFmpeg memiliki kewajiban lisensi; lihat source dan catatan lisensi sebelum distribusi.") },
-        confirmButton = { TextButton(onClick = { about = false }) { Text("Mengerti") } })
 }

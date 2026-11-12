@@ -1,0 +1,18 @@
+{
+  "screens": [
+    "01-search",
+    "02-playlist-select",
+    "03-downloads",
+    "04-library-delete",
+    "05-player",
+    "06-search-loading"
+  ],
+  "sample_data": true,
+  "dimensions": [
+    864,
+    1920
+  ],
+  "preview_duration_proposal_seconds": 120,
+  "application_changed": false,
+  "notes": "Concepts from supplied phone screenshots. All tracks, covers, counts, times and progress are sample design data. GIF shows proposed indeterminate search animation, not network measurement."
+}

@@ -1,0 +1,28 @@
+"""Host source contracts only; functional TLS/session tests run separately."""
+from pathlib import Path
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / 'app/src/main/java/com/swararia/audiolab'
+
+
+class DesktopRemoteWiring(unittest.TestCase):
+    def test_network_implementation_is_built_only_at_composition_root(self):
+        vm = (SRC / 'AppViewModel.kt').read_text()
+        root = (SRC / 'AppContainer.kt').read_text()
+        self.assertNotIn('DesktopRemoteHttpsApi()', vm,
+                         'ViewModel must consume injected reusable port, not construct network implementation')
+        self.assertIn('DesktopRemoteHttpsApi()', root)
+        self.assertIn('container.desktopRemoteApi()', root)
+
+    def test_remote_feature_never_owns_phone_player_or_durable_credentials(self):
+        names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteScreen']
+        source = '\n'.join((SRC / (n + '.kt')).read_text() for n in names)
+        for forbidden in ['MediaController', 'ExoPlayer', 'PlaybackService', 'SharedPreferences',
+                          'SavedStateHandle', 'rememberSaveable', 'setDefaultSSLSocketFactory',
+                          'setDefaultHostnameVerifier', 'setHostnameVerifier']:
+            self.assertNotIn(forbidden, source)
+
+
+if __name__ == '__main__':
+    unittest.main()

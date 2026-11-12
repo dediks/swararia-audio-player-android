@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "security_concerns": [],
+  "logic_errors": [],
+  "suggestions": [
+    "Preexisting initial Activity controller connection failure may still require Activity recreation; its initial retry path is not part of this fix.",
+    "Task dismissal/swipe from Recents, OS kill, force-stop and reboot are explicitly outside Home/lock/recreation continuity acceptance.",
+    "Physical-device acceptance remains required for Home/lock/recreation, notification handoff/cancel, 120s playback boundary and latency.",
+    "Future helper hardening: invalidate check reports at entry/unexpected interruption, reject optimized Python, and stage package outputs before promotion. Current approved invocation uses normal Python and existing-file/fingerprint/hash guards."
+  ],
+  "summary": "Combined independent review passed: full runtime/security review, scoped Python release-helper review, equivalent framework SessionResult boundary proof and canonical SessionError constant equivalence. Exact in-memory fingerprint reconstruction chains final app source to the original approved runtime. Authorization, result values and public state extras remain unchanged. Reviewers did not claim real artifact packaging or device acceptance; parent execution evidence is separate.",
+  "reviewed_base_commit": "246e1462cf531fad47b98a4a16447db2aa09b018",
+  "app_source_fingerprint_sha256": "a6f85652b93785403364d7fca5316238ad738dbb8823cd94edfaa7af7d4e30bb",
+  "original_runtime_review_fingerprint_sha256": "d402dfa0497bdbcfcbf3b9e33dd13407d5aa8e1d49bd5f379a262ce2f60a99a6",
+  "review_records": [
+    {"delegation_id": "deleg_05f05eda", "scope": "Full runtime/test diff and new Kotlin/test files", "record": "verification/preview-background-0.4.1-review-pass1.json"},
+    {"delegation_id": "deleg_e635dd50", "scope": "Python release helpers only; invalid member-annotation claim excluded", "record": "verification/preview-background-0.4.1-helper-review.json"},
+    {"delegation_id": "deleg_7a561c18", "scope": "Framework SessionResult boundary and exact original app-fingerprint reconstruction", "record": "verification/preview-background-0.4.1-result-review.json"},
+    {"delegation_id": "deleg_8793cd7e", "scope": "Canonical error-constant namespace, pinned bytecode values and exact predecessor fingerprint reconstruction", "record": "verification/preview-background-0.4.1-constants-review.json"}
+  ],
+  "device_execution_tested": false,
+  "preview_latency_measured_on_device": false
+}

@@ -1,0 +1,30 @@
+{
+  "version": "0.4.1-spike",
+  "version_code": 5,
+  "application_id_unchanged": true,
+  "database_schema_unchanged": true,
+  "database_version": 2,
+  "new_migration_required": false,
+  "protected_source_files_unchanged": 26,
+  "no_new_dependencies": true,
+  "manifest_permissions_and_services_unchanged": true,
+  "artifacts": [
+    {
+      "abi": "arm64-v8a",
+      "same_signer": true,
+      "old_apk_unchanged": true,
+      "native_and_engine_payloads_identical": true,
+      "old_apk_sha256": "c2d13fc614d566270f04430b436a1e214c88914038d754bf36732457c3c8ad2b",
+      "new_apk_sha256": "1f4e3b05d0e3d46a5632868ff7c0e1fe3a1c83e0c95ee6f5d5efe945a7c18c1c"
+    },
+    {
+      "abi": "armeabi-v7a",
+      "same_signer": true,
+      "old_apk_unchanged": true,
+      "native_and_engine_payloads_identical": true,
+      "old_apk_sha256": "bfb5a531a7c5481007e60b057da496967010d847efe2d58a235d9fe7bffb6006",
+      "new_apk_sha256": "4ced475085af2656e0ac3f8a79b04463da7980f26504311dad904fec82283ea4"
+    }
+  ],
+  "device_upgrade_tested": false
+}

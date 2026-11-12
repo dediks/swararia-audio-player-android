@@ -1,0 +1,10 @@
+{
+ "passed": false,
+ "review_batch": "deleg_6ce48cd4",
+ "scope": "Data/native publication, durable URL policy and storage boundary",
+ "security_concerns": [{"severity":"medium","file":"DownloadQueueRepository.kt:11","issue":"insertSafe source predicate permits embedded NUL inside fixed-length video ID because SQLite GLOB text matching stops at NUL.","evidence":"Actual CREATE_DOWNLOADS and insertSafe SQL accepted 43-byte canonical-prefix strings with an embedded NUL ID/suffix. Kotlin wrappers reject but the callable SQL boundary must enforce its own storage invariant.","required_fix":"Add instr(:sourceUrl,char(0))=0 and regressions with embedded, not only appended, NUL."}],
+ "logic_errors": [],
+ "suggestions": [],
+ "summary": "No other core journal, atomic completion, retry, import/delete, consent or native lifecycle blocker established. Parent independently identified pending MediaStore adapter issues; all final fixes must be re-reviewed together.",
+ "verification": {"host_rules_tests":11,"host_sql_source_tests":5,"runner_publication_tests":13,"real_api_compilation":true,"device_execution_tested":false}
+}

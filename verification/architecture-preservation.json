@@ -1,0 +1,23 @@
+{
+  "base_commit": "e96b931e2214006dfb956a004f662b895dc77340",
+  "preserved_files": 48,
+  "storage_bodies_unchanged": true,
+  "room_declarations_unchanged": true,
+  "previous_apks_unchanged": true,
+  "mockup_preserved": true,
+  "device_tested": false,
+  "candidate_apks": [
+    {
+      "abi": "arm64-v8a",
+      "sha256": "c1a2409cf91414a548fcf85d7c5b2ca9dca5d219f97177d6ff3024f6f691a5bf",
+      "signer_unchanged": true,
+      "native_and_engine_unchanged": true
+    },
+    {
+      "abi": "armeabi-v7a",
+      "sha256": "979508c134380e71a4d6cf4623598c63bea0de9073f0d59df1195f9a51a12616",
+      "signer_unchanged": true,
+      "native_and_engine_unchanged": true
+    }
+  ]
+}

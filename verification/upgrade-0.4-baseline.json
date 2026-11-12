@@ -1,0 +1,8 @@
+{
+  "base_commit": "f2d0b3d1ab6c8f250733a42606100721f1a9888d",
+  "snapshot": "/home/ubuntu/projects/swararia-audio-player-android/.checkpoints/before-0.4-source.zip",
+  "members": 156,
+  "sha256": "c3a72243439b889ab3fbcdb9a33f9605a2d54d1cf6f25ea45174db9b8247691c",
+  "new_dependencies": false,
+  "push_allowed": false
+}

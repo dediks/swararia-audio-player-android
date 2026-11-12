@@ -1,0 +1,8 @@
+{
+  "base_commit": "e96b931e2214006dfb956a004f662b895dc77340",
+  "snapshot": "/home/ubuntu/projects/swararia-audio-player-android/.checkpoints/before-architecture-refactor.zip",
+  "snapshot_files": 138,
+  "snapshot_sha256": "6c8630938a2fbf3bbe8035db16a879425e0d83140e3df87d4d414228c19df5eb",
+  "mockup_preserved": true,
+  "new_dependencies": false
+}

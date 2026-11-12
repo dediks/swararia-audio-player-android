@@ -1,0 +1,18 @@
+{
+  "passed": false,
+  "review_batch": "deleg_f1a783a7",
+  "security_concerns": [
+    {"severity":"high","files":["DownloadQueueRepository.kt","DownloadQueueRules.kt","ThumbnailPolicy.kt"],"issue":"Arbitrary signed/auth-bearing source URLs and thumbnail queries can reach durable download_jobs columns.","required_fix":"Validate canonical supported public source IDs before enqueue and discard unsafe durable thumbnail URLs; regression tests."}
+  ],
+  "logic_errors": [
+    {"severity":"high","files":["BatchDownloadRunner.kt","IngestService.kt","MediaLibrary.kt","DownloadQueueRepository.kt"],"issue":"Publication and queue completion are separate commits; recovery/retry can duplicate already-published audio.","required_fix":"Durable publication association/reconciliation, shared Room transaction for track insertion and completion, optional artwork after completion, crash-boundary tests."},
+    {"severity":"P1","files":["MainActivity.kt"],"issue":"Activity-captured delete callback skips queue reconciliation after rotation/disconnection.","required_fix":"Retained explicit deletion IDs reconciled with current controller; delayed-delete/recreation tests. Do not infer deletion from transient empty library."},
+    {"severity":"P2","files":["SearchPreviewPlayer.kt","SearchSession.kt"],"issue":"Playback error clears selected Preview context, hiding failed/Retry surface.","required_fix":"Invalidate stream cache, stop playback, preserve selected hit in failed state and retry fresh; preserve cleanup exclusion."}
+  ],
+  "suggestions": [
+    "Bound overall artwork download duration, not only read timeout and bytes.",
+    "Document MediaMetadataRetriever embeddedPicture allocation before byte cap.",
+    "Retain explicit physical-device acceptance gates for MediaStore, migration, background behavior, cancellation, clipping and visual layout."
+  ],
+  "summary":"Blocked pending focused fixes and independent re-review. Host checks passed, not physical Android execution."
+}
