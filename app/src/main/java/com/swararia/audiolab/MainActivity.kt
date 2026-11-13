@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             AudioTheme {
                 val tracks by model.tracks.collectAsStateWithLifecycle()
+                val playlists by model.playlists.collectAsStateWithLifecycle()
                 val ingest by model.ingest.collectAsStateWithLifecycle()
                 val search by model.search.collectAsStateWithLifecycle()
                 val preview by model.preview.collectAsStateWithLifecycle()
@@ -80,7 +81,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 SwarariaUi(
-                    tracks = tracks, controller = controller, ingest = ingest, search = search,
+                    tracks = tracks, playlists = playlists, controller = controller, ingest = ingest, search = search,
                     lastRename = lastRename, organizerBusy = organizerBusy, snackbarHostState = snackbars,
                     searchActions = SearchActions(
                         preview = preview,
@@ -110,6 +111,17 @@ class MainActivity : ComponentActivity() {
                         runCatching { playTrack(track, tracks) }
                             .onFailure { model.message(it.message ?: "Audio tidak dapat diputar.") }
                     } },
+                    onPlayQueue = { track, queue -> withNotificationPermission {
+                        runCatching { playTrack(track, queue.ifEmpty { tracks }) }
+                            .onFailure { model.message(it.message ?: "Audio tidak dapat diputar.") }
+                    } },
+                    playlistActions = PlaylistUiActions(
+                        onCreatePlaylist = { name, trackId -> model.createPlaylist(name, trackId) },
+                        onRenamePlaylist = { playlistId, name -> model.renamePlaylist(playlistId, name) },
+                        onDeletePlaylist = { playlistId -> model.deletePlaylist(playlistId) },
+                        onAddTrackToPlaylist = { playlistId, trackId -> model.addTrackToPlaylist(playlistId, trackId) },
+                        onRemoveTrackFromPlaylist = { playlistId, trackId -> model.removeTrackFromPlaylist(playlistId, trackId) },
+                    ),
                     onRename = { id, title, done -> model.rename(id, title, done) },
                     onUndo = { model.undoRename() },
                     onSearch = { query, provider -> whenOnlineIdle { model.search(query, provider) } },

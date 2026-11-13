@@ -37,6 +37,7 @@ class AppViewModel(
     }
     override fun onCleared() { desktopRemote.disconnect(); session.close(); super.onCleared() }
     val tracks = library.tracks.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val playlists = library.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val lastRename = library.lastRename.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     private val busy = MutableStateFlow(false)
     val organizerBusy = busy.asStateFlow()
@@ -48,7 +49,10 @@ class AppViewModel(
         { session.canStartOnlineOperation() }, { ingest.value.busy }, { jobs.value },
         { id -> playbackDeletion.delete(id) { library.delete(id) } }, ::message)
     val operationBusy = operations.busy
-    init { operations.initialize() }
+    init {
+        operations.initialize()
+        viewModelScope.launch { runCatching { library.scanMissingMetadata() } }
+    }
     fun enqueueDownloads(requests: List<DownloadRequest>, authorized: Boolean, start: (String) -> Unit) {
         if (!canStartOnlineOperation()) { message("Tunggu proses yang sedang berjalan."); return }
         cancelPreview(); operations.enqueue(requests, authorized, start)
@@ -79,6 +83,49 @@ class AppViewModel(
             try { messageChannel.send("Nama dikembalikan: ${library.undoLastRename()}") }
             catch (cancel: CancellationException) { throw cancel }
             catch (failure: Exception) { messageChannel.send(failure.message ?: "Pembatalan gagal.") }
+            finally { busy.value = false }
+        }
+    }
+
+    fun createPlaylist(name: String, initialTrackId: Long? = null) = runPlaylistAction("Gagal membuat playlist.") {
+        val cleanName = LibraryRules.validatedPlaylistName(name)
+        val playlistId = library.createPlaylist(cleanName)
+        if (initialTrackId != null) {
+            library.addTrackToPlaylist(playlistId, initialTrackId)
+            "Playlist \"$cleanName\" dibuat & lagu ditambahkan."
+        } else {
+            "Playlist \"$cleanName\" dibuat."
+        }
+    }
+
+    fun renamePlaylist(playlistId: Long, name: String) = runPlaylistAction("Gagal mengubah nama playlist.") {
+        val cleanName = LibraryRules.validatedPlaylistName(name)
+        library.renamePlaylist(playlistId, cleanName)
+        "Playlist diganti menjadi \"$cleanName\"."
+    }
+
+    fun deletePlaylist(playlistId: Long) = runPlaylistAction("Gagal menghapus playlist.") {
+        library.deletePlaylist(playlistId)
+        "Playlist dihapus."
+    }
+
+    fun addTrackToPlaylist(playlistId: Long, trackId: Long) = runPlaylistAction("Gagal menambahkan lagu ke playlist.") {
+        library.addTrackToPlaylist(playlistId, trackId)
+        "Lagu ditambahkan ke playlist."
+    }
+
+    fun removeTrackFromPlaylist(playlistId: Long, trackId: Long) = runPlaylistAction("Gagal mengeluarkan lagu dari playlist.") {
+        library.removeTrackFromPlaylist(playlistId, trackId)
+        "Lagu dikeluarkan dari playlist."
+    }
+
+    private fun runPlaylistAction(fallbackError: String, block: suspend () -> String) {
+        if (busy.value || operations.busy.value) return
+        busy.value = true
+        viewModelScope.launch {
+            try { messageChannel.send(block()) }
+            catch (cancel: CancellationException) { throw cancel }
+            catch (failure: Exception) { messageChannel.send(failure.message ?: fallbackError) }
             finally { busy.value = false }
         }
     }

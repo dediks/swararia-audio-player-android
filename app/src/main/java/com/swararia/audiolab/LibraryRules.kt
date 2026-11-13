@@ -30,4 +30,28 @@ object LibraryRules {
         require(title.toByteArray(Charsets.UTF_8).size <= 180) { "Nama terlalu panjang. Maksimal 180 byte." }
         return title + if (extension.isEmpty()) "" else ".$extension"
     }
+
+    fun validatedPlaylistName(raw: String): String {
+        val clean = raw.trim()
+        require(clean.isNotBlank()) { "Isi nama playlist terlebih dahulu." }
+        require(clean.none { it.isISOControl() }) { "Nama playlist tidak boleh berisi karakter kontrol." }
+        require(clean.toByteArray(Charsets.UTF_8).size <= 60) { "Nama playlist maksimal 60 byte." }
+        return clean
+    }
+
+    fun sanitizedTag(raw: String?, maxLen: Int = 120): String? {
+        if (raw == null) return null
+        val cleaned = buildString {
+            for (ch in raw) {
+                append(if (ch.isISOControl()) ' ' else ch)
+            }
+        }.replace(Regex("\\s+"), " ").trim()
+        if (cleaned.isEmpty() || cleaned.equals("<unknown>", ignoreCase = true)) return null
+        return cleaned.take(maxLen)
+    }
+
+    fun audioFormatLabel(displayName: String): String {
+        val ext = displayName.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
+        return ext.takeIf { it.isNotEmpty() }?.uppercase(java.util.Locale.ROOT) ?: "AUDIO"
+    }
 }

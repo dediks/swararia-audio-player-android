@@ -39,4 +39,22 @@ class LibraryRulesTest {
         assertEquals("Acara.opus", LibraryRules.renamedDisplayName("asli.opus", "Acara.OPUS"))
         assertEquals("Lagu café.opus", LibraryRules.renamedDisplayName("asli.opus", "Lagu café"))
     }
+
+    @Test fun playlistNamesValidateLengthAndControlChars() {
+        assertEquals("Fokus Malam", LibraryRules.validatedPlaylistName("  Fokus Malam  "))
+        for (bad in listOf("", "   ", "Playlist\nBaru", "Tab\tName", "a".repeat(61))) {
+            assertThrows("Invalid playlist name must be rejected: $bad", IllegalArgumentException::class.java) {
+                LibraryRules.validatedPlaylistName(bad)
+            }
+        }
+    }
+
+    @Test fun audioTagSanitizationAndFormatLabelsWork() {
+        assertEquals("NIKI", LibraryRules.sanitizedTag("  NIKI \n "))
+        assertNull(LibraryRules.sanitizedTag(null))
+        assertNull(LibraryRules.sanitizedTag("   "))
+        assertNull(LibraryRules.sanitizedTag("<unknown>"))
+        assertEquals("FLAC", LibraryRules.audioFormatLabel("track.flac"))
+        assertEquals("AUDIO", LibraryRules.audioFormatLabel("noext"))
+    }
 }

@@ -9,3 +9,12 @@ data class UpgradeUiActions(
     val onRetryFailed: (String) -> Unit,
     val onDelete: (AudioTrack, () -> Unit) -> Unit,
 )
+
+/** Playlist actions supplied by the ViewModel owner; presentation never opens storage. */
+data class PlaylistUiActions(
+    val onCreatePlaylist: (String, Long?) -> Unit = { _, _ -> },
+    val onRenamePlaylist: (Long, String) -> Unit = { _, _ -> },
+    val onDeletePlaylist: (Long) -> Unit = {},
+    val onAddTrackToPlaylist: (Long, Long) -> Unit = { _, _ -> },
+    val onRemoveTrackFromPlaylist: (Long, Long) -> Unit = { _, _ -> },
+)

@@ -14,6 +14,7 @@ import androidx.media3.session.MediaController
 @Composable
 fun SwarariaUi(
     tracks: List<AudioTrack>,
+    playlists: List<LibraryPlaylist> = emptyList(),
     controller: MediaController?,
     ingest: IngestState,
     search: YoutubeSearchState,
@@ -26,6 +27,8 @@ fun SwarariaUi(
     onUpdate: () -> Unit,
     onCancel: () -> Unit,
     onPlay: (AudioTrack) -> Unit,
+    onPlayQueue: (AudioTrack, List<AudioTrack>) -> Unit = { track, _ -> onPlay(track) },
+    playlistActions: PlaylistUiActions = PlaylistUiActions(),
     onRename: (Long, String, () -> Unit) -> Unit,
     onUndo: () -> Unit,
     onSearch: (String, SearchProvider) -> Unit,
@@ -49,13 +52,15 @@ fun SwarariaUi(
         fullPlayer = false
         destination = target
     }
-    val playTrack: (AudioTrack) -> Unit = { track ->
+    val playQueuedTrack: (AudioTrack, List<AudioTrack>?) -> Unit = { track, queue ->
         if (playback.connected) {
             searchActions.stopPreview()
             if (track.id.toString() == playback.mediaId) toggleSwarariaPlayback(controller)
+            else if (queue != null) onPlayQueue(track, queue)
             else onPlay(track)
         }
     }
+    val playTrack: (AudioTrack) -> Unit = { track -> playQueuedTrack(track, null) }
     LaunchedEffect(previewActive) { if (previewActive) fullPlayer = false }
     BackHandler(enabled = fullPlayer || destination != 0 || previewActive) {
         if (destination != 3) searchActions.stopPreview()
@@ -98,9 +103,10 @@ fun SwarariaUi(
             onRename = { editing = it }, onSettings = { settings = true },
         ) else pages.SaveableStateProvider(destination) {
             when (destination) {
-                0 -> LibraryPage(tracks = tracks, currentId = playback.mediaId, connected = playback.connected,
+                0 -> LibraryPage(tracks = tracks, playlists = playlists, currentId = playback.mediaId, connected = playback.connected,
                     ingest = ingest, search = search, organizerBusy = organizerBusy || upgrade.operationBusy,
                     modifier = contentModifier, onAdd = { navigate(1) }, onPlay = playTrack,
+                    onPlayQueue = playQueuedTrack, playlistActions = playlistActions,
                     onRename = { editing = it }, onHistory = { history = true }, onSettings = { settings = true },
                     onDelete = { deleting = it }, onImport = { if (!onlineBusy) onImport() })
                 1 -> AddAudioScreen(ingest = ingest, search = search, controller = controller, actions = searchActions,

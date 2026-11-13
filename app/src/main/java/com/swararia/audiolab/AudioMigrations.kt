@@ -13,4 +13,21 @@ object AudioMigrations {
             db.execSQL(CREATE_DOWNLOADS)
         }
     }
+    // Executed verbatim by both Room and host sqlite migration tests for v2 -> v3.
+    internal val MIGRATION_2_3_STATEMENTS = listOf(
+        "ALTER TABLE tracks ADD COLUMN artist TEXT",
+        "ALTER TABLE tracks ADD COLUMN album TEXT",
+        "ALTER TABLE tracks ADD COLUMN genre TEXT",
+        "ALTER TABLE tracks ADD COLUMN metadataCheckedAt INTEGER",
+        "CREATE TABLE IF NOT EXISTS `playlists` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS `index_playlists_name` ON `playlists` (`name`)",
+        "CREATE TABLE IF NOT EXISTS `playlist_tracks` (`playlistId` INTEGER NOT NULL, `trackId` INTEGER NOT NULL, `position` INTEGER NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`playlistId`, `trackId`), FOREIGN KEY(`playlistId`) REFERENCES `playlists`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`trackId`) REFERENCES `tracks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "CREATE INDEX IF NOT EXISTS `index_playlist_tracks_playlistId` ON `playlist_tracks` (`playlistId`)",
+        "CREATE INDEX IF NOT EXISTS `index_playlist_tracks_trackId` ON `playlist_tracks` (`trackId`)",
+    )
+    val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            for (statement in MIGRATION_2_3_STATEMENTS) db.execSQL(statement)
+        }
+    }
 }

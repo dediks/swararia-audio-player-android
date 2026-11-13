@@ -172,4 +172,67 @@ class MigrationSqlTest(unittest.TestCase):
         self.assertIn('AUTOINCREMENT', db.execute("SELECT sql FROM sqlite_master WHERE name='download_jobs'").fetchone()[0])
         self.assertEqual(1, db.execute("SELECT count(*) FROM sqlite_master WHERE name='index_tracks_uri'").fetchone()[0])
 
+    def test_actual_additive_migration_preserves_v2_to_v3_data(self):
+        migration = (SOURCE / 'AudioMigrations.kt').read_text()
+        block_match = re.search(r'MIGRATION_2_3_STATEMENTS\s*=\s*listOf\((.*?)\n\s*\)', migration, re.DOTALL)
+        self.assertIsNotNone(block_match, 'MIGRATION_2_3_STATEMENTS missing')
+        stmts = re.findall(r'"((?:[^"\\]|\\.)+)"', block_match.group(1))
+        self.assertEqual(9, len(stmts))
+
+        schema_v2 = json.loads((ROOT / 'app/schemas/com.swararia.audiolab.AudioDatabase/2.json').read_text())['database']
+        schema_v3_path = ROOT / 'app/schemas/com.swararia.audiolab.AudioDatabase/3.json'
+        self.assertTrue(schema_v3_path.exists(), 'Room schema 3.json must be exported')
+        schema_v3 = json.loads(schema_v3_path.read_text())['database']
+
+        migrated = sqlite3.connect(':memory:')
+        for entity in schema_v2['entities']:
+            migrated.execute(entity['createSql'].replace('${TABLE_NAME}', entity['tableName']))
+            for index in entity.get('indices', []):
+                migrated.execute(index['createSql'].replace('${TABLE_NAME}', entity['tableName']))
+        v2_tracks = [
+            (1, 'content://media/external_primary/audio/media/8', 'song.opus', 123, 5000, 9, 'art-1'),
+            (9, 'content://media/external_primary/audio/media/9', 'clip.mp3', 444, None, 10, None),
+        ]
+        migrated.executemany('INSERT INTO tracks VALUES (?,?,?,?,?,?,?)', v2_tracks)
+        for statement in stmts:
+            migrated.execute(statement)
+
+        self.assertEqual(
+            [r + (None, None, None, None) for r in v2_tracks],
+            migrated.execute('SELECT * FROM tracks ORDER BY id').fetchall(),
+        )
+
+        reference = sqlite3.connect(':memory:')
+        for entity in schema_v3['entities']:
+            reference.execute(entity['createSql'].replace('${TABLE_NAME}', entity['tableName']))
+            for index in entity.get('indices', []):
+                reference.execute(index['createSql'].replace('${TABLE_NAME}', entity['tableName']))
+
+        for entity in schema_v3['entities']:
+            table = entity['tableName']
+            self.assertEqual(
+                [(r[1], r[2], r[3], r[5]) for r in reference.execute(f'PRAGMA table_info({table})').fetchall()],
+                [(r[1], r[2], r[3], r[5]) for r in migrated.execute(f'PRAGMA table_info({table})').fetchall()],
+                f'Column schema mismatch for {table}',
+            )
+            self.assertEqual(
+                reference.execute(f'PRAGMA foreign_key_list({table})').fetchall(),
+                migrated.execute(f'PRAGMA foreign_key_list({table})').fetchall(),
+                f'Foreign key mismatch for {table}',
+            )
+            ref_idx = sorted(
+                r[0] for r in reference.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND name NOT LIKE 'sqlite_autoindex%'", (table,)).fetchall()
+            )
+            mig_idx = sorted(
+                r[0] for r in migrated.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND name NOT LIKE 'sqlite_autoindex%'", (table,)).fetchall()
+            )
+            self.assertEqual(ref_idx, mig_idx, f'Index mismatch for {table}')
+
+        migrated.commit()
+        migrated.execute('PRAGMA foreign_keys = ON')
+        migrated.execute("INSERT INTO playlists(id, name, createdAt) VALUES (10, 'Fokus', 100)")
+        migrated.execute("INSERT INTO playlist_tracks(playlistId, trackId, position, addedAt) VALUES (10, 1, 0, 101)")
+        migrated.execute("DELETE FROM tracks WHERE id = 1")
+        self.assertEqual(0, migrated.execute("SELECT count(*) FROM playlist_tracks").fetchone()[0])
+
 if __name__ == '__main__': unittest.main()

@@ -10,7 +10,9 @@ import java.util.UUID
 data class DesktopRemoteUiState(
     val endpoint: String? = null, val phase: String = "disconnected", val role: String? = null,
     val playback: DesktopRemotePlayback? = null, val commands: Set<String> = emptySet(),
-    val playlist: String? = null, val currentTrackId: String? = null,
+    val playlist: String? = null, val activeGroupId: String? = null, val totalTracks: Int = 0,
+    val groups: List<DesktopRemoteTrackGroup> = emptyList(),
+    val currentTrackId: String? = null,
     val tracks: List<DesktopRemoteTrack> = emptyList(),
     val busy: Boolean = false, val fresh: Boolean = false, val message: String? = null,
     val outcome: String? = null,
@@ -18,6 +20,7 @@ data class DesktopRemoteUiState(
     val canControl: Boolean get() = phase == "active" && role == "control" && playback?.online == true && fresh && !busy && outcome !in setOf("accepted", "pending")
     val canFadeOut: Boolean get() = canControl && "fade_out" in commands && playback?.playing == true && playback?.transport != "FADING"
     val canSelectTrack: Boolean get() = canControl && "select_track" in commands
+    val canSwitchGroup: Boolean get() = canControl && "select_group" in commands
     val canStepTrack: Boolean get() = canControl && playback?.title != null
 }
 
@@ -118,7 +121,8 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
             expiresAt = approval.expiresAt
             if (approval.status == "pending") {
                 mutable.value = mutable.value.copy(phase = "pending", role = null, playback = null,
-                    commands = emptySet(), playlist = null, currentTrackId = null, tracks = emptyList(),
+                    commands = emptySet(), playlist = null, activeGroupId = null, totalTracks = 0,
+                    groups = emptyList(), currentTrackId = null, tracks = emptyList(),
                     fresh = false, message = "Setujui perangkat ini di PC.")
                 return
             }
@@ -138,7 +142,9 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
             current(ticket, owner)
             if (outcome !in setOf("accepted", "pending")) commandId = null
             mutable.value = mutable.value.copy(phase = "active", role = approval.role, commands = supported,
-                playback = playback, playlist = catalog?.playlist, currentTrackId = catalog?.currentTrackId,
+                playback = playback, playlist = catalog?.playlist, activeGroupId = catalog?.activeGroupId,
+                totalTracks = catalog?.totalTracks ?: 0, groups = catalog?.groups ?: emptyList(),
+                currentTrackId = catalog?.currentTrackId,
                 tracks = catalog?.tracks ?: emptyList(), fresh = true,
                 message = if (!playback.online) "Pemutar Desktop belum siap." else null, outcome = outcome)
         } catch (cancel: CancellationException) { throw cancel }
@@ -153,7 +159,7 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
     }
     fun command(action: String) {
         val before = mutable.value
-        if (!before.canControl || action !in before.commands || action == "select_track") return
+        if (!before.canControl || action !in before.commands || action in setOf("select_track", "select_group")) return
         dispatchControlAction(before) { p, g ->
             api.command(p, g, action, UUID.randomUUID().toString())
         }
@@ -164,6 +170,14 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
         if (!before.canSelectTrack || before.tracks.none { it.id == trackId }) return
         dispatchControlAction(before) { p, g ->
             api.selectTrack(p, g, trackId, autoPlay, UUID.randomUUID().toString())
+        }
+    }
+
+    fun selectGroup(groupId: String) {
+        val before = mutable.value
+        if (!before.canSwitchGroup || before.groups.none { it.id == groupId }) return
+        dispatchControlAction(before) { p, g ->
+            api.selectGroup(p, g, groupId, UUID.randomUUID().toString())
         }
     }
 

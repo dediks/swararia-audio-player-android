@@ -18,9 +18,9 @@ class DesktopRemoteFadeOutTest {
         assertEquals(setOf("play", "pause", "stop", "fade_out"), withFade)
 
         val withTracks = DesktopRemoteJson.capabilities(mapper.readTree(
-            """{"protocol":"v1","commands":["play","pause","stop","fade_out","prev","next","select_track"]}""",
+            """{"protocol":"v1","commands":["play","pause","stop","fade_out","prev","next","select_track","select_group"]}""",
         ))
-        assertEquals(setOf("play", "pause", "stop", "fade_out", "prev", "next", "select_track"), withTracks)
+        assertEquals(setOf("play", "pause", "stop", "fade_out", "prev", "next", "select_track", "select_group"), withTracks)
 
         val unknown = runCatching {
             DesktopRemoteJson.capabilities(mapper.readTree("""{"protocol":"v1","commands":["play","fade_out","seek"]}"""))
@@ -107,5 +107,35 @@ class DesktopRemoteFadeOutTest {
         assertFalse(ready.copy(playback = playingPlayback.copy(transport = "FADING")).canFadeOut)
         assertFalse(ready.copy(playback = playingPlayback.copy(online = false)).canFadeOut)
         assertFalse(ready.copy(playback = playingPlayback.copy(title = null)).canStepTrack)
+        assertFalse(ready.canSwitchGroup)
+        assertTrue(ready.copy(commands = ready.commands + "select_group").canSwitchGroup)
+
+        val groupedCatalog = DesktopRemoteJson.tracks(mapper.readTree("""
+            {
+              "protocol":"v1",
+              "master_online":true,
+              "catalog_version":5,
+              "playlist":"Semua Lagu",
+              "active_group_id":"g_all",
+              "total_tracks":2,
+              "groups":[
+                {"id":"g_all","name":"Semua Lagu","count":2},
+                {"id":"g_open","name":"Opening","count":2}
+              ],
+              "current_track_id":"trk_01",
+              "tracks":[
+                {"id":"trk_01","title":"Fanfare.wav","group_id":"g_open"},
+                {"id":"trk_02","title":"Waltz.mp3","group_id":"g_missing"}
+              ]
+            }
+        """.trimIndent()))
+        assertEquals("g_all", groupedCatalog.activeGroupId)
+        assertEquals(2, groupedCatalog.groups.size)
+        assertEquals("g_open", groupedCatalog.tracks[0].groupId)
+        assertEquals(null, groupedCatalog.tracks[1].groupId)
+
+        val groupCmd = mapper.readTree(DesktopRemoteJson.commandBody("select_group", "grp-key-1234", groupId = "g_open").decodeToString())
+        assertEquals("select_group", groupCmd.get("action").asText())
+        assertEquals("g_open", groupCmd.get("group_id").asText())
     }
 }

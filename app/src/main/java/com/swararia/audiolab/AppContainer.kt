@@ -12,7 +12,7 @@ class AppContainer(context: Context) {
     val ingestState = IngestStatus.state // Adapter to the existing foreground service; process-local, not a durable queue.
     val database: AudioDatabase by lazy {
         Room.databaseBuilder(appContext, AudioDatabase::class.java, "audio-library-spike.db")
-            .addMigrations(AudioMigrations.MIGRATION_1_2).build()
+            .addMigrations(AudioMigrations.MIGRATION_1_2, AudioMigrations.MIGRATION_2_3).build()
     }
     val library: MediaLibrary by lazy { MediaLibrary(appContext, database) }
     val downloadQueue: DownloadQueueRepository by lazy { RoomDownloadQueueRepository(database) }

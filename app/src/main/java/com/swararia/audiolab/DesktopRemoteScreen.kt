@@ -3,6 +3,7 @@ package com.swararia.audiolab
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -42,6 +43,9 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
     var scanFeedback by remember { mutableStateOf<String?>(null) }
     var pendingScanned by remember { mutableStateOf<String?>(null) }
     var trackQuery by remember { mutableStateOf("") }
+    var selectedGroupId by remember { mutableStateOf<String?>(null) }
+    var groupBySections by remember { mutableStateOf(true) }
+    var collapsedGroupIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pendingTrackSwitch by remember { mutableStateOf<PendingTrackChoice?>(null) }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -78,6 +82,8 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
             pendingScanned = null
         } else if (state.phase == "disconnected") {
             trackQuery = ""
+            selectedGroupId = null
+            collapsedGroupIds = emptySet()
             pendingTrackSwitch = null
         }
     }
@@ -154,13 +160,39 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
     val isFading = playback?.transport == "FADING"
     val supportsFadeOut = "fade_out" in state.commands
     val supportsSelectTrack = "select_track" in state.commands
+    val effectiveGroupId = remember(selectedGroupId, state.activeGroupId, state.groups) {
+        when {
+            selectedGroupId != null && state.groups.any { it.id == selectedGroupId } -> selectedGroupId
+            else -> state.activeGroupId?.takeIf { id -> state.groups.any { it.id == id } } ?: state.groups.firstOrNull()?.id
+        }
+    }
+    val showAllGroups = effectiveGroupId == "g_all" || effectiveGroupId == null || state.groups.isEmpty()
     val indexedTracks = remember(state.tracks) {
         state.tracks.mapIndexed { index, track -> (index + 1) to track }
     }
+    val groupFilteredTracks = remember(indexedTracks, effectiveGroupId, showAllGroups) {
+        if (showAllGroups) indexedTracks
+        else indexedTracks.filter { (_, track) -> track.groupId == effectiveGroupId }
+    }
     val trimmedQuery = trackQuery.trim()
-    val filteredTracks = remember(indexedTracks, trimmedQuery) {
-        if (trimmedQuery.isEmpty()) indexedTracks
-        else indexedTracks.filter { (_, track) -> track.title.contains(trimmedQuery, ignoreCase = true) }
+    val filteredTracks = remember(groupFilteredTracks, trimmedQuery) {
+        if (trimmedQuery.isEmpty()) groupFilteredTracks
+        else groupFilteredTracks.filter { (_, track) -> track.title.contains(trimmedQuery, ignoreCase = true) }
+    }
+    val groupNameById = remember(state.groups) { state.groups.associate { it.id to it.name } }
+    val groupedSections = remember(filteredTracks, state.groups, groupNameById, showAllGroups, groupBySections, trimmedQuery) {
+        if (!groupBySections || !showAllGroups || trimmedQuery.isNotEmpty() || state.groups.size <= 2) null
+        else {
+            val byGroup = linkedMapOf<String, MutableList<Pair<Int, DesktopRemoteTrack>>>()
+            for (pair in filteredTracks) {
+                val gid = pair.second.groupId ?: "_other"
+                byGroup.getOrPut(gid) { mutableListOf() }.add(pair)
+            }
+            if (byGroup.size <= 1) null
+            else byGroup.entries.map { (gid, list) ->
+                Triple(gid, groupNameById[gid] ?: "Lainnya", list)
+            }
+        }
     }
     val listState = rememberLazyListState()
     val showCompactBar by remember { derivedStateOf { listState.firstVisibleItemIndex >= 2 } }
@@ -231,6 +263,25 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
                         totalCount = state.tracks.size,
                         filteredCount = filteredTracks.size,
                         query = trackQuery,
+                        groups = state.groups,
+                        selectedGroupId = effectiveGroupId,
+                        activePcGroupId = state.activeGroupId,
+                        canSwitchGroup = state.canSwitchGroup,
+                        groupBySections = groupBySections,
+                        onToggleGroupBySections = { groupBySections = !groupBySections },
+                        onSelectGroup = { group ->
+                            selectedGroupId = group.id
+                            val hasLocalTracks = group.id == "g_all" || indexedTracks.any { (_, t) -> t.groupId == group.id }
+                            val needsPcSwitch = state.canSwitchGroup && (
+                                !hasLocalTracks ||
+                                    (group.id == "g_all" && state.activeGroupId != "g_all") ||
+                                    (state.totalTracks > state.tracks.size && group.id != state.activeGroupId)
+                            )
+                            if (needsPcSwitch) session.selectGroup(group.id)
+                        },
+                        onSyncGroupToPc = {
+                            effectiveGroupId?.let { session.selectGroup(it) }
+                        },
                         onQueryChange = { trackQuery = it },
                     )
                 }
@@ -242,7 +293,39 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
                     }
                 } else if (filteredTracks.isEmpty()) {
                     item(key = "library_no_match") {
-                        NoticeCard("Tidak ada lagu yang cocok dengan \"$trimmedQuery\".")
+                        NoticeCard(
+                            if (trimmedQuery.isNotEmpty()) "Tidak ada lagu yang cocok dengan \"$trimmedQuery\"."
+                            else "Belum ada lagu terisi pada grup ini.",
+                        )
+                    }
+                } else if (groupedSections != null) {
+                    groupedSections.forEach { (groupId, groupName, sectionTracks) ->
+                        val collapsed = groupId in collapsedGroupIds
+                        item(key = "grp_hdr_$groupId") {
+                            RemoteTrackGroupHeader(
+                                name = groupName,
+                                count = sectionTracks.size,
+                                collapsed = collapsed,
+                                onToggle = {
+                                    collapsedGroupIds = if (collapsed) collapsedGroupIds - groupId else collapsedGroupIds + groupId
+                                },
+                            )
+                        }
+                        if (!collapsed) {
+                            items(sectionTracks, key = { (_, track) -> track.id }) { (slotNumber, track) ->
+                                val isCurrent = track.id == state.currentTrackId
+                                TrackPickerRow(
+                                    slotNumber = slotNumber,
+                                    track = track,
+                                    isCurrent = isCurrent,
+                                    isCurrentPlaying = isCurrent && isPlaying && !isFading,
+                                    canSelect = state.canSelectTrack,
+                                    canControl = state.canControl,
+                                    onCueOrSelect = { handleTrackChoice(track, autoPlay = false) },
+                                    onPlayOrPause = { handleTrackChoice(track, autoPlay = true) },
+                                )
+                            }
+                        }
                     }
                 } else {
                     items(filteredTracks, key = { (_, track) -> track.id }) { (slotNumber, track) ->
@@ -788,6 +871,14 @@ private fun TrackLibraryHeaderCard(
     totalCount: Int,
     filteredCount: Int,
     query: String,
+    groups: List<DesktopRemoteTrackGroup>,
+    selectedGroupId: String?,
+    activePcGroupId: String?,
+    canSwitchGroup: Boolean,
+    groupBySections: Boolean,
+    onToggleGroupBySections: () -> Unit,
+    onSelectGroup: (DesktopRemoteTrackGroup) -> Unit,
+    onSyncGroupToPc: () -> Unit,
     onQueryChange: (String) -> Unit,
 ) {
     Surface(
@@ -818,10 +909,52 @@ private fun TrackLibraryHeaderCard(
                 }
                 StatusPill(
                     RemoteBadge(
-                        label = if (query.isBlank()) "$totalCount lagu" else "$filteredCount / $totalCount",
+                        label = if (query.isBlank() && selectedGroupId == activePcGroupId) "$totalCount lagu" else "$filteredCount / $totalCount",
                         highlighted = false,
                     ),
                 )
+            }
+            if (groups.size > 1) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(groups, key = { it.id }) { group ->
+                        FilterChip(
+                            selected = group.id == selectedGroupId,
+                            onClick = { onSelectGroup(group) },
+                            label = {
+                                Text(
+                                    if (group.count > 0) "${group.name} (${group.count})" else group.name,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if ((selectedGroupId == "g_all" || selectedGroupId == null) && groups.size > 2) {
+                        FilterChip(
+                            selected = groupBySections,
+                            onClick = onToggleGroupBySections,
+                            leadingIcon = if (groupBySections) {
+                                { Icon(UiIcons.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            } else null,
+                            label = { Text("Kelompokkan per folder") },
+                        )
+                    }
+                    if (canSwitchGroup && selectedGroupId != null && selectedGroupId != activePcGroupId) {
+                        OutlinedButton(
+                            onClick = onSyncGroupToPc,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        ) {
+                            Text("Terapkan grup di PC", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
             }
             OutlinedTextField(
                 value = query,
@@ -842,6 +975,47 @@ private fun TrackLibraryHeaderCard(
             Text(
                 "Tap judul lagu untuk Cue (standby), atau tombol ▶ untuk langsung memutar.",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RemoteTrackGroupHeader(
+    name: String,
+    count: Int,
+    collapsed: Boolean,
+    onToggle: () -> Unit,
+) {
+    Surface(
+        onClick = onToggle,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                imageVector = if (collapsed) UiIcons.ChevronRight else UiIcons.ChevronDown,
+                contentDescription = if (collapsed) "Buka grup $name" else "Tutup grup $name",
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = name,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "$count lagu",
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

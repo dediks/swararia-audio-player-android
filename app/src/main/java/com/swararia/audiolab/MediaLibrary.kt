@@ -14,6 +14,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -25,6 +26,47 @@ import java.util.Locale
 class MediaLibrary(private val context: Context, private val database: AudioDatabase) : AudioLibraryRepository {
     override val tracks: Flow<List<AudioTrack>> = database.tracks().observeAll()
     override val lastRename: Flow<RenameRecord?> = database.tracks().observeLastRename()
+    override val playlists: Flow<List<LibraryPlaylist>> = combine(
+        database.playlists().observePlaylists(),
+        database.playlists().observeEntries(),
+    ) { playlistRows, entryRows ->
+        val trackIdsByPlaylist = entryRows.groupBy({ it.playlistId }, { it.trackId })
+        playlistRows.map { playlist ->
+            LibraryPlaylist(
+                id = playlist.id,
+                name = playlist.name,
+                createdAt = playlist.createdAt,
+                trackIds = trackIdsByPlaylist[playlist.id].orEmpty(),
+            )
+        }
+    }
+
+    private data class ExtractedAudioMetadata(
+        val durationMs: Long?,
+        val artist: String?,
+        val album: String?,
+        val genre: String?,
+    )
+
+    private fun inspectAudioMetadata(uri: Uri): ExtractedAudioMetadata = runCatching {
+        val reader = MediaMetadataRetriever()
+        try {
+            reader.setDataSource(context, uri)
+            val durationMs = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+            val rawArtist = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                ?: reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)
+            val rawAlbum = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
+            val rawGenre = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE)
+            ExtractedAudioMetadata(
+                durationMs = durationMs,
+                artist = LibraryRules.sanitizedTag(rawArtist, 120),
+                album = LibraryRules.sanitizedTag(rawAlbum, 120),
+                genre = LibraryRules.sanitizedTag(rawGenre, 60),
+            )
+        } finally {
+            reader.release()
+        }
+    }.getOrDefault(ExtractedAudioMetadata(null, null, null, null))
 
     private val artwork = ArtworkStore(context)
 
@@ -51,6 +93,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                 try {
                     database.withTransaction {
                         database.downloads().clearTrack(track.id)
+                        database.playlists().removeTrackFromAll(track.id)
                         database.tracks().removeTrackHistory(track.id)
                         database.tracks().removeTrack(track.id)
                     }
@@ -232,16 +275,17 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         }
         override suspend fun finish(id: Long, uri: String, bytes: Long): Long {
             val name = actualName(Uri.parse(uri))
-            val duration = runCatching {
-                val reader = MediaMetadataRetriever()
-                try { reader.setDataSource(context, Uri.parse(uri)); reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() }
-                finally { reader.release() }
-            }.getOrNull()
+            val meta = inspectAudioMetadata(Uri.parse(uri))
+            val checkedAt = System.currentTimeMillis()
             return database.withTransaction {
                 val job = checkNotNull(database.downloads().find(id))
                 check(job.status == "RUNNING" && job.pendingUri == uri && job.publicationBytes == bytes)
                 val trackId = database.tracks().findByUri(uri)?.id ?: database.tracks().insert(
-                    AudioTrack(uri = uri, displayName = name, sizeBytes = bytes, durationMs = duration))
+                    AudioTrack(
+                        uri = uri, displayName = name, sizeBytes = bytes, durationMs = meta.durationMs,
+                        artist = meta.artist, album = meta.album, genre = meta.genre, metadataCheckedAt = checkedAt,
+                    )
+                )
                 check(database.downloads().complete(id, trackId) == 1)
                 trackId
             }
@@ -344,20 +388,76 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             resolver.query(uri, arrayOf(MediaStore.Audio.Media.DISPLAY_NAME), null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) actualName = cursor.getString(0)
             }
-            val duration = runCatching {
-                val reader = MediaMetadataRetriever()
-                try {
-                    reader.setDataSource(context, uri)
-                    reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-                } finally { reader.release() }
-            }.getOrNull()
-            val track = AudioTrack(uri = uri.toString(), displayName = actualName, sizeBytes = copied, durationMs = duration,
-                artworkKey = embeddedArtwork(uri))
+            val meta = inspectAudioMetadata(uri)
+            val track = AudioTrack(
+                uri = uri.toString(), displayName = actualName, sizeBytes = copied, durationMs = meta.durationMs,
+                artworkKey = embeddedArtwork(uri), artist = meta.artist, album = meta.album, genre = meta.genre,
+                metadataCheckedAt = System.currentTimeMillis(),
+            )
             val id = database.tracks().insert(track)
             return track.copy(id = id)
         } catch (failure: Throwable) {
             withContext(NonCancellable + Dispatchers.IO) { runCatching { resolver.delete(uri, null, null) } }
             throw failure
+        }
+    }
+
+    override suspend fun createPlaylist(name: String): Long = withContext(Dispatchers.IO) {
+        val clean = LibraryRules.validatedPlaylistName(name)
+        mutationMutex.withLock {
+            require(database.playlists().findPlaylistByName(clean) == null) { "Playlist \"$clean\" sudah ada." }
+            database.playlists().insertPlaylist(LocalPlaylist(name = clean))
+        }
+    }
+
+    override suspend fun renamePlaylist(playlistId: Long, name: String) = withContext(Dispatchers.IO) {
+        val clean = LibraryRules.validatedPlaylistName(name)
+        mutationMutex.withLock {
+            check(database.playlists().findPlaylist(playlistId) != null) { "Playlist tidak ditemukan." }
+            val existing = database.playlists().findPlaylistByName(clean)
+            require(existing == null || existing.id == playlistId) { "Playlist \"$clean\" sudah ada." }
+            database.playlists().renamePlaylist(playlistId, clean)
+        }
+    }
+
+    override suspend fun deletePlaylist(playlistId: Long) = withContext(Dispatchers.IO) {
+        mutationMutex.withLock {
+            database.playlists().deletePlaylist(playlistId)
+        }
+    }
+
+    override suspend fun addTrackToPlaylist(playlistId: Long, trackId: Long) {
+        withContext(Dispatchers.IO) {
+            mutationMutex.withLock {
+                database.withTransaction {
+                    check(database.playlists().findPlaylist(playlistId) != null) { "Playlist tidak ditemukan." }
+                    check(database.tracks().find(trackId) != null) { "Audio tidak ada di library." }
+                    val pos = database.playlists().nextPosition(playlistId)
+                    database.playlists().insertEntry(PlaylistTrackCrossRef(playlistId = playlistId, trackId = trackId, position = pos))
+                }
+            }
+        }
+    }
+
+    override suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: Long) = withContext(Dispatchers.IO) {
+        mutationMutex.withLock {
+            database.playlists().removeEntry(playlistId, trackId)
+        }
+    }
+
+    override suspend fun scanMissingMetadata() = withContext(Dispatchers.IO) {
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val pending = database.tracks().unscannedMetadata(25)
+            if (pending.isEmpty()) break
+            for (track in pending) {
+                currentCoroutineContext().ensureActive()
+                val uri = runCatching { Uri.parse(track.uri) }.getOrNull()
+                val meta = if (uri != null && ManagedCopyRules.validUri(track.uri)) inspectAudioMetadata(uri)
+                else ExtractedAudioMetadata(null, null, null, null)
+                val now = System.currentTimeMillis()
+                database.tracks().updateMetadata(track.id, meta.durationMs, meta.artist, meta.album, meta.genre, now)
+            }
         }
     }
 

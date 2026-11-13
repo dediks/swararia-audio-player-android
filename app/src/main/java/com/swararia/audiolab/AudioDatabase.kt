@@ -11,7 +11,51 @@ data class AudioTrack(
     val sizeBytes: Long,
     val durationMs: Long?,
     val addedAt: Long = System.currentTimeMillis(),
-    val artworkKey: String? = null
+    val artworkKey: String? = null,
+    val artist: String? = null,
+    val album: String? = null,
+    val genre: String? = null,
+    val metadataCheckedAt: Long? = null,
+)
+
+@Entity(tableName = "playlists", indices = [Index(value = ["name"], unique = true)])
+data class LocalPlaylist(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+@Entity(
+    tableName = "playlist_tracks",
+    primaryKeys = ["playlistId", "trackId"],
+    foreignKeys = [
+        ForeignKey(
+            entity = LocalPlaylist::class,
+            parentColumns = ["id"],
+            childColumns = ["playlistId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = AudioTrack::class,
+            parentColumns = ["id"],
+            childColumns = ["trackId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index(value = ["playlistId"]), Index(value = ["trackId"])],
+)
+data class PlaylistTrackCrossRef(
+    val playlistId: Long,
+    val trackId: Long,
+    val position: Int,
+    val addedAt: Long = System.currentTimeMillis(),
+)
+
+data class LibraryPlaylist(
+    val id: Long,
+    val name: String,
+    val createdAt: Long,
+    val trackIds: List<Long>,
 )
 
 @Entity(tableName = "rename_history")
@@ -40,13 +84,39 @@ interface TrackDao {
     @Query("DELETE FROM tracks WHERE id = :id") suspend fun removeTrack(id: Long)
     @Query("SELECT COUNT(*) FROM tracks WHERE artworkKey = :key") suspend fun artworkReferences(key: String): Int
     @Query("UPDATE tracks SET artworkKey = :key WHERE id = :id") suspend fun setArtwork(id: Long, key: String)
+    @Query("SELECT * FROM tracks WHERE metadataCheckedAt IS NULL ORDER BY id DESC LIMIT :limit")
+    suspend fun unscannedMetadata(limit: Int = 50): List<AudioTrack>
+    @Query("UPDATE tracks SET durationMs = COALESCE(durationMs, :durationMs), artist = :artist, album = :album, genre = :genre, metadataCheckedAt = :checkedAt WHERE id = :id")
+    suspend fun updateMetadata(id: Long, durationMs: Long?, artist: String?, album: String?, genre: String?, checkedAt: Long)
 }
 
-@Database(entities = [AudioTrack::class, RenameRecord::class, DownloadJob::class], version = 2, exportSchema = true)
+@Dao
+interface PlaylistDao {
+    @Query("SELECT * FROM playlists ORDER BY createdAt ASC, id ASC")
+    fun observePlaylists(): Flow<List<LocalPlaylist>>
+    @Query("SELECT * FROM playlist_tracks ORDER BY playlistId ASC, position ASC, addedAt ASC")
+    fun observeEntries(): Flow<List<PlaylistTrackCrossRef>>
+    @Insert suspend fun insertPlaylist(playlist: LocalPlaylist): Long
+    @Query("SELECT * FROM playlists WHERE id = :id") suspend fun findPlaylist(id: Long): LocalPlaylist?
+    @Query("SELECT * FROM playlists WHERE LOWER(name) = LOWER(:name) LIMIT 1") suspend fun findPlaylistByName(name: String): LocalPlaylist?
+    @Query("UPDATE playlists SET name = :name WHERE id = :id") suspend fun renamePlaylist(id: Long, name: String)
+    @Query("DELETE FROM playlists WHERE id = :id") suspend fun deletePlaylist(id: Long)
+    @Query("SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_tracks WHERE playlistId = :playlistId")
+    suspend fun nextPosition(playlistId: Long): Int
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertEntry(entry: PlaylistTrackCrossRef): Long
+    @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
+    suspend fun removeEntry(playlistId: Long, trackId: Long)
+    @Query("DELETE FROM playlist_tracks WHERE trackId = :trackId")
+    suspend fun removeTrackFromAll(trackId: Long)
+}
+
+@Database(entities = [AudioTrack::class, RenameRecord::class, DownloadJob::class, LocalPlaylist::class, PlaylistTrackCrossRef::class], version = 3, exportSchema = true)
 abstract class AudioDatabase : RoomDatabase() {
     /** Native library registers recovery on this DB instance, preserving existing queue/startup APIs.
      * Not persisted schema; no Android context is retained by the queue repository. */
     @Volatile internal var downloadPublicationRecovery: (suspend () -> Unit)? = null
     abstract fun tracks(): TrackDao
     abstract fun downloads(): DownloadDao
+    abstract fun playlists(): PlaylistDao
 }

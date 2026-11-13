@@ -1,7 +1,11 @@
 package com.swararia.audiolab
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.rememberScrollState
@@ -206,4 +210,291 @@ internal fun EngineSettingsDialog(
             }
         }, confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } })
     if (details) DiagnosticsDialog(ingest, onDismiss = { details = false })
+}
+
+@Composable
+internal fun CreateOrRenamePlaylistDialog(
+    title: String,
+    confirmLabel: String,
+    initialName: String = "",
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var name by remember(initialName) { mutableStateOf(initialName) }
+    val validated = remember(name) { runCatching { LibraryRules.validatedPlaylistName(name) } }
+    val canSave = !busy && validated.isSuccess && validated.getOrNull() != initialName.trim()
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        icon = { Icon(UiIcons.Queue, null) },
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    enabled = !busy,
+                    singleLine = true,
+                    label = { Text("Nama playlist") },
+                    placeholder = { Text("Misal: Favorit Malam, Lofi Fokus") },
+                    isError = name.isNotBlank() && validated.isFailure,
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = {
+                        val valid = validated.getOrNull()
+                        if (!busy && valid != null && valid != initialName.trim()) {
+                            onConfirm(valid); onDismiss()
+                        }
+                    }),
+                )
+                if (name.isNotBlank() && validated.isFailure) {
+                    Text(
+                        validated.exceptionOrNull()?.message ?: "Nama playlist tidak valid.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { validated.getOrNull()?.let { onConfirm(it); onDismiss() } },
+                enabled = canSave,
+            ) { Text(confirmLabel) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("Batal") }
+        },
+    )
+}
+
+@Composable
+internal fun DeletePlaylistDialog(
+    playlist: LibraryPlaylist,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onDelete: (Long) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        icon = { Icon(UiIcons.Delete, null, tint = MaterialTheme.colorScheme.error) },
+        title = { Text("Hapus playlist?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Playlist \"${playlist.name}\" akan dihapus.", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "File audio asli di pustaka HP tetap aman dan tidak ikut terhapus.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (!busy) { onDelete(playlist.id); onDismiss() } },
+                enabled = !busy,
+            ) { Text("Hapus playlist", color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("Batal") }
+        },
+    )
+}
+
+@Composable
+internal fun PlaylistPickerDialog(
+    track: AudioTrack,
+    playlists: List<LibraryPlaylist>,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onToggleMembership: (Long, Boolean) -> Unit,
+    onCreatePlaylistWithTrack: (String, Long) -> Unit,
+) {
+    var creating by remember { mutableStateOf(playlists.isEmpty()) }
+    var newName by remember { mutableStateOf("") }
+    val validatedNew = remember(newName) { runCatching { LibraryRules.validatedPlaylistName(newName) } }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        icon = { Icon(UiIcons.Queue, null) },
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Masukkan ke playlist")
+                Text(
+                    UiPresentation.title(track.displayName),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (playlists.isEmpty() && !creating) {
+                    Text(
+                        "Belum ada playlist. Buat playlist pertama Anda di bawah.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                playlists.forEach { playlist ->
+                    val included = track.id in playlist.trackIds
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (included) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable(enabled = !busy) { onToggleMembership(playlist.id, !included) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Checkbox(
+                                checked = included,
+                                onCheckedChange = { checked -> if (!busy) onToggleMembership(playlist.id, checked) },
+                                enabled = !busy,
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(playlist.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${playlist.trackIds.size} lagu", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+                if (creating) {
+                    HorizontalDivider()
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        enabled = !busy,
+                        singleLine = true,
+                        label = { Text("Nama playlist baru") },
+                        isError = newName.isNotBlank() && validatedNew.isFailure,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (newName.isNotBlank() && validatedNew.isFailure) {
+                        Text(
+                            validatedNew.exceptionOrNull()?.message ?: "Nama playlist tidak valid.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        if (playlists.isNotEmpty()) {
+                            TextButton(onClick = { creating = false; newName = "" }, enabled = !busy) { Text("Batal") }
+                        }
+                        TextButton(
+                            onClick = {
+                                val clean = validatedNew.getOrNull() ?: return@TextButton
+                                onCreatePlaylistWithTrack(clean, track.id)
+                                newName = ""
+                                creating = false
+                            },
+                            enabled = !busy && validatedNew.isSuccess,
+                        ) { Text("Buat & tambahkan") }
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { creating = true },
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                    ) {
+                        Icon(UiIcons.Plus, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Buat playlist baru")
+                    }
+                }
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("Selesai") }
+        },
+    )
+}
+
+@Composable
+internal fun AddTracksToPlaylistDialog(
+    playlist: LibraryPlaylist,
+    tracks: List<AudioTrack>,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onToggleTrack: (Long, Boolean) -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(tracks, query) {
+        val q = query.trim()
+        if (q.isEmpty()) tracks else tracks.filter {
+            it.displayName.contains(q, ignoreCase = true) ||
+                UiPresentation.title(it.displayName).contains(q, ignoreCase = true) ||
+                (it.artist?.contains(q, ignoreCase = true) == true)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        icon = { Icon(UiIcons.Plus, null) },
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Tambah lagu ke playlist")
+                Text(playlist.name, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Cari lagu atau artis") },
+                    singleLine = true,
+                    leadingIcon = { Icon(UiIcons.Search, null) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (filtered.isEmpty()) {
+                        Text("Tidak ada lagu yang cocok.", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    filtered.forEach { track ->
+                        val included = track.id in playlist.trackIds
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable(enabled = !busy) { onToggleTrack(track.id, !included) }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Checkbox(
+                                checked = included,
+                                onCheckedChange = { checked -> if (!busy) onToggleTrack(track.id, checked) },
+                                enabled = !busy,
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(UiPresentation.title(track.displayName),
+                                    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(UiPresentation.trackSubtitle(track.displayName, track.artist, track.durationMs),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("Selesai") }
+        },
+    )
 }

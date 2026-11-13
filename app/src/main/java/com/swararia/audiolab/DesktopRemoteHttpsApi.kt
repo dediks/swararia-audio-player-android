@@ -2,6 +2,7 @@ package com.swararia.audiolab
 
 import kotlinx.coroutines.*
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.net.CookieHandler
 import java.net.InetAddress
 import java.net.Socket
@@ -9,6 +10,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.*
 
@@ -31,9 +33,13 @@ class DesktopRemoteTrustManager(private val pin: ByteArray, private val host: St
     }
 }
 
-private class DesktopRemoteSocketFactory(private val delegate: SSLSocketFactory) : SSLSocketFactory() {
+private class DesktopRemoteSocketFactory(
+    private val delegate: SSLSocketFactory,
+    private val registerSocket: (Socket) -> Unit = {},
+) : SSLSocketFactory() {
     private fun secure(socket: Socket): Socket = (socket as SSLSocket).apply {
         enabledProtocols = supportedProtocols.filter { it == "TLSv1.2" || it == "TLSv1.3" }.toTypedArray()
+        registerSocket(this)
     }
     override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
     override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
@@ -56,6 +62,8 @@ interface DesktopRemoteApi {
     suspend fun command(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, action: String, key: String): DesktopRemoteCommand
     suspend fun selectTrack(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, trackId: String, autoPlay: Boolean, key: String): DesktopRemoteCommand =
         command(pairing, grant, "select_track", key)
+    suspend fun selectGroup(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, groupId: String, key: String): DesktopRemoteCommand =
+        command(pairing, grant, "select_group", key)
     suspend fun commandStatus(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, id: String): DesktopRemoteCommand
 }
 
@@ -69,11 +77,13 @@ class DesktopRemoteHttpsApi : DesktopRemoteApi {
     override suspend fun state(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
         DesktopRemoteJson.playback(request(pairing, grant.authorization(), "/v1/state"))
     override suspend fun tracks(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
-        DesktopRemoteJson.tracks(request(pairing, grant.authorization(), "/v1/tracks", maxBytes = 65_536))
+        DesktopRemoteJson.tracks(request(pairing, grant.authorization(), "/v1/tracks", maxBytes = 98_304))
     override suspend fun command(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, action: String, key: String) =
         DesktopRemoteJson.command(request(pairing, grant.authorization(), "/v1/commands", DesktopRemoteJson.commandBody(action, key), 202))
     override suspend fun selectTrack(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, trackId: String, autoPlay: Boolean, key: String) =
         DesktopRemoteJson.command(request(pairing, grant.authorization(), "/v1/commands", DesktopRemoteJson.commandBody("select_track", key, trackId, autoPlay), 202))
+    override suspend fun selectGroup(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, groupId: String, key: String) =
+        DesktopRemoteJson.command(request(pairing, grant.authorization(), "/v1/commands", DesktopRemoteJson.commandBody("select_group", key, groupId = groupId), 202))
     override suspend fun commandStatus(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, id: String): DesktopRemoteCommand {
         if (!id.matches(Regex("[A-Za-z0-9_-]{24}"))) throw DesktopRemoteFailure()
         return DesktopRemoteJson.command(request(pairing, grant.authorization(), "/v1/commands/$id"))
@@ -92,6 +102,13 @@ class DesktopRemoteHttpsApi : DesktopRemoteApi {
         body: ByteArray?, expected: Int, maxBytes: Int): com.fasterxml.jackson.databind.JsonNode = coroutineScope {
         suspendCancellableCoroutine { continuation ->
             val active = AtomicReference<HttpsURLConnection?>()
+            val activeSocket = AtomicReference<Socket?>()
+            val cancelled = AtomicBoolean(false)
+            fun abortTransport() {
+                cancelled.set(true)
+                activeSocket.getAndSet(null)?.let { runCatching { it.close() } }
+                active.getAndSet(null)?.let { runCatching { it.disconnect() } }
+            }
             val worker = launch(Dispatchers.IO) {
                 try {
                     // Do not participate in a process-global cookie store, or mutate it.
@@ -101,9 +118,18 @@ class DesktopRemoteHttpsApi : DesktopRemoteApi {
                     }
                     val connection = URL("https://${pairing.endpoint}$path").openConnection() as HttpsURLConnection
                     active.set(connection)
-                    if (!continuation.isActive) return@launch
+                    if (!continuation.isActive || cancelled.get()) {
+                        abortTransport()
+                        return@launch
+                    }
                     connection.apply {
-                        sslSocketFactory = DesktopRemoteSocketFactory(context.socketFactory)
+                        sslSocketFactory = DesktopRemoteSocketFactory(context.socketFactory) { socket ->
+                            activeSocket.set(socket)
+                            if (cancelled.get() || !continuation.isActive) {
+                                runCatching { socket.close() }
+                                throw IOException("Desktop remote request cancelled")
+                            }
+                        }
                         // Intentionally never set hostnameVerifier: platform default checks IP SAN.
                         instanceFollowRedirects = false
                         useCaches = false
@@ -148,9 +174,12 @@ class DesktopRemoteHttpsApi : DesktopRemoteApi {
                         else -> DesktopRemoteFailure(DesktopRemoteFailure.Kind.UNAVAILABLE)
                     }
                     if (continuation.isActive) continuation.resumeWith(Result.failure(safe))
-                } finally { active.getAndSet(null)?.disconnect() }
+                } finally {
+                    activeSocket.set(null)
+                    active.getAndSet(null)?.disconnect()
+                }
             }
-            continuation.invokeOnCancellation { active.getAndSet(null)?.disconnect(); worker.cancel() }
+            continuation.invokeOnCancellation { abortTransport(); worker.cancel() }
         }
     }
 }

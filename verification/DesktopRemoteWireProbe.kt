@@ -49,7 +49,7 @@ object DesktopRemoteWireProbe {
                 if (approval.status != "active") { delay(50); approval = api.session(connection, grant) }
             }
             check(approval.status == "active" && approval.role == "control")
-            check(api.capabilities(connection, grant) == setOf("play", "pause", "stop", "fade_out", "prev", "next", "select_track"))
+            check(api.capabilities(connection, grant) == setOf("play", "pause", "stop", "fade_out", "prev", "next", "select_track", "select_group"))
             val catalog = api.tracks(connection, grant)
             check(catalog.online)
             val state = api.state(connection, grant)

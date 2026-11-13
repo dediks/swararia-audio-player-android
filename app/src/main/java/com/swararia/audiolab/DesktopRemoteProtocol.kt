@@ -54,19 +54,24 @@ data class DesktopRemoteApproval(val deviceId: String, val status: String, val r
 data class DesktopRemotePlayback(val role: String, val online: Boolean, val playing: Boolean?,
     val transport: String?, val time: Double?, val duration: Double?, val title: String?)
 data class DesktopRemoteCommand(val id: String, val status: String)
-data class DesktopRemoteTrack(val id: String, val title: String)
+data class DesktopRemoteTrackGroup(val id: String, val name: String, val count: Int)
+data class DesktopRemoteTrack(val id: String, val title: String, val groupId: String? = null)
 data class DesktopRemoteCatalog(
     val online: Boolean,
     val version: Int,
     val playlist: String?,
     val currentTrackId: String?,
     val tracks: List<DesktopRemoteTrack>,
+    val totalTracks: Int = tracks.size,
+    val activeGroupId: String? = null,
+    val groups: List<DesktopRemoteTrackGroup> = emptyList(),
 )
 
 object DesktopRemoteJson {
     private val mapper = ObjectMapper().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
     private val trackIdRegex = Regex("[A-Za-z0-9_-]{3,32}")
-    private val allowedCommands = setOf("play", "pause", "stop", "fade_out", "prev", "next", "select_track")
+    private val groupIdRegex = Regex("[A-Za-z0-9_-]{2,32}")
+    private val allowedCommands = setOf("play", "pause", "stop", "fade_out", "prev", "next", "select_track", "select_group")
     fun objectValue(bytes: ByteArray, maxBytes: Int = 16_384): JsonNode = checked {
         require(bytes.size in 2..maxBytes)
         mapper.factory.createParser(bytes).use { parser ->
@@ -124,10 +129,10 @@ object DesktopRemoteJson {
         }
         return textValue
     }
-    private fun trackId(node: JsonNode, name: String, nullable: Boolean = false): String? {
+    private fun idToken(node: JsonNode, name: String, pattern: Regex, nullable: Boolean = false): String? {
         val value = node.get(name) ?: if (nullable) return null else throw DesktopRemoteFailure()
         if (nullable && value.isNull) return null
-        if (!value.isTextual || !value.textValue().matches(trackIdRegex)) throw DesktopRemoteFailure()
+        if (!value.isTextual || !value.textValue().matches(pattern)) throw DesktopRemoteFailure()
         return value.textValue()
     }
     fun capabilities(node: JsonNode): Set<String> {
@@ -153,29 +158,54 @@ object DesktopRemoteJson {
         val verNode = node.get("catalog_version") ?: throw DesktopRemoteFailure()
         if (!verNode.isIntegralNumber || verNode.intValue() < 0) throw DesktopRemoteFailure()
         val playlist = safeTitle(node, "playlist", 80)
-        val currentId = trackId(node, "current_track_id", nullable = true)
+        val activeGroupId = idToken(node, "active_group_id", groupIdRegex, nullable = true)
+        val currentId = idToken(node, "current_track_id", trackIdRegex, nullable = true)
+        val groupArr = node.get("groups")
+        val seenGroups = HashSet<String>()
+        val groups = ArrayList<DesktopRemoteTrackGroup>()
+        if (groupArr != null && !groupArr.isNull) {
+            if (!groupArr.isArray || groupArr.size() > 64) throw DesktopRemoteFailure()
+            for (entry in groupArr) {
+                if (!entry.isObject) throw DesktopRemoteFailure()
+                val gid = idToken(entry, "id", groupIdRegex, nullable = false)!!
+                if (!seenGroups.add(gid)) throw DesktopRemoteFailure()
+                val name = safeTitle(entry, "name", 80) ?: throw DesktopRemoteFailure()
+                val countNode = entry.get("count")
+                val count = if (countNode == null || countNode.isNull) 0 else {
+                    if (!countNode.isIntegralNumber || countNode.intValue() < 0) throw DesktopRemoteFailure()
+                    countNode.intValue()
+                }
+                groups.add(DesktopRemoteTrackGroup(gid, name, count))
+            }
+        }
         val arr = node.get("tracks") ?: throw DesktopRemoteFailure()
         if (!arr.isArray || arr.size() > 250) throw DesktopRemoteFailure()
         val seen = HashSet<String>(arr.size())
         val items = ArrayList<DesktopRemoteTrack>(arr.size())
         for (entry in arr) {
             if (!entry.isObject) throw DesktopRemoteFailure()
-            val tid = trackId(entry, "id", nullable = false)!!
+            val tid = idToken(entry, "id", trackIdRegex, nullable = false)!!
             if (!seen.add(tid)) throw DesktopRemoteFailure()
             val title = safeTitle(entry, "title", 140) ?: throw DesktopRemoteFailure()
-            items.add(DesktopRemoteTrack(tid, title))
+            val gid = idToken(entry, "group_id", groupIdRegex, nullable = true)?.takeIf { seenGroups.isEmpty() || it in seenGroups }
+            items.add(DesktopRemoteTrack(tid, title, gid))
         }
-        return DesktopRemoteCatalog(online, verNode.intValue(), playlist, currentId, items)
+        val totalNode = node.get("total_tracks")
+        val totalTracks = if (totalNode != null && !totalNode.isNull) {
+            if (!totalNode.isIntegralNumber || totalNode.intValue() < items.size) throw DesktopRemoteFailure()
+            totalNode.intValue()
+        } else items.size
+        return DesktopRemoteCatalog(online, verNode.intValue(), playlist, currentId, items, totalTracks, activeGroupId, groups)
     }
     fun command(node: JsonNode): DesktopRemoteCommand {
         val status = text(node, "status")
         if (status !in setOf("accepted", "pending", "applied", "rejected", "expired", "unknown")) throw DesktopRemoteFailure()
         return DesktopRemoteCommand(id(node, "command_id"), status)
     }
-    fun commandBody(action: String, key: String, trackId: String? = null, autoPlay: Boolean = false): ByteArray {
+    fun commandBody(action: String, key: String, trackId: String? = null, autoPlay: Boolean = false, groupId: String? = null): ByteArray {
         if (action !in allowedCommands || !key.matches(Regex("[A-Za-z0-9_-]{8,80}"))) throw DesktopRemoteFailure()
         if (action == "select_track") {
-            if (trackId == null || !trackId.matches(trackIdRegex)) throw DesktopRemoteFailure()
+            if (groupId != null || trackId == null || !trackId.matches(trackIdRegex)) throw DesktopRemoteFailure()
             return mapper.writeValueAsBytes(mapOf(
                 "action" to action,
                 "idempotency_key" to key,
@@ -183,7 +213,15 @@ object DesktopRemoteJson {
                 "auto_play" to autoPlay,
             ))
         }
-        if (trackId != null || autoPlay) throw DesktopRemoteFailure()
+        if (action == "select_group") {
+            if (trackId != null || autoPlay || groupId == null || !groupId.matches(groupIdRegex)) throw DesktopRemoteFailure()
+            return mapper.writeValueAsBytes(mapOf(
+                "action" to action,
+                "idempotency_key" to key,
+                "group_id" to groupId,
+            ))
+        }
+        if (trackId != null || autoPlay || groupId != null) throw DesktopRemoteFailure()
         return mapper.writeValueAsBytes(mapOf("action" to action, "idempotency_key" to key))
     }
 }

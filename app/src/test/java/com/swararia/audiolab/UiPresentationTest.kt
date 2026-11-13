@@ -22,4 +22,27 @@ class UiPresentationTest {
             assertEquals(index,artwork.invoke(instance,id))
         }
     }
+
+    @Test fun trackSubtitleAndGroupingSortNamedGroupsBeforeFallback() {
+        assertEquals("Tulus · FLAC · 3:05", UiPresentation.trackSubtitle("Monokrom.flac", "Tulus", 185_000L))
+        assertEquals("FLAC · 3:05", UiPresentation.trackSubtitle("Monokrom.flac", "   ", 185_000L))
+        assertEquals("2 lagu · 3:00", UiPresentation.groupSummary(2, 180_000L))
+        assertEquals("2 lagu", UiPresentation.groupSummary(2, 0L))
+
+        val rows = listOf(
+            Triple("a.mp3", "", 60_000L),
+            Triple("b.mp3", "Zedd", 90_000L),
+            Triple("c.mp3", "Adhitia", 120_000L),
+            Triple("d.mp3", "Adhitia", 30_000L),
+        )
+        val grouped = UiPresentation.groupItems(
+            rows,
+            keySelector = { it.second },
+            durationSelector = { it.third },
+            fallbackLabel = "Artis Tidak Diketahui",
+        )
+        assertEquals(listOf("Adhitia", "Zedd", "Artis Tidak Diketahui"), grouped.map { it.label })
+        assertEquals(150_000L, grouped.first().totalDurationMs)
+        assertEquals(2, grouped.first().items.size)
+    }
 }
