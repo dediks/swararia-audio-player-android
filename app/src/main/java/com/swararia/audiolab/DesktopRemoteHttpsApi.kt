@@ -51,7 +51,11 @@ interface DesktopRemoteApi {
     suspend fun session(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant): DesktopRemoteApproval
     suspend fun capabilities(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant): Set<String>
     suspend fun state(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant): DesktopRemotePlayback
+    suspend fun tracks(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant): DesktopRemoteCatalog =
+        DesktopRemoteCatalog(online = true, version = 0, playlist = null, currentTrackId = null, tracks = emptyList())
     suspend fun command(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, action: String, key: String): DesktopRemoteCommand
+    suspend fun selectTrack(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, trackId: String, autoPlay: Boolean, key: String): DesktopRemoteCommand =
+        command(pairing, grant, "select_track", key)
     suspend fun commandStatus(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, id: String): DesktopRemoteCommand
 }
 
@@ -64,24 +68,28 @@ class DesktopRemoteHttpsApi : DesktopRemoteApi {
         DesktopRemoteJson.capabilities(request(pairing, grant.authorization(), "/v1/capabilities"))
     override suspend fun state(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
         DesktopRemoteJson.playback(request(pairing, grant.authorization(), "/v1/state"))
+    override suspend fun tracks(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
+        DesktopRemoteJson.tracks(request(pairing, grant.authorization(), "/v1/tracks", maxBytes = 65_536))
     override suspend fun command(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, action: String, key: String) =
         DesktopRemoteJson.command(request(pairing, grant.authorization(), "/v1/commands", DesktopRemoteJson.commandBody(action, key), 202))
+    override suspend fun selectTrack(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, trackId: String, autoPlay: Boolean, key: String) =
+        DesktopRemoteJson.command(request(pairing, grant.authorization(), "/v1/commands", DesktopRemoteJson.commandBody("select_track", key, trackId, autoPlay), 202))
     override suspend fun commandStatus(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, id: String): DesktopRemoteCommand {
         if (!id.matches(Regex("[A-Za-z0-9_-]{24}"))) throw DesktopRemoteFailure()
         return DesktopRemoteJson.command(request(pairing, grant.authorization(), "/v1/commands/$id"))
     }
     private suspend fun request(pairing: DesktopRemotePairing, secret: DesktopRemoteSecret, path: String,
-        body: ByteArray? = null, expected: Int = 200): com.fasterxml.jackson.databind.JsonNode {
+        body: ByteArray? = null, expected: Int = 200, maxBytes: Int = 16_384): com.fasterxml.jackson.databind.JsonNode {
         return try {
             // Socket idle timeouts alone do not bound a peer that keeps sending bytes.
-            withTimeout(8_000) { requestWithinDeadline(pairing, secret, path, body, expected) }
+            withTimeout(8_000) { requestWithinDeadline(pairing, secret, path, body, expected, maxBytes) }
         } catch (_: TimeoutCancellationException) {
             currentCoroutineContext().ensureActive() // Preserve cancellation owned by the caller.
             throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.UNAVAILABLE)
         }
     }
     private suspend fun requestWithinDeadline(pairing: DesktopRemotePairing, secret: DesktopRemoteSecret, path: String,
-        body: ByteArray?, expected: Int): com.fasterxml.jackson.databind.JsonNode = coroutineScope {
+        body: ByteArray?, expected: Int, maxBytes: Int): com.fasterxml.jackson.databind.JsonNode = coroutineScope {
         suspendCancellableCoroutine { continuation ->
             val active = AtomicReference<HttpsURLConnection?>()
             val worker = launch(Dispatchers.IO) {
@@ -116,7 +124,7 @@ class DesktopRemoteHttpsApi : DesktopRemoteApi {
                     val code = connection.responseCode
                     if (code == 401 || code == 403) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.AUTH)
                     if (code != expected) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.PROTOCOL)
-                    if (connection.contentType?.substringBefore(';')?.trim() != "application/json" || connection.contentLengthLong > 16_384) throw DesktopRemoteFailure()
+                    if (connection.contentType?.substringBefore(';')?.trim() != "application/json" || connection.contentLengthLong > maxBytes) throw DesktopRemoteFailure()
                     val bytes = connection.inputStream.use { input ->
                         val output = ByteArrayOutputStream()
                         val buffer = ByteArray(2048)
@@ -124,12 +132,12 @@ class DesktopRemoteHttpsApi : DesktopRemoteApi {
                             ensureActive()
                             val n = input.read(buffer)
                             if (n < 0) break
-                            if (output.size() + n > 16_384) throw DesktopRemoteFailure()
+                            if (output.size() + n > maxBytes) throw DesktopRemoteFailure()
                             output.write(buffer, 0, n)
                         }
                         output.toByteArray()
                     }
-                    val result = DesktopRemoteJson.objectValue(bytes)
+                    val result = DesktopRemoteJson.objectValue(bytes, maxBytes)
                     if (continuation.isActive) continuation.resumeWith(Result.success(result))
                 } catch (cancel: CancellationException) {
                     continuation.cancel(cancel)

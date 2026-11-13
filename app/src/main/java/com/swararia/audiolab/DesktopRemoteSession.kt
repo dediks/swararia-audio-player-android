@@ -10,11 +10,15 @@ import java.util.UUID
 data class DesktopRemoteUiState(
     val endpoint: String? = null, val phase: String = "disconnected", val role: String? = null,
     val playback: DesktopRemotePlayback? = null, val commands: Set<String> = emptySet(),
+    val playlist: String? = null, val currentTrackId: String? = null,
+    val tracks: List<DesktopRemoteTrack> = emptyList(),
     val busy: Boolean = false, val fresh: Boolean = false, val message: String? = null,
     val outcome: String? = null,
 ) {
     val canControl: Boolean get() = phase == "active" && role == "control" && playback?.online == true && fresh && !busy && outcome !in setOf("accepted", "pending")
     val canFadeOut: Boolean get() = canControl && "fade_out" in commands && playback?.playing == true && playback?.transport != "FADING"
+    val canSelectTrack: Boolean get() = canControl && "select_track" in commands
+    val canStepTrack: Boolean get() = canControl && playback?.title != null
 }
 
 /** Android-free RAM owner. Like SearchSession, invoke on the caller's single UI thread.
@@ -114,7 +118,8 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
             expiresAt = approval.expiresAt
             if (approval.status == "pending") {
                 mutable.value = mutable.value.copy(phase = "pending", role = null, playback = null,
-                    commands = emptySet(), fresh = false, message = "Setujui perangkat ini di PC.")
+                    commands = emptySet(), playlist = null, currentTrackId = null, tracks = emptyList(),
+                    fresh = false, message = "Setujui perangkat ini di PC.")
                 return
             }
             if (approval.status != "active" || approval.role !in setOf("control", "view_only")) throw DesktopRemoteFailure()
@@ -123,6 +128,9 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
             val playback = api.state(p, g)
             current(ticket, owner)
             if (playback.role != approval.role) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.AUTH)
+            val catalog = if ("select_track" in supported) {
+                api.tracks(p, g).also { current(ticket, owner) }
+            } else null
             val id = commandId
             val outcome = if (id != null) api.commandStatus(p, g, id).also {
                 if (it.id != id) throw DesktopRemoteFailure()
@@ -130,8 +138,9 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
             current(ticket, owner)
             if (outcome !in setOf("accepted", "pending")) commandId = null
             mutable.value = mutable.value.copy(phase = "active", role = approval.role, commands = supported,
-                playback = playback, fresh = true, message = if (!playback.online) "Pemutar Desktop belum siap." else null,
-                outcome = outcome)
+                playback = playback, playlist = catalog?.playlist, currentTrackId = catalog?.currentTrackId,
+                tracks = catalog?.tracks ?: emptyList(), fresh = true,
+                message = if (!playback.online) "Pemutar Desktop belum siap." else null, outcome = outcome)
         } catch (cancel: CancellationException) { throw cancel }
           catch (failure: Exception) {
             current(ticket, owner)
@@ -144,10 +153,28 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
     }
     fun command(action: String) {
         val before = mutable.value
+        if (!before.canControl || action !in before.commands || action == "select_track") return
+        dispatchControlAction(before) { p, g ->
+            api.command(p, g, action, UUID.randomUUID().toString())
+        }
+    }
+
+    fun selectTrack(trackId: String, autoPlay: Boolean) {
+        val before = mutable.value
+        if (!before.canSelectTrack || before.tracks.none { it.id == trackId }) return
+        dispatchControlAction(before) { p, g ->
+            api.selectTrack(p, g, trackId, autoPlay, UUID.randomUUID().toString())
+        }
+    }
+
+    private fun dispatchControlAction(
+        before: DesktopRemoteUiState,
+        send: suspend (DesktopRemotePairing, DesktopRemoteGrant) -> DesktopRemoteCommand,
+    ) {
         val owner = visibility ?: return
         val p = pairing ?: return
         val g = grant ?: return
-        if (!before.canControl || action !in before.commands || expiresAt <= now()) return
+        if (expiresAt <= now()) return
         val ticket = generation
         mutable.value = before.copy(busy = true)
         mutation = scope.launch {
@@ -159,7 +186,7 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
                     current(ticket, owner)
                     if (approval.deviceId != g.deviceId || approval.status != "active" || approval.role != "control" || approval.expiresAt <= now()) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.AUTH)
                     dispatched = true
-                    val result = api.command(p, g, action, UUID.randomUUID().toString())
+                    val result = send(p, g)
                     currentCoroutineContext().ensureActive()
                     if (generation != ticket) return@withLock
                     commandId = result.id

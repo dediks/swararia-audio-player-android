@@ -2,6 +2,9 @@ package com.swararia.audiolab
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -28,6 +31,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 
+private data class PendingTrackChoice(val track: DesktopRemoteTrack, val preferredAutoPlay: Boolean)
+
 /** No saved state, clipboard reads, camera permission, discovery, or playback ownership. */
 @Composable
 fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modifier) {
@@ -36,9 +41,12 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
     var scanning by remember { mutableStateOf(false) }
     var scanFeedback by remember { mutableStateOf<String?>(null) }
     var pendingScanned by remember { mutableStateOf<String?>(null) }
+    var trackQuery by remember { mutableStateOf("") }
+    var pendingTrackSwitch by remember { mutableStateOf<PendingTrackChoice?>(null) }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+
     DisposableEffect(session, lifecycle) {
         val lease = Any()
         val observer = LifecycleEventObserver { _, event ->
@@ -62,85 +70,251 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
             lifecycle.removeObserver(observer)
         }
     }
+
     LaunchedEffect(state.phase) {
         if (state.phase == "pending" || state.phase == "active") {
             input = ""
             scanFeedback = null
             pendingScanned = null
+        } else if (state.phase == "disconnected") {
+            trackQuery = ""
+            pendingTrackSwitch = null
         }
     }
-    Column(
-        modifier.verticalScroll(rememberScrollState()).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        RemoteHeaderBar(state)
-        if (state.phase == "disconnected") {
-            DisconnectedPairingSection(
-                input = input,
-                scanning = scanning,
-                busy = state.busy,
-                scanFeedback = scanFeedback,
-                errorMessage = state.message,
-                onInputChange = {
-                    if (it.length <= 256) {
-                        input = it
+
+    if (state.phase != "active") {
+        Column(
+            modifier.verticalScroll(rememberScrollState()).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            RemoteHeaderBar(state)
+            if (state.phase == "disconnected") {
+                DisconnectedPairingSection(
+                    input = input,
+                    scanning = scanning,
+                    busy = state.busy,
+                    scanFeedback = scanFeedback,
+                    errorMessage = state.message,
+                    onInputChange = {
+                        if (it.length <= 256) {
+                            input = it
+                            scanFeedback = null
+                            pendingScanned = null
+                        }
+                    },
+                    onScanQr = {
+                        if (scanning || state.busy) return@DisconnectedPairingSection
+                        scanning = true
                         scanFeedback = null
                         pendingScanned = null
-                    }
-                },
-                onScanQr = {
-                    if (scanning || state.busy) return@DisconnectedPairingSection
-                    scanning = true
-                    scanFeedback = null
-                    pendingScanned = null
-                    coroutineScope.launch {
-                        try {
-                            when (val res = DesktopRemoteQrScanner.scan(context) { scanFeedback = it }) {
-                                is DesktopRemoteScanResult.Scanned -> {
-                                    scanFeedback = null
-                                    input = ""
-                                    if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                                        pendingScanned = null
-                                        session.connect(res.rawText)
-                                    } else {
-                                        // Scanner overlay may briefly pause the Activity; deliver right after ON_RESUME restores visibility.
-                                        pendingScanned = res.rawText
+                        coroutineScope.launch {
+                            try {
+                                when (val res = DesktopRemoteQrScanner.scan(context) { scanFeedback = it }) {
+                                    is DesktopRemoteScanResult.Scanned -> {
+                                        scanFeedback = null
+                                        input = ""
+                                        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                                            pendingScanned = null
+                                            session.connect(res.rawText)
+                                        } else {
+                                            // Scanner overlay may briefly pause the Activity; deliver right after ON_RESUME restores visibility.
+                                            pendingScanned = res.rawText
+                                        }
                                     }
+                                    DesktopRemoteScanResult.Canceled -> scanFeedback = null
+                                    is DesktopRemoteScanResult.Failed -> scanFeedback = res.message
                                 }
-                                DesktopRemoteScanResult.Canceled -> scanFeedback = null
-                                is DesktopRemoteScanResult.Failed -> scanFeedback = res.message
+                            } finally {
+                                scanning = false
                             }
-                        } finally {
-                            scanning = false
                         }
-                    }
-                },
-                onConnectManual = {
-                    scanFeedback = null
-                    pendingScanned = null
-                    session.connect(input)
-                },
-            )
-        } else if (state.phase != "active") {
-            PendingApprovalCard(
-                state = state,
-                onRefresh = { session.refresh() },
-                onCancel = {
-                    session.disconnect()
-                    input = ""
-                },
-            )
+                    },
+                    onConnectManual = {
+                        scanFeedback = null
+                        pendingScanned = null
+                        session.connect(input)
+                    },
+                )
+            } else {
+                PendingApprovalCard(
+                    state = state,
+                    onRefresh = { session.refresh() },
+                    onCancel = {
+                        session.disconnect()
+                        input = ""
+                    },
+                )
+            }
+        }
+        return
+    }
+
+    val playback = state.playback
+    val isPlaying = playback?.playing == true || playback?.transport == "PLAYING"
+    val isFading = playback?.transport == "FADING"
+    val supportsFadeOut = "fade_out" in state.commands
+    val supportsSelectTrack = "select_track" in state.commands
+    val indexedTracks = remember(state.tracks) {
+        state.tracks.mapIndexed { index, track -> (index + 1) to track }
+    }
+    val trimmedQuery = trackQuery.trim()
+    val filteredTracks = remember(indexedTracks, trimmedQuery) {
+        if (trimmedQuery.isEmpty()) indexedTracks
+        else indexedTracks.filter { (_, track) -> track.title.contains(trimmedQuery, ignoreCase = true) }
+    }
+    val listState = rememberLazyListState()
+    val showCompactBar by remember { derivedStateOf { listState.firstVisibleItemIndex >= 2 } }
+
+    fun handleTrackChoice(track: DesktopRemoteTrack, autoPlay: Boolean) {
+        if (!state.canSelectTrack) return
+        if (track.id == state.currentTrackId) {
+            if (autoPlay) session.command(if (isPlaying && !isFading) "pause" else "play")
+            return
+        }
+        if (isPlaying || isFading) {
+            pendingTrackSwitch = PendingTrackChoice(track, autoPlay)
         } else {
-            ActiveRemoteControlSection(
+            session.selectTrack(track.id, autoPlay)
+        }
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        if (showCompactBar) {
+            CompactStickyControlBar(
                 state = state,
-                onCommand = { action -> session.command(action) },
-                onRefresh = { session.refresh() },
-                onDisconnect = {
-                    session.disconnect()
-                    input = ""
-                },
+                isPlaying = isPlaying,
+                isFading = isFading,
+                onCommand = { session.command(it) },
             )
         }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item(key = "header") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    RemoteHeaderBar(state)
+                    if (!state.fresh) {
+                        NoticeCard("Menyegarkan status terbaru dari PC… kontrol terkunci sementara.")
+                    } else if (playback?.online != true) {
+                        NoticeCard("Pemutar web PC belum aktif. Buka halaman Swararia di browser PC.", isError = true)
+                    } else if (state.role == "view_only") {
+                        NoticeCard("Mode View-Only: Anda hanya dapat memantau status dan daftar lagu PC.")
+                    }
+                }
+            }
+            item(key = "now_playing") {
+                NowPlayingDeckCard(state.fresh, playback)
+            }
+            item(key = "transport") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TransportDeckCard(
+                        state = state,
+                        isPlaying = isPlaying,
+                        isFading = isFading,
+                        supportsFadeOut = supportsFadeOut,
+                        onCommand = { session.command(it) },
+                    )
+                    state.outcome?.let { outcome ->
+                        val (label, isError) = formatOutcomeFeedback(outcome)
+                        NoticeCard(label, isError = isError, icon = if (isError) UiIcons.Info else UiIcons.Check)
+                    }
+                    state.message?.let { message -> NoticeCard(message, isError = state.outcome == null) }
+                }
+            }
+            if (supportsSelectTrack) {
+                item(key = "library_header") {
+                    TrackLibraryHeaderCard(
+                        playlist = state.playlist,
+                        totalCount = state.tracks.size,
+                        filteredCount = filteredTracks.size,
+                        query = trackQuery,
+                        onQueryChange = { trackQuery = it },
+                    )
+                }
+                if (state.tracks.isEmpty()) {
+                    item(key = "library_empty") {
+                        NoticeCard(
+                            if (playback?.online == true) "Daftar lagu PC masih kosong atau belum tersinkron." else "Menunggu pemutar PC online untuk memuat daftar lagu.",
+                        )
+                    }
+                } else if (filteredTracks.isEmpty()) {
+                    item(key = "library_no_match") {
+                        NoticeCard("Tidak ada lagu yang cocok dengan \"$trimmedQuery\".")
+                    }
+                } else {
+                    items(filteredTracks, key = { (_, track) -> track.id }) { (slotNumber, track) ->
+                        val isCurrent = track.id == state.currentTrackId
+                        TrackPickerRow(
+                            slotNumber = slotNumber,
+                            track = track,
+                            isCurrent = isCurrent,
+                            isCurrentPlaying = isCurrent && isPlaying && !isFading,
+                            canSelect = state.canSelectTrack,
+                            canControl = state.canControl,
+                            onCueOrSelect = { handleTrackChoice(track, autoPlay = false) },
+                            onPlayOrPause = { handleTrackChoice(track, autoPlay = true) },
+                        )
+                    }
+                }
+            } else if (state.role == "control") {
+                item(key = "library_upgrade_hint") {
+                    NoticeCard("Fitur pilih lagu belum aktif di server PC saat ini (restart server Swararia di PC).")
+                }
+            }
+            item(key = "footer") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(
+                            onClick = { session.refresh() },
+                            enabled = !state.busy,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                        ) {
+                            Icon(UiIcons.History, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Refresh")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                session.disconnect()
+                                input = ""
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                        ) {
+                            Icon(UiIcons.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Putuskan")
+                        }
+                    }
+                    Text(
+                        "Menutup layar atau pindah aplikasi tidak menghentikan audio PC. Sesi disimpan di RAM saja.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+
+    pendingTrackSwitch?.let { choice ->
+        ReplacePlayingTrackDialog(
+            currentTitle = playback?.title ?: "lagu aktif",
+            targetTrack = choice.track,
+            preferredAutoPlay = choice.preferredAutoPlay,
+            onCueOnly = {
+                pendingTrackSwitch = null
+                session.selectTrack(choice.track.id, autoPlay = false)
+            },
+            onPlayNow = {
+                pendingTrackSwitch = null
+                session.selectTrack(choice.track.id, autoPlay = true)
+            },
+            onDismiss = { pendingTrackSwitch = null },
+        )
     }
 }
 
@@ -162,7 +336,7 @@ private fun resolveTransportBadge(fresh: Boolean, playback: DesktopRemotePlaybac
     !fresh -> RemoteBadge("SINKRONISASI", highlighted = false)
     playback == null || !playback.online -> RemoteBadge("OFFLINE", highlighted = false, error = true)
     playback.transport == "FADING" -> RemoteBadge("FADING OUT 3S", highlighted = true)
-    playback.playing || playback.transport == "PLAYING" -> RemoteBadge("PLAYING", highlighted = true)
+    playback.playing == true || playback.transport == "PLAYING" -> RemoteBadge("PLAYING", highlighted = true)
     playback.transport == "PAUSED" -> RemoteBadge("PAUSED", highlighted = false)
     playback.transport == "STOPPED" || playback.transport == "CUED" -> RemoteBadge("CUED", highlighted = false)
     else -> RemoteBadge(playback.transport ?: "STANDBY", highlighted = false)
@@ -178,6 +352,71 @@ private fun formatOutcomeFeedback(outcome: String): Pair<String, Boolean> = when
     "unknown" -> "Hasil belum pasti — tidak dikirim ulang otomatis" to true
     "expired" -> "Batas waktu perintah habis — cek pemutar PC" to true
     else -> "Perintah ditolak oleh pemutar PC" to true
+}
+
+@Composable
+private fun CompactStickyControlBar(
+    state: DesktopRemoteUiState,
+    isPlaying: Boolean,
+    isFading: Boolean,
+    onCommand: (String) -> Unit,
+) {
+    val activeTitle = state.playback?.title?.takeIf { it.isNotBlank() } ?: "Pemutar PC"
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 4.dp,
+        shadowElevation = 4.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = activeTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = resolveTransportBadge(state.fresh, state.playback).label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isPlaying || isFading) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(
+                    onClick = { onCommand(if (isPlaying && !isFading) "pause" else "play") },
+                    enabled = state.canControl && ((if (isPlaying && !isFading) "pause" else "play") in state.commands),
+                ) {
+                    Icon(
+                        if (isPlaying && !isFading) UiIcons.Pause else UiIcons.Play,
+                        contentDescription = if (isPlaying && !isFading) "Pause PC" else "Play PC",
+                    )
+                }
+                IconButton(
+                    onClick = { onCommand("stop") },
+                    enabled = state.canControl && "stop" in state.commands,
+                ) {
+                    Icon(UiIcons.Stop, contentDescription = "Stop PC")
+                }
+                FilledTonalButton(
+                    onClick = { onCommand("fade_out") },
+                    enabled = state.canFadeOut,
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier.heightIn(min = 38.dp),
+                ) {
+                    Icon(UiIcons.Fade, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (isFading) "Fading" else "Fade 3s", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f))
+        }
+    }
 }
 
 @Composable
@@ -370,65 +609,6 @@ private fun PendingApprovalCard(state: DesktopRemoteUiState, onRefresh: () -> Un
 }
 
 @Composable
-private fun ActiveRemoteControlSection(
-    state: DesktopRemoteUiState,
-    onCommand: (String) -> Unit,
-    onRefresh: () -> Unit,
-    onDisconnect: () -> Unit,
-) {
-    val playback = state.playback
-    val isPlaying = playback?.playing == true || playback?.transport == "PLAYING"
-    val isFading = playback?.transport == "FADING"
-    val supportsFadeOut = "fade_out" in state.commands
-    if (!state.fresh) {
-        NoticeCard("Menyegarkan status terbaru dari PC… kontrol terkunci sementara.")
-    } else if (playback?.online != true) {
-        NoticeCard("Pemutar web PC belum aktif. Buka halaman Swararia di browser PC.", isError = true)
-    } else if (state.role == "view_only") {
-        NoticeCard("Mode View-Only: Anda hanya dapat memantau status pemutar PC.")
-    }
-    NowPlayingDeckCard(state.fresh, playback)
-    TransportDeckCard(
-        state = state,
-        isPlaying = isPlaying,
-        isFading = isFading,
-        supportsFadeOut = supportsFadeOut,
-        onCommand = onCommand,
-    )
-    state.outcome?.let { outcome ->
-        val (label, isError) = formatOutcomeFeedback(outcome)
-        NoticeCard(label, isError = isError, icon = if (isError) UiIcons.Info else UiIcons.Check)
-    }
-    state.message?.let { message -> NoticeCard(message, isError = state.outcome == null) }
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedButton(
-            onClick = onRefresh,
-            enabled = !state.busy,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
-        ) {
-            Icon(UiIcons.History, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Refresh")
-        }
-        OutlinedButton(
-            onClick = onDisconnect,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
-        ) {
-            Icon(UiIcons.Close, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Putuskan")
-        }
-    }
-    Text(
-        "Menutup layar atau pindah aplikasi tidak menghentikan audio PC. Sesi disimpan di RAM saja.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
-
-@Composable
 private fun NowPlayingDeckCard(fresh: Boolean, playback: DesktopRemotePlayback?) {
     val badge = resolveTransportBadge(fresh, playback)
     val durationSec = playback?.duration?.toDouble()
@@ -488,6 +668,7 @@ private fun TransportDeckCard(
     onCommand: (String) -> Unit,
 ) {
     val waitingCommand = state.busy || state.outcome in setOf("accepted", "pending")
+    val supportsPrevNext = "prev" in state.commands || "next" in state.commands
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -566,6 +747,30 @@ private fun TransportDeckCard(
                 )
             }
             if (isFading) LinearProgressIndicator(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)))
+            if (supportsPrevNext) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        onClick = { onCommand("prev") },
+                        enabled = state.canStepTrack && "prev" in state.commands,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                    ) {
+                        Icon(UiIcons.Previous, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Prev", style = MaterialTheme.typography.labelMedium)
+                    }
+                    OutlinedButton(
+                        onClick = { onCommand("next") },
+                        enabled = state.canStepTrack && "next" in state.commands,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                    ) {
+                        Text("Next", style = MaterialTheme.typography.labelMedium)
+                        Spacer(Modifier.width(6.dp))
+                        Icon(UiIcons.Next, contentDescription = null, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
             if (state.role == "control" && !supportsFadeOut) {
                 Text(
                     "Fade Out 3s belum aktif di server PC saat ini (restart server Swararia di PC).",
@@ -575,6 +780,173 @@ private fun TransportDeckCard(
             }
         }
     }
+}
+
+@Composable
+private fun TrackLibraryHeaderCard(
+    playlist: String?,
+    totalCount: Int,
+    filteredCount: Int,
+    query: String,
+    onQueryChange: (String) -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "DAFTAR LAGU PC",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        playlist?.takeIf { it.isNotBlank() } ?: "Semua Lagu",
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                StatusPill(
+                    RemoteBadge(
+                        label = if (query.isBlank()) "$totalCount lagu" else "$filteredCount / $totalCount",
+                        highlighted = false,
+                    ),
+                )
+            }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { if (it.length <= 80) onQueryChange(it) },
+                placeholder = { Text("Cari judul lagu…") },
+                leadingIcon = { Icon(UiIcons.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                trailingIcon = if (query.isNotEmpty()) {
+                    {
+                        IconButton(onClick = { onQueryChange("") }) {
+                            Icon(UiIcons.Close, contentDescription = "Hapus pencarian", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                } else null,
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Tap judul lagu untuk Cue (standby), atau tombol ▶ untuk langsung memutar.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TrackPickerRow(
+    slotNumber: Int,
+    track: DesktopRemoteTrack,
+    isCurrent: Boolean,
+    isCurrentPlaying: Boolean,
+    canSelect: Boolean,
+    canControl: Boolean,
+    onCueOrSelect: () -> Unit,
+    onPlayOrPause: () -> Unit,
+) {
+    val borderColor = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+    val container = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
+    Surface(
+        onClick = onCueOrSelect,
+        enabled = canSelect,
+        shape = RoundedCornerShape(14.dp),
+        color = container,
+        border = BorderStroke(1.dp, borderColor),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Text(
+                    text = slotNumber.toString().padStart(2, '0'),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = track.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (isCurrent) {
+                    Text(
+                        text = if (isCurrentPlaying) "Sedang diputar di PC" else "Aktif di pemutar PC",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            FilledTonalIconButton(
+                onClick = onPlayOrPause,
+                enabled = if (isCurrent) canControl else canSelect,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    imageVector = if (isCurrentPlaying) UiIcons.Pause else UiIcons.Play,
+                    contentDescription = if (isCurrentPlaying) "Pause" else "Putar ${track.title}",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReplacePlayingTrackDialog(
+    currentTitle: String,
+    targetTrack: DesktopRemoteTrack,
+    preferredAutoPlay: Boolean,
+    onCueOnly: () -> Unit,
+    onPlayNow: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ganti Lagu di PC?") },
+        text = {
+            Text("PC sedang aktif pada \"$currentTitle\". Memilih \"${targetTrack.title}\" akan menghentikan lagu tersebut.")
+        },
+        confirmButton = {
+            Button(onClick = if (preferredAutoPlay) onPlayNow else onCueOnly) {
+                Text(if (preferredAutoPlay) "Putar Sekarang" else "Siapkan (Cue)")
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TextButton(onClick = onDismiss) { Text("Batal") }
+                OutlinedButton(onClick = if (preferredAutoPlay) onCueOnly else onPlayNow) {
+                    Text(if (preferredAutoPlay) "Cue Saja" else "Putar Langsung")
+                }
+            }
+        },
+    )
 }
 
 @Composable
