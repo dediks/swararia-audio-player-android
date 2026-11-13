@@ -4,7 +4,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -53,12 +55,100 @@ class PlaybackService : MediaSessionService() {
     private var requestStarted = 0L
     private var requestDispatched = 0L
     private var resolvingForeground = false
+    private var explicitlyStopped = false
+    private var remoteServerForegroundActive = false
+    private var remoteEndpointLabel = "LAN"
+
+    private val remotePlaybackHost = object : RemoteServicePlaybackHost {
+        override fun currentSnapshot(): RemoteServerPlaybackSnapshot = buildRemoteSnapshot()
+
+        override fun executeRemoteCommand(
+            request: RemoteCommandExecutionRequest,
+            queueEntries: List<RemoteQueueEntry>,
+        ): RemoteCommandExecutionResult {
+            if (savedLocal != null) {
+                return RemoteCommandExecutionResult(applied = false, errorCode = "preview_active")
+            }
+            val player = appPlayer ?: return RemoteCommandExecutionResult(applied = false, errorCode = "player_unavailable")
+            when (request.action) {
+                "select_track" -> {
+                    val idx = queueEntries.indexOfFirst { it.numericId == request.trackNumericId }
+                    if (idx < 0) return RemoteCommandExecutionResult(applied = false, errorCode = "unknown_track")
+                    val items = toMediaItems(queueEntries)
+                    explicitlyStopped = false
+                    cancelFade()
+                    player.setMediaItems(items, idx, 0L)
+                    applyMode(mode)
+                    player.prepare()
+                    if (request.autoPlay) player.play() else player.pause()
+                }
+                "play" -> {
+                    if (player.mediaItemCount == 0) {
+                        if (queueEntries.isEmpty()) {
+                            return RemoteCommandExecutionResult(applied = false, errorCode = "empty_queue")
+                        }
+                        player.setMediaItems(toMediaItems(queueEntries), 0, 0L)
+                        applyMode(mode)
+                        player.prepare()
+                    }
+                    explicitlyStopped = false
+                    cancelFade()
+                    if (player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_ENDED) {
+                        if (player.playbackState == Player.STATE_ENDED) player.seekTo(0L)
+                        player.prepare()
+                    }
+                    player.play()
+                }
+                "pause" -> {
+                    explicitlyStopped = false
+                    cancelFade()
+                    player.pause()
+                }
+                "stop" -> {
+                    cancelFade()
+                    player.pause()
+                    player.seekTo(0L)
+                    explicitlyStopped = true
+                }
+                "fade_out" -> {
+                    if (!startFade()) return RemoteCommandExecutionResult(applied = false, errorCode = "cannot_fade")
+                }
+                "prev" -> {
+                    if (player.mediaItemCount == 0) {
+                        return RemoteCommandExecutionResult(applied = false, errorCode = "empty_queue")
+                    }
+                    explicitlyStopped = false
+                    cancelFade()
+                    val wasPlaying = player.isPlaying
+                    if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem() else player.seekTo(0L)
+                    if (wasPlaying) player.play()
+                }
+                "next" -> {
+                    if (player.mediaItemCount == 0 || !player.hasNextMediaItem()) {
+                        return RemoteCommandExecutionResult(applied = false, errorCode = "no_next_track")
+                    }
+                    explicitlyStopped = false
+                    cancelFade()
+                    val wasPlaying = player.isPlaying
+                    player.seekToNextMediaItem()
+                    if (wasPlaying) player.play()
+                }
+                else -> return RemoteCommandExecutionResult(applied = false, errorCode = "unsupported_action")
+            }
+            publishState()
+            return RemoteCommandExecutionResult(applied = true, updatedPlayback = buildRemoteSnapshot())
+        }
+    }
 
     private fun timing(stage: String, began: Long) {
         if (began > 0L) android.util.Log.d("SwarariaTiming", "$stage=${((System.nanoTime() - began) / 1_000_000L).coerceAtLeast(0)}")
     }
     private val playerListener = object : Player.Listener {
-        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) { if (!playWhenReady) cancelFade() }
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (playWhenReady) explicitlyStopped = false
+            if (!playWhenReady) cancelFade()
+            publishState()
+        }
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (!isPlaying) cancelFade()
             if (savedLocal != null && previewPrepared && !changing) {
@@ -69,12 +159,15 @@ class PlaybackService : MediaSessionService() {
                     android.util.Log.d("SwarariaTiming", "preview_tap_to_playing_ms=${((SystemClock.elapsedRealtimeNanos() - requestDispatched) / 1_000_000L).coerceAtLeast(0)}")
                 }
                 previewPhase = if (isPlaying) "playing" else if (appPlayer?.playbackState == Player.STATE_BUFFERING) "buffering" else "paused"
-                publishState()
             }
+            publishState()
         }
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) cancelFade()
-            if (savedLocal == null || changing || !previewPrepared) return
+            if (savedLocal == null || changing || !previewPrepared) {
+                if (savedLocal == null) publishState()
+                return
+            }
             when (playbackState) {
                 Player.STATE_ENDED, Player.STATE_IDLE -> finishPreview()
                 Player.STATE_READY -> {
@@ -88,8 +181,14 @@ class PlaybackService : MediaSessionService() {
             // Never log exception text/URI/headers. Invalidate even when no Activity is alive.
             if (savedLocal != null && !changing) { previewOwner.previewError(); finishPreview(keepError = true) }
         }
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = cancelFade()
-        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) = cancelFade()
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            cancelFade()
+            publishState()
+        }
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            cancelFade()
+            publishState()
+        }
     }
     private fun isApp(controller: MediaSession.ControllerInfo): Boolean = controller.packageName == packageName && controller.uid == Process.myUid()
     private val callback = object : MediaSession.Callback {
@@ -165,6 +264,7 @@ class PlaybackService : MediaSessionService() {
         applyMode(PlaybackMode.fromStored(getSharedPreferences(PREFERENCES, MODE_PRIVATE).getString(PlaybackCommands.EXTRA_MODE, null)))
         val open = PendingIntent.getActivity(this, 20, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         session = MediaSession.Builder(this, player).setSessionActivity(open).setCallback(callback).setSessionExtras(stateExtras()).build()
+        (application as? SwarariaApp)?.container?.remoteServerController?.attachPlaybackHost(remotePlaybackHost)
     }
     private fun beginPreview(args: Bundle): SessionResult {
         val id = args.getString(PreviewProtocol.ID).orEmpty()
@@ -277,7 +377,82 @@ class PlaybackService : MediaSessionService() {
             putBoolean(PreviewProtocol.ERROR, state.error != null)
         }
     }
-    private fun publishState() { session?.setSessionExtras(stateExtras()) }
+    private fun publishState() {
+        session?.setSessionExtras(stateExtras())
+        (application as? SwarariaApp)?.container?.remoteServerController?.notifyPlaybackChanged(buildRemoteSnapshot())
+    }
+
+    private fun toMediaItems(entries: List<RemoteQueueEntry>): List<MediaItem> = entries.map { entry ->
+        MediaItem.Builder()
+            .setMediaId(entry.numericId.toString())
+            .setUri(Uri.parse(entry.uriString))
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(entry.title).build())
+            .build()
+    }
+
+    private fun buildRemoteSnapshot(): RemoteServerPlaybackSnapshot {
+        val player = appPlayer ?: return RemoteServerPlaybackSnapshot(online = false, transportState = "STOPPED")
+        if (savedLocal != null) {
+            return RemoteServerPlaybackSnapshot(
+                online = false,
+                playing = false,
+                transportState = "PREVIEW_ACTIVE",
+                currentTimeSec = null,
+                durationSec = null,
+                currentTrackNumericId = null,
+                previewActive = true,
+            )
+        }
+        val playing = player.isPlaying
+        val isFading = originalVolume != null
+        val transportState = when {
+            isFading -> "FADING"
+            playing -> "PLAYING"
+            player.playbackState == Player.STATE_BUFFERING -> "BUFFERING"
+            explicitlyStopped || player.playbackState == Player.STATE_IDLE || player.mediaItemCount == 0 -> "STOPPED"
+            else -> "PAUSED"
+        }
+        val posSec = if (explicitlyStopped || player.mediaItemCount == 0) 0.0
+        else player.currentPosition.coerceAtLeast(0L) / 1000.0
+        val durMs = player.duration
+        val durSec = if (durMs > 0L && durMs != C.TIME_UNSET) durMs / 1000.0 else null
+        val curId = player.currentMediaItem?.mediaId?.toLongOrNull()
+        return RemoteServerPlaybackSnapshot(
+            online = true,
+            playing = playing,
+            transportState = transportState,
+            currentTimeSec = posSec,
+            durationSec = durSec,
+            currentTrackNumericId = curId,
+            previewActive = false,
+        )
+    }
+
+    private fun ensureRemoteServerForeground() {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(REMOTE_SERVER_CHANNEL, "FOH Remote Server", NotificationManager.IMPORTANCE_LOW),
+        )
+        val open = PendingIntent.getActivity(
+            this,
+            23,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notification = NotificationCompat.Builder(this, REMOTE_SERVER_CHANNEL)
+            .setSmallIcon(R.drawable.ic_audio)
+            .setContentTitle("Swararia Server FOH aktif")
+            .setContentText("Terbuka di https://$remoteEndpointLabel")
+            .setContentIntent(open)
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(REMOTE_SERVER_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        } else {
+            startForeground(REMOTE_SERVER_NOTIFICATION_ID, notification)
+        }
+    }
     private fun startFade(): Boolean {
         val player = appPlayer ?: return false
         if (!FadeRules.canStart(player.isPlaying, originalVolume != null)) return false
@@ -304,9 +479,26 @@ class PlaybackService : MediaSessionService() {
     }
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = if (isApp(controllerInfo) || controllerInfo.isTrusted) session else null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_CANCEL_PREVIEW) {
-            if (lease.matches(intent.getStringExtra(PreviewProtocol.TOKEN), intent.getLongExtra(PreviewProtocol.GENERATION, 0))) finishPreview()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_CANCEL_PREVIEW -> {
+                if (lease.matches(intent.getStringExtra(PreviewProtocol.TOKEN), intent.getLongExtra(PreviewProtocol.GENERATION, 0))) finishPreview()
+                return START_NOT_STICKY
+            }
+            ACTION_REMOTE_SERVER_START -> {
+                val rawEndpoint = intent.getStringExtra(EXTRA_REMOTE_ENDPOINT).orEmpty()
+                remoteEndpointLabel = rawEndpoint.filter { !it.isISOControl() }.take(32).ifBlank { "LAN" }
+                remoteServerForegroundActive = true
+                ensureRemoteServerForeground()
+                return START_NOT_STICKY
+            }
+            ACTION_REMOTE_SERVER_STOP -> {
+                remoteServerForegroundActive = false
+                getSystemService(NotificationManager::class.java).cancel(REMOTE_SERVER_NOTIFICATION_ID)
+                if (appPlayer?.isPlaying != true && savedLocal == null) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                }
+                return START_NOT_STICKY
+            }
         }
         super.onStartCommand(intent, flags, startId)
         return START_NOT_STICKY // Signed sources and in-flight work are deliberately not persisted.
@@ -315,9 +507,13 @@ class PlaybackService : MediaSessionService() {
         if (resolvingForeground && !previewPrepared && savedLocal != null) return
         super.onUpdateNotification(session, startInForegroundRequired)
         if (previewPrepared && startInForegroundRequired) resolvingForeground = false
+        if (remoteServerForegroundActive && !startInForegroundRequired && appPlayer?.isPlaying != true && savedLocal == null) {
+            ensureRemoteServerForeground()
+        }
     }
-    override fun isPlaybackOngoing(): Boolean = savedLocal != null || super.isPlaybackOngoing()
+    override fun isPlaybackOngoing(): Boolean = remoteServerForegroundActive || savedLocal != null || super.isPlaybackOngoing()
     override fun onDestroy() {
+        (application as? SwarariaApp)?.container?.remoteServerController?.detachPlaybackHost(remotePlaybackHost)
         scope.cancel()
         if (::previewOwner.isInitialized) previewOwner.close()
         cancelFade(); handler.removeCallbacksAndMessages(null)
@@ -325,8 +521,13 @@ class PlaybackService : MediaSessionService() {
         appPlayer?.release(); appPlayer = null
         super.onDestroy()
     }
-    private companion object {
-        const val PREFERENCES = "native_playback"
-        const val ACTION_CANCEL_PREVIEW = "com.swararia.audiolab.CANCEL_PREVIEW"
+    companion object {
+        private const val PREFERENCES = "native_playback"
+        private const val ACTION_CANCEL_PREVIEW = "com.swararia.audiolab.CANCEL_PREVIEW"
+        private const val REMOTE_SERVER_CHANNEL = "remote_server"
+        private const val REMOTE_SERVER_NOTIFICATION_ID = 2103
+        const val ACTION_REMOTE_SERVER_START = "com.swararia.audiolab.REMOTE_SERVER_START"
+        const val ACTION_REMOTE_SERVER_STOP = "com.swararia.audiolab.REMOTE_SERVER_STOP"
+        const val EXTRA_REMOTE_ENDPOINT = "com.swararia.audiolab.REMOTE_ENDPOINT"
     }
 }

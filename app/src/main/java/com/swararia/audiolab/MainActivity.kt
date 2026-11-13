@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
                 val organizerBusy by model.organizerBusy.collectAsStateWithLifecycle()
                 val operationBusy by model.operationBusy.collectAsStateWithLifecycle()
                 val jobs by model.jobs.collectAsStateWithLifecycle()
+                val remoteServerState by model.remoteServerState.collectAsStateWithLifecycle()
                 val snackbars = remember { SnackbarHostState() }
                 LaunchedEffect(model) { model.messages.collect { snackbars.showSnackbar(it) } }
                 LaunchedEffect(tracks, controller) {
@@ -127,6 +128,8 @@ class MainActivity : ComponentActivity() {
                     onSearch = { query, provider -> whenOnlineIdle { model.search(query, provider) } },
                     onCancelSearch = { model.cancelSearch() },
                     desktopRemote = model.desktopRemote,
+                    remoteServerState = remoteServerState,
+                    remoteServerActions = model.remoteServerActions,
                     upgrade = UpgradeUiActions(
                         jobs = jobs, operationBusy = operationBusy,
                         onDownloadBatch = { hits, authorized -> whenOnlineIdle {

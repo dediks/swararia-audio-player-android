@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Swararia FOH Remote &amp; Sync</title>
+  <link rel="stylesheet" href="/web/remote.css" />
+  <script src="/web/remote.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo-dot" aria-hidden="true"></div>
+        <div>
+          <h1 class="brand-title">Swararia FOH Remote</h1>
+          <p id="subStatus" class="brand-sub">Menghubungkan ke server HP…</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span id="rolePill" class="pill pill-muted hidden"></span>
+        <span id="transferPill" class="pill pill-muted hidden"></span>
+        <button id="btnDisconnect" type="button" class="btn btn-ghost hidden">Putuskan</button>
+      </div>
+    </header>
+
+    <div id="globalNotice" class="notice hidden" role="status" aria-live="polite"></div>
+
+    <!-- Pairing View -->
+    <section id="viewPair" class="card hidden">
+      <h2>Sambungkan Browser ke HP Swararia</h2>
+      <p class="muted">
+        Masukkan nama perangkat ini dan <strong>PIN Pairing 8 karakter</strong> yang tampil di tab <strong>Remote → Mode Server HP</strong>.
+      </p>
+      <form id="pairForm" class="stack" autocomplete="off">
+        <label class="field">
+          <span>Nama Perangkat</span>
+          <input id="pairLabel" type="text" maxlength="80" placeholder="Laptop FOH / Operator 2" required />
+        </label>
+        <label class="field">
+          <span>PIN Pairing (8 Karakter)</span>
+          <input id="pairPin" type="text" maxlength="12" placeholder="ABCD2345" required />
+        </label>
+        <button id="btnPair" type="submit" class="btn btn-primary">Minta Persetujuan HP</button>
+      </form>
+    </section>
+
+    <!-- Pending View -->
+    <section id="viewPending" class="card hidden">
+      <h2>Menunggu Persetujuan di HP</h2>
+      <p class="muted">
+        Buka layar Swararia di HP Server lalu pilih peran (<strong>Control</strong> atau <strong>View-Only</strong>) untuk perangkat ini.
+      </p>
+      <div class="row-actions">
+        <button id="btnRefreshPending" type="button" class="btn btn-secondary">Cek Status</button>
+        <button id="btnCancelPending" type="button" class="btn btn-ghost">Batalkan</button>
+      </div>
+    </section>
+
+    <!-- Main Active App -->
+    <main id="viewActive" class="stack hidden">
+      <nav class="tabs" aria-label="Mode Antarmuka">
+        <button id="tabBtnFoh" type="button" class="tab-btn active">Deck FOH &amp; Lagu</button>
+        <button id="tabBtnSync" type="button" class="tab-btn">Download &amp; Sync</button>
+      </nav>
+
+      <!-- Tab: FOH Control & Catalog -->
+      <section id="panelFoh" class="stack">
+        <div class="card deck-card">
+          <div class="deck-header">
+            <span id="transportBadge" class="pill pill-muted">OFFLINE</span>
+            <span id="timeLabel" class="mono muted">0:00 / --:--</span>
+          </div>
+          <h2 id="nowTitle" class="now-title">Belum ada lagu dipilih</h2>
+          <div class="progress-track" aria-hidden="true">
+            <div id="progressBar" class="progress-fill"></div>
+          </div>
+
+          <div class="transport-grid">
+            <button id="btnPrev" type="button" class="btn btn-secondary">Prev</button>
+            <button id="btnPlayPause" type="button" class="btn btn-primary">Play</button>
+            <button id="btnNext" type="button" class="btn btn-secondary">Next</button>
+            <button id="btnFadeOut" type="button" class="btn btn-warn">Fade 3 Detik</button>
+            <button id="btnStop" type="button" class="btn btn-danger">Stop</button>
+          </div>
+        </div>
+
+        <!-- Inline live switch guard (no native confirm()) -->
+        <div id="switchGuardCard" class="card guard-card hidden">
+          <p id="switchGuardText"></p>
+          <div class="row-actions">
+            <button id="btnConfirmCue" type="button" class="btn btn-secondary">Cue (Siapkan Saja)</button>
+            <button id="btnConfirmPlay" type="button" class="btn btn-primary">Putar Sekarang</button>
+            <button id="btnConfirmCancel" type="button" class="btn btn-ghost">Batal</button>
+          </div>
+        </div>
+
+        <div class="card stack">
+          <div class="catalog-top">
+            <h3 id="catalogHeading">Koleksi Audio HP</h3>
+            <span id="catalogSummary" class="muted">0 lagu</span>
+          </div>
+          <div id="groupChips" class="chip-row"></div>
+          <input id="trackSearch" type="search" placeholder="Cari judul lagu atau grup…" />
+          <div id="trackList" class="track-list"></div>
+        </div>
+      </section>
+
+      <!-- Tab: Sync & Download -->
+      <section id="panelSync" class="stack hidden">
+        <div id="syncBlockedBanner" class="card hidden">
+          <h3>Izin Transfer Belum Aktif</h3>
+          <p class="muted">
+            Untuk menjaga keamanan koleksi HP Server, aktifkan toggle <strong>Izinkan Transfer &amp; Sync File</strong> dan centang izin transfer untuk perangkat ini pada layar HP Swararia.
+          </p>
+        </div>
+
+        <div id="syncEnabledContent" class="stack hidden">
+          <div class="card stack">
+            <div class="catalog-top">
+              <div>
+                <h3>Tarik / Unduh Koleksi dari HP</h3>
+                <p class="muted">Pilih grup/playlist lalu unduh lagu satuan atau sekaligus ke komputer ini.</p>
+              </div>
+              <button id="btnRefreshManifest" type="button" class="btn btn-secondary">Muat Ulang</button>
+            </div>
+            <div id="syncGroupChips" class="chip-row"></div>
+            <div class="row-actions">
+              <button id="btnDownloadGroup" type="button" class="btn btn-primary">Unduh Semua di Grup Ini</button>
+              <span id="downloadProgressLabel" class="muted"></span>
+            </div>
+            <div id="downloadTrackList" class="track-list"></div>
+          </div>
+
+          <div class="card stack">
+            <div>
+              <h3>Kirim &amp; Sinkronisasi Lagu ke HP (Anti-Dobel SHA-256)</h3>
+              <p class="muted">
+                File akan diperiksa sidik jari <strong>SHA-256</strong> sebelum dikirim. Lagu yang identik sudah ada di HP dilewati otomatis dan hanya ditautkan ke playlist bila dipilih.
+              </p>
+            </div>
+
+            <div class="sync-form-grid">
+              <label class="field">
+                <span>Pilih File Audio dari Laptop/PC (Multi-File)</span>
+                <input id="uploadFileInput" type="file" multiple accept="audio/*,.mp3,.m4a,.mp4,.opus,.ogg,.webm,.wav,.flac,.aac" />
+              </label>
+              <label class="field">
+                <span>Masukkan ke Playlist HP (Opsional)</span>
+                <input id="uploadPlaylistInput" type="text" maxlength="60" list="existingPlaylistsDatalist" placeholder="Misal: Worship / Event Minggu" />
+                <datalist id="existingPlaylistsDatalist"></datalist>
+              </label>
+            </div>
+
+            <div class="row-actions">
+              <button id="btnAnalyzeSync" type="button" class="btn btn-secondary">1. Analisa &amp; Cek Dobel</button>
+              <button id="btnStartSync" type="button" class="btn btn-primary" disabled>2. Kirim Lagu Baru ke HP</button>
+            </div>
+
+            <div id="syncAnalysisSummary" class="notice hidden"></div>
+            <div id="uploadPlanList" class="track-list"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
+

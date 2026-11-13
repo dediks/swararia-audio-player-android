@@ -37,6 +37,35 @@ class DesktopRemoteWiring(unittest.TestCase):
         for forbidden in ['SharedPreferences', 'MODE_PRIVATE', 'MODE_WORLD_READABLE', 'AES/ECB', 'AES/CBC']:
             self.assertNotIn(forbidden, store)
 
+    def test_android_remote_server_wiring_and_security_boundaries(self):
+        container = (SRC / 'AppContainer.kt').read_text()
+        self.assertIn('remoteServerController: AndroidRemoteServerController', container)
+        self.assertIn('container.remoteServerController', container)
+
+        swararia_ui = (SRC / 'SwarariaUi.kt').read_text()
+        self.assertIn('3 -> RemoteTabScreen(', swararia_ui)
+
+        remote_screen = (SRC / 'RemoteServerScreen.kt').read_text()
+        for required in ['DesktopRemoteScreen(', 'RemoteServerUiState', 'RemoteServerUiActions', 'QRCodeWriter']:
+            self.assertIn(required, remote_screen)
+        for forbidden in ['PlaybackService', 'MediaController', 'ExoPlayer', 'AudioDatabase', 'MediaLibrary',
+                          'AndroidRemoteTlsIdentity', 'SSLServerSocket', 'SharedPreferences']:
+            self.assertNotIn(forbidden, remote_screen)
+
+        server_sources = '\n'.join((SRC / (n + '.kt')).read_text() for n in [
+            'AndroidRemoteTlsIdentity', 'AndroidRemoteServerEngine',
+            'AndroidRemoteHttpListener', 'AndroidRemoteServerController',
+        ])
+        for forbidden in ['setDefaultSSLSocketFactory', 'setDefaultHostnameVerifier', 'SharedPreferences', 'http://']:
+            self.assertNotIn(forbidden, server_sources)
+
+        assets_dir = ROOT / 'app/src/main/assets/remote_server'
+        for name in ['index.html', 'remote.css', 'remote.js']:
+            self.assertTrue((assets_dir / name).is_file(), f'Missing remote_server asset: {name}')
+        web_bundle = '\n'.join((assets_dir / n).read_text() for n in ['index.html', 'remote.js'])
+        for forbidden in ['innerHTML', 'outerHTML', 'eval(', 'localStorage', 'sessionStorage']:
+            self.assertNotIn(forbidden, web_bundle)
+
 
 if __name__ == '__main__':
     unittest.main()

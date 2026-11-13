@@ -15,6 +15,7 @@ class AppViewModel(
     previewPlayback: PreviewPlayback? = null,
     desktopRemoteApi: DesktopRemoteApi,
     desktopRemoteStore: DesktopRemoteSessionStore? = null,
+    private val remoteServer: AndroidRemoteServerController? = null,
 ) : ViewModel() {
     val desktopRemote = DesktopRemoteSession(desktopRemoteApi, viewModelScope, store = desktopRemoteStore)
     private val session: SearchSession = SearchSession(searchRepository, viewModelScope,
@@ -48,12 +49,48 @@ class AppViewModel(
     val playbackDeletion = PlaybackDeletion()
     private val operations: UpgradeOperations = UpgradeOperations(downloadQueue, viewModelScope,
         { session.canStartOnlineOperation() }, { ingest.value.busy }, { jobs.value },
-        { id -> playbackDeletion.delete(id) { library.delete(id) } }, ::message)
+        { id ->
+            playbackDeletion.delete(id) { library.delete(id) }
+            remoteServer?.notifyLibraryDeletionsChanged()
+        }, ::message)
     val operationBusy = operations.busy
+    val remoteServerState: StateFlow<RemoteServerUiState> =
+        remoteServer?.state ?: MutableStateFlow(RemoteServerUiState())
+    val remoteServerActions = RemoteServerUiActions(
+        onRefreshInterfaces = ::refreshServerInterfaces,
+        onStartServer = ::startRemoteServer,
+        onStopServer = ::stopRemoteServer,
+        onRefreshNativeInvite = ::refreshServerNativeInvite,
+        onRefreshWebPin = ::refreshServerWebPin,
+        onSetMediaTransferEnabled = ::setServerMediaTransferEnabled,
+        onSetPauseTransferDuringPlayback = ::setServerPauseTransferDuringPlayback,
+        onApproveDevice = ::approveServerDevice,
+        onSetDeviceTransferAllowed = ::setServerDeviceTransferAllowed,
+        onDenyOrRevokeDevice = ::denyOrRevokeServerDevice,
+        onClearError = ::clearServerError,
+    )
     init {
         operations.initialize()
+        remoteServer?.attachDeletedTrackChecker { id -> !playbackDeletion.canPlay(id) }
         viewModelScope.launch { runCatching { library.scanMissingMetadata() } }
     }
+    fun refreshServerInterfaces() { remoteServer?.refreshInterfaces() }
+    fun startRemoteServer(bindIp: String, port: Int) { remoteServer?.startServer(bindIp, port) }
+    fun stopRemoteServer() { remoteServer?.stopServer() }
+    fun refreshServerNativeInvite() { remoteServer?.refreshNativeInvite() }
+    fun refreshServerWebPin() { remoteServer?.refreshWebPin() }
+    fun setServerMediaTransferEnabled(allowed: Boolean) { remoteServer?.setMediaTransferEnabled(allowed) }
+    fun setServerPauseTransferDuringPlayback(pause: Boolean) { remoteServer?.setPauseTransferDuringPlayback(pause) }
+    fun approveServerDevice(deviceId: String, role: String, allowTransfer: Boolean) {
+        remoteServer?.approveDevice(deviceId, role, allowTransfer)
+    }
+    fun setServerDeviceTransferAllowed(deviceId: String, allow: Boolean) {
+        remoteServer?.setDeviceTransferAllowed(deviceId, allow)
+    }
+    fun denyOrRevokeServerDevice(deviceId: String, deny: Boolean = false) {
+        remoteServer?.denyOrRevokeDevice(deviceId, deny)
+    }
+    fun clearServerError() { remoteServer?.clearError() }
     fun enqueueDownloads(requests: List<DownloadRequest>, authorized: Boolean, start: (String) -> Unit) {
         if (!canStartOnlineOperation()) { message("Tunggu proses yang sedang berjalan."); return }
         cancelPreview(); operations.enqueue(requests, authorized, start)

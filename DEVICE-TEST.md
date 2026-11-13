@@ -1,6 +1,19 @@
 # Uji pada HP — QA fitur interaktif belum selesai
 
-APK debug (`versionCode=6`, `0.5.0-spike`) sudah terpasang dan terbuka pada perangkat USB `SM_M156B` Android 16 via `adb.exe`, tetapi QA fitur lengkap belum dijalankan pada HP. Lolos kompilasi, unit test, tanda tangan APK, dan pemeriksaan native library bukan bukti alur berikut sudah berhasil pada HP.
+APK debug (`versionCode=6`, `0.5.0-spike` + Pembaruan 0.6.0 Server Mode) sudah dibangun ulang; cek status pemasangan terbaru di bawah. Lolos kompilasi, unit test, tanda tangan APK, dan pemeriksaan native library bukan bukti alur berikut sudah berhasil pada HP.
+
+## Pembaruan 0.6.0 — prioritas uji Mode Server HP, Browser FOH & Sync SHA-256
+- Pasang sebagai **update** (`adb install -r`) di atas APK `com.swararia.audiolab.spike` dari keystore yang sama; verifikasi koleksi & playlist dari v3 tetap utuh sesudah migrasi aditif Room `v3 → v4` dan kolom SHA-256 terisi bertahap tanpa gangguan pemutaran.
+- Masuk tab **Remote**, pilih switcher **`Jadikan HP Ini Server`**, hubungkan HP ke Hotspot/Wi-Fi lokal (atau nyalakan Hotspot HP ini), ketuk **Segarkan IP**, pilih IP Hotspot/Wi-Fi dan port (`8443`), lalu tekan **Nyalakan Server HP**. Pastikan notifikasi foreground pemutar audio aktif dan HP tetap melayani meski layar dimatikan.
+- **Uji Klien Android lain (`QR Native`):** pada HP Swararia Android ke-2, buka **Remote → `Kendalikan PC` → `Scan QR dari PC`** untuk memindai QR pada layar Server HP, lalu setujui sebagai `Control` / `View-Only` pada Server HP. Uji `Play`/`Pause`/`Prev`/`Next`/`Fade 3s`/`Stop`, ganti grup playlist, serta pastikan preview online lokal di Server HP mengunci remote control untuk sementara.
+- **Uji Web Browser FOH (Chrome Android / Safari iPhone / Laptop):** buka `https://<IP>:<port>/` dari browser, lanjutkan peringatan sertifikat lokal (cocokkan fingerprint SHA-256), masukkan **PIN 8 karakter**, setujui perangkat pada Server HP:
+  - Cek rate-limit/lockout 5x PIN salah, cek tombol refresh/PIN Baru, dan cek tombol **`Putuskan`** langsung mengakhiri sesi browser.
+  - Uji role `View-Only` (tombol kontrol tetap nonaktif & API transfer menolak akses).
+- **Uji Download & Sinkronisasi Lagu (Anti-Duplikat SHA-256):**
+  - Pastikan toggle **"Izinkan Transfer & Sync File"** awalnya **MATI** (unduh/unggah harus ditolak). Nyalakan toggle global tersebut dan beri izin sync pada perangkat `Control`.
+  - Uji toggle **"Tahan Transfer Saat Audio Diputar"** saat audio `PLAYING` (upload/download ditolak rapi dengan pesan status tanpa gangguan audio) lalu jeda lagu untuk melanjutkan transfer.
+  - Unduh 1 lagu & batch beberapa lagu dari grup playlist; lalu unggah kembali lagu yang sama dari browser ke Server HP (harus terdeteksi `Sudah ada / Deduplicated SHA-256`, tidak menggandakan file di `Music/SwarariaAudioLab`, namun playlist tujuan tetap tertaut), serta unggah 1 lagu MP3/WAV baru dan pastikan muncul di Library Server HP.
+- Tekan **Hentikan Server** dan pastikan endpoint segera menutup seluruh koneksi dan membatalkan PIN/invite.
 
 ## Persiapan
 - APK ditujukan untuk Android 10+; pilih ARM64 untuk HP 64-bit, atau ARMv7 bila perangkat menjalankan Android 32-bit.

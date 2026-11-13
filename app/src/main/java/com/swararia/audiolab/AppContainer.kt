@@ -12,7 +12,7 @@ class AppContainer(context: Context) {
     val ingestState = IngestStatus.state // Adapter to the existing foreground service; process-local, not a durable queue.
     val database: AudioDatabase by lazy {
         Room.databaseBuilder(appContext, AudioDatabase::class.java, "audio-library-spike.db")
-            .addMigrations(AudioMigrations.MIGRATION_1_2, AudioMigrations.MIGRATION_2_3).build()
+            .addMigrations(AudioMigrations.MIGRATION_1_2, AudioMigrations.MIGRATION_2_3, AudioMigrations.MIGRATION_3_4).build()
     }
     val library: MediaLibrary by lazy { MediaLibrary(appContext, database) }
     val downloadQueue: DownloadQueueRepository by lazy { RoomDownloadQueueRepository(database) }
@@ -22,6 +22,9 @@ class AppContainer(context: Context) {
     fun previewPlayback(): PreviewPlayback = PreviewRemote(appContext)
     fun desktopRemoteApi(): DesktopRemoteApi = DesktopRemoteHttpsApi()
     fun desktopRemoteStore(): DesktopRemoteSessionStore = AndroidKeystoreDesktopRemoteStore(appContext)
+    val remoteServerController: AndroidRemoteServerController by lazy {
+        AndroidRemoteServerController(appContext, library)
+    }
 }
 
 class SwarariaApp : Application() {
@@ -43,6 +46,7 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
             container.previewPlayback(),
             container.desktopRemoteApi(),
             container.desktopRemoteStore(),
+            container.remoteServerController,
         ) as T
     }
 }

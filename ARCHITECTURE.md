@@ -1,5 +1,16 @@
 # Architecture
 
+## Android Remote Server Mode, Web Client & SHA-256 Media Sync (0.6.0 / Room v4)
+
+`AppContainer → AndroidRemoteServerController → AndroidRemoteServerEngine + AndroidRemoteHttpListener + AndroidRemoteTlsIdentity ↔ PlaybackService (RemoteServicePlaybackHost) + MediaLibrary (Room v4)`
+
+`AppViewModel (remoteServerState / remoteServerActions + deletedTrackChecker) → RemoteTabScreen → { DesktopRemoteScreen | RemoteServerScreen }`
+
+- **Dual-plane protocol isolation:** `AndroidRemoteHttpListener` serves native Android remotes on `/v1/*` (Bearer token + rejecting browser `Origin`/`Referer`/`Sec-Fetch-Site` headers, schema-compatible with `DesktopRemoteJson`) separately from browser FOH remotes on `/` and `/web/*` (`__Host-swararia_session` `HttpOnly; Secure; SameSite=Strict` cookie + `X-Swararia-Csrf` memory token + strict same-origin `POST` enforcement + CSP without `innerHTML`/`localStorage`/`sessionStorage`). HTTP/1.1 parser rejects `Transfer-Encoding`, duplicate `Content-Length`, query strings, path traversal, and mismatched `Host` headers.
+- **Ephemeral TLS without keystore files:** `AndroidRemoteTlsIdentity` generates an in-memory EC P-256 self-signed X.509 v3 identity (with `IP SAN`, `BasicConstraints cA=false`, `KeyUsage digitalSignature`, `EKU serverAuth`) bound exclusively to the chosen private/loopback IPv4 address.
+- **Playback & transfer coordination:** `AndroidRemoteServerController` lives in `AppContainer` (process/service lifetime rather than Activity/ViewModel teardown), attaches to `PlaybackService` on the Main Looper (`RemoteServicePlaybackHost`), and caps concurrent heavy streaming transfers with `Semaphore(2)` inside 16 socket slots so FOH control polls/commands never starve. `MediaTransferEnabled` defaults `false`, `pauseTransferDuringPlayback` defaults `true`, and `view_only` devices are rejected from both control commands and media transfer.
+- **Duplicate-free sync (`3.json → 4.json`):** `AudioMigrations.MIGRATION_3_4` adds nullable indexed `sha256` on `tracks`, populated on import/download and backfilled by `MediaLibrary.scanMissingMetadata()`. `MediaLibrary.importValidatedUpload` verifies staged upload digest, inspects audio tracks via `MediaExtractor`/`MediaMetadataRetriever`, deduplicates by `(sha256, sizeBytes)` before `MediaStore` `IS_PENDING 1 → 0` publication, and optionally links the existing or newly created track into the target playlist.
+
 ## Desktop Remote client (0.5.0 candidate)
 
 `AppContainer → DesktopRemoteApi/DesktopRemoteHttpsApi + DesktopRemoteSessionStore/AndroidKeystoreDesktopRemoteStore → AppViewModel/DesktopRemoteSession → DesktopRemoteScreen (+ DesktopRemoteQrScanner)`

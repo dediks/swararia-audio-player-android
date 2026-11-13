@@ -3,6 +3,8 @@ package com.swararia.audiolab
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
@@ -20,6 +22,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.InputStream
+import java.security.MessageDigest
 import java.util.Locale
 
 /** Only owns copies created by this APK; no broad storage permission is used. */
@@ -274,8 +277,10 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             check(inspect(uri)?.pending == false)
         }
         override suspend fun finish(id: Long, uri: String, bytes: Long): Long {
-            val name = actualName(Uri.parse(uri))
-            val meta = inspectAudioMetadata(Uri.parse(uri))
+            val parsedUri = Uri.parse(uri)
+            val name = actualName(parsedUri)
+            val meta = inspectAudioMetadata(parsedUri)
+            val digest = if (ManagedCopyRules.validUri(uri)) computeUriSha256(parsedUri) else null
             val checkedAt = System.currentTimeMillis()
             return database.withTransaction {
                 val job = checkNotNull(database.downloads().find(id))
@@ -284,6 +289,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                     AudioTrack(
                         uri = uri, displayName = name, sizeBytes = bytes, durationMs = meta.durationMs,
                         artist = meta.artist, album = meta.album, genre = meta.genre, metadataCheckedAt = checkedAt,
+                        sha256 = digest,
                     )
                 )
                 check(database.downloads().complete(id, trackId) == 1)
@@ -360,7 +366,12 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         input.use { publish(it, name, AUDIO_TYPES.getValue(extension)) }
     }
 
-    private suspend fun publish(input: InputStream, displayName: String, mime: String): AudioTrack = mutationMutex.withLock {
+    private suspend fun publish(
+        input: InputStream,
+        displayName: String,
+        mime: String,
+        expectedSha256: String? = null,
+    ): AudioTrack = mutationMutex.withLock {
         val values = ContentValues().apply {
             put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
             put(MediaStore.Audio.Media.MIME_TYPE, mime)
@@ -370,6 +381,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         val uri = resolver.insert(collection, values) ?: error("HP menolak pembuatan file audio.")
         try {
             var copied = 0L
+            val digest = MessageDigest.getInstance("SHA-256")
             val output = resolver.openOutputStream(uri, "w") ?: error("File baru tidak dapat ditulis.")
             output.use { destination ->
                 val buffer = ByteArray(64 * 1024)
@@ -377,10 +389,18 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                     currentCoroutineContext().ensureActive()
                     val read = input.read(buffer)
                     if (read < 0) break
-                    if (read > 0) { destination.write(buffer, 0, read); copied += read }
+                    if (read > 0) {
+                        destination.write(buffer, 0, read)
+                        digest.update(buffer, 0, read)
+                        copied += read
+                    }
                 }
             }
             require(copied > 0) { "Sumber audio kosong; tidak ada file yang ditambahkan." }
+            val actualSha256 = shaHex(digest.digest())
+            if (expectedSha256 != null) {
+                require(actualSha256.equals(expectedSha256, ignoreCase = true)) { "Checksum audio tidak cocok." }
+            }
             currentCoroutineContext().ensureActive()
             val published = resolver.update(uri, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null)
             check(published > 0) { "File tidak berhasil dipublikasikan ke penyimpanan HP." }
@@ -392,7 +412,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             val track = AudioTrack(
                 uri = uri.toString(), displayName = actualName, sizeBytes = copied, durationMs = meta.durationMs,
                 artworkKey = embeddedArtwork(uri), artist = meta.artist, album = meta.album, genre = meta.genre,
-                metadataCheckedAt = System.currentTimeMillis(),
+                metadataCheckedAt = System.currentTimeMillis(), sha256 = actualSha256,
             )
             val id = database.tracks().insert(track)
             return track.copy(id = id)
@@ -459,11 +479,187 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                 database.tracks().updateMetadata(track.id, meta.durationMs, meta.artist, meta.album, meta.genre, now)
             }
         }
+        val attempted = HashSet<Long>()
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val unhashed = database.tracks().unhashedTracks(25).filter { attempted.add(it.id) }
+            if (unhashed.isEmpty()) break
+            for (track in unhashed) {
+                currentCoroutineContext().ensureActive()
+                val uri = runCatching { Uri.parse(track.uri) }.getOrNull() ?: continue
+                if (!ManagedCopyRules.validUri(track.uri)) continue
+                val digest = computeUriSha256(uri) ?: continue
+                database.tracks().updateSha256(track.id, digest)
+            }
+        }
+    }
+
+    override suspend fun findTrackBySha256AndSize(sha256: String, sizeBytes: Long): AudioTrack? = withContext(Dispatchers.IO) {
+        val cleanHex = sha256.trim().lowercase(Locale.ROOT)
+        if (!SHA256_REGEX.matches(cleanHex) || sizeBytes <= 0L) return@withContext null
+        val existing = database.tracks().findBySha256AndSize(cleanHex, sizeBytes) ?: return@withContext null
+        if (!ManagedCopyRules.validUri(existing.uri)) return@withContext null
+        val exists = runCatching { managedItemExists(Uri.parse(existing.uri)) }.getOrDefault(false)
+        if (exists) existing else null
+    }
+
+    override suspend fun importValidatedUpload(
+        stagedFile: File,
+        requestedName: String,
+        expectedSha256: String,
+        playlistName: String?,
+    ): UploadImportOutcome = withContext(Dispatchers.IO) {
+        val cleanHex = expectedSha256.trim().lowercase(Locale.ROOT)
+        require(SHA256_REGEX.matches(cleanHex)) { "Checksum SHA-256 tidak valid." }
+        require(stagedFile.isFile && stagedFile.length() in 1L..MAX_UPLOAD_BYTES) { "Ukuran file upload di luar batas aman." }
+        val rawBase = requestedName.replace('\\', '/').substringAfterLast('/').trim()
+        val ext = rawBase.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        val mime = AUDIO_TYPES[ext] ?: error("Format audio tidak didukung: $ext")
+        val cleanDisplayName = LibraryRules.renamedDisplayName("audio.$ext", rawBase.ifBlank { "Audio.$ext" })
+        val cleanPlaylist = playlistName?.let(LibraryRules::validatedPlaylistName)
+
+        validateAudioFileContent(stagedFile)
+
+        // Check existing track by SHA-256 + byte size first; avoid unnecessary write outside lock.
+        val preExisting = findTrackBySha256AndSize(cleanHex, stagedFile.length())
+        if (preExisting != null) {
+            val linkedId = cleanPlaylist?.let { ensurePlaylistAndLink(it, preExisting.id) }
+            return@withContext UploadImportOutcome.Deduplicated(preExisting, linkedId)
+        }
+
+        // Publish into Music/SwarariaAudioLab/ while serializing name resolution + Room state.
+        var createdTrack: AudioTrack? = null
+        var deduplicatedTrack: AudioTrack? = null
+        var targetName = cleanDisplayName
+        val resolvedExisting = mutationMutex.withLock {
+            val existing = database.tracks().findBySha256AndSize(cleanHex, stagedFile.length())
+            if (existing != null && ManagedCopyRules.validUri(existing.uri) &&
+                runCatching { managedItemExists(Uri.parse(existing.uri)) }.getOrDefault(false)
+            ) {
+                existing
+            } else {
+                targetName = uniqueAvailableDisplayName(cleanDisplayName)
+                null
+            }
+        }
+        if (resolvedExisting != null) {
+            deduplicatedTrack = resolvedExisting
+        } else {
+            createdTrack = stagedFile.inputStream().use { publish(it, targetName, mime, cleanHex) }
+        }
+
+        val finalTrack = createdTrack ?: checkNotNull(deduplicatedTrack)
+        val linkedId = cleanPlaylist?.let { ensurePlaylistAndLink(it, finalTrack.id) }
+        if (createdTrack != null) UploadImportOutcome.Created(finalTrack, linkedId)
+        else UploadImportOutcome.Deduplicated(finalTrack, linkedId)
+    }
+
+    override suspend fun openReadableTrack(trackId: Long): ReadableManagedMedia? = withContext(Dispatchers.IO) {
+        if (trackId <= 0L) return@withContext null
+        val track = database.tracks().find(trackId) ?: return@withContext null
+        if (!ManagedCopyRules.validUri(track.uri)) return@withContext null
+        val uri = Uri.parse(track.uri)
+        if (!runCatching { managedItemExists(uri) }.getOrDefault(false)) return@withContext null
+        val ext = track.displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        val mime = AUDIO_TYPES[ext] ?: return@withContext null
+        val afd = resolver.openAssetFileDescriptor(uri, "r") ?: return@withContext null
+        val size = afd.length.takeIf { it > 0L } ?: track.sizeBytes
+        val stream = runCatching { afd.createInputStream() }.getOrElse {
+            runCatching { afd.close() }
+            return@withContext null
+        }
+        ReadableManagedMedia(track = track, mimeType = mime, sizeBytes = size, inputStream = stream)
+    }
+
+    private suspend fun ensurePlaylistAndLink(playlistName: String, trackId: Long): Long = mutationMutex.withLock {
+        database.withTransaction {
+            val playlistId = database.playlists().findPlaylistByName(playlistName)?.id
+                ?: database.playlists().insertPlaylist(LocalPlaylist(name = playlistName))
+            val pos = database.playlists().nextPosition(playlistId)
+            database.playlists().insertEntry(PlaylistTrackCrossRef(playlistId = playlistId, trackId = trackId, position = pos))
+            playlistId
+        }
+    }
+
+    private fun uniqueAvailableDisplayName(requested: String): String {
+        fun isFree(candidate: String): Boolean {
+            resolver.query(
+                collection,
+                arrayOf(MediaStore.Audio.Media._ID),
+                "${MediaStore.Audio.Media.RELATIVE_PATH}=? AND ${MediaStore.Audio.Media.DISPLAY_NAME}=?",
+                arrayOf(ManagedCopyRules.PATH, candidate),
+                null,
+            )?.use { cursor ->
+                return !cursor.moveToFirst()
+            }
+            return true
+        }
+        if (isFree(requested)) return requested
+        val ext = requested.substringAfterLast('.', "")
+        val base = if (ext.isNotEmpty()) requested.dropLast(ext.length + 1) else requested
+        for (suffix in 2..999) {
+            val trimmedBase = base.take(120)
+            val candidate = LibraryRules.renamedDisplayName(requested, "$trimmedBase ($suffix)")
+            if (isFree(candidate)) return candidate
+        }
+        return LibraryRules.renamedDisplayName(requested, "${base.take(80)}-${System.currentTimeMillis()}")
+    }
+
+    private fun validateAudioFileContent(file: File) {
+        val extractor = MediaExtractor()
+        val hasAudioTrack = try {
+            extractor.setDataSource(file.absolutePath)
+            (0 until extractor.trackCount).any { idx ->
+                val mime = extractor.getTrackFormat(idx).getString(MediaFormat.KEY_MIME).orEmpty()
+                mime.startsWith("audio/", ignoreCase = true)
+            }
+        } catch (_: Exception) {
+            false
+        } finally {
+            runCatching { extractor.release() }
+        }
+        require(hasAudioTrack) { "File tidak berisi aliran audio yang valid." }
+
+        val reader = MediaMetadataRetriever()
+        val retrieverOk = try {
+            reader.setDataSource(file.absolutePath)
+            val hasAudio = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
+            val durationMs = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+            hasAudio.equals("yes", ignoreCase = true) || (durationMs != null && durationMs > 0L)
+        } catch (_: Exception) {
+            false
+        } finally {
+            runCatching { reader.release() }
+        }
+        require(retrieverOk) { "Metadata audio gagal diverifikasi." }
+    }
+
+    private fun computeUriSha256(uri: Uri): String? = runCatching {
+        resolver.openInputStream(uri)?.use { input ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read > 0) digest.update(buffer, 0, read)
+            }
+            shaHex(digest.digest())
+        }
+    }.getOrNull()
+
+    private fun shaHex(bytes: ByteArray): String = buildString(bytes.size * 2) {
+        for (b in bytes) {
+            val v = b.toInt() and 0xFF
+            append("0123456789abcdef"[v ushr 4])
+            append("0123456789abcdef"[v and 0x0F])
+        }
     }
 
     companion object {
         // Shared across instances to prevent delete/rename/artwork publication races.
         private val mutationMutex = Mutex()
+        private val SHA256_REGEX = Regex("[0-9a-f]{64}")
+        const val MAX_UPLOAD_BYTES = 150L * 1024L * 1024L
         val AUDIO_TYPES = mapOf(
             "mp3" to "audio/mpeg", "m4a" to "audio/mp4", "mp4" to "audio/mp4",
             "opus" to "audio/ogg", "ogg" to "audio/ogg", "webm" to "audio/webm",

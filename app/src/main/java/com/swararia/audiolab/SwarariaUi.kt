@@ -35,6 +35,8 @@ fun SwarariaUi(
     onCancelSearch: () -> Unit,
     upgrade: UpgradeUiActions,
     desktopRemote: DesktopRemoteSession,
+    remoteServerState: RemoteServerUiState = RemoteServerUiState(),
+    remoteServerActions: RemoteServerUiActions = RemoteServerUiActions(),
 ) {
     var destination by rememberSaveable { mutableIntStateOf(0) }
     var fullPlayer by rememberSaveable { mutableStateOf(false) }
@@ -122,7 +124,12 @@ fun SwarariaUi(
                     onImport = { if (!onlineBusy) onImport() },
                     onCancel = { if (ingest.busy && ingest.cancelable) onCancel() },
                     onCancelSearch = onCancelSearch, onSettings = { settings = true })
-                3 -> DesktopRemoteScreen(desktopRemote, contentModifier)
+                3 -> RemoteTabScreen(
+                    desktopRemote = desktopRemote,
+                    serverState = remoteServerState,
+                    serverActions = remoteServerActions,
+                    modifier = contentModifier,
+                )
                 else -> DownloadsScreen(upgrade, ingest, contentModifier, onSettings = { settings = true },
                     onCancelIngest = { if (ingest.busy && ingest.cancelable) onCancel() })
             }

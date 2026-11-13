@@ -3,7 +3,10 @@ package com.swararia.audiolab
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
-@Entity(tableName = "tracks", indices = [Index(value = ["uri"], unique = true)])
+@Entity(
+    tableName = "tracks",
+    indices = [Index(value = ["uri"], unique = true), Index(value = ["sha256"])],
+)
 data class AudioTrack(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val uri: String,
@@ -16,6 +19,7 @@ data class AudioTrack(
     val album: String? = null,
     val genre: String? = null,
     val metadataCheckedAt: Long? = null,
+    val sha256: String? = null,
 )
 
 @Entity(tableName = "playlists", indices = [Index(value = ["name"], unique = true)])
@@ -88,6 +92,12 @@ interface TrackDao {
     suspend fun unscannedMetadata(limit: Int = 50): List<AudioTrack>
     @Query("UPDATE tracks SET durationMs = COALESCE(durationMs, :durationMs), artist = :artist, album = :album, genre = :genre, metadataCheckedAt = :checkedAt WHERE id = :id")
     suspend fun updateMetadata(id: Long, durationMs: Long?, artist: String?, album: String?, genre: String?, checkedAt: Long)
+    @Query("SELECT * FROM tracks WHERE sha256 = :sha256 AND sizeBytes = :sizeBytes ORDER BY id ASC LIMIT 1")
+    suspend fun findBySha256AndSize(sha256: String, sizeBytes: Long): AudioTrack?
+    @Query("SELECT * FROM tracks WHERE sha256 IS NULL ORDER BY id DESC LIMIT :limit")
+    suspend fun unhashedTracks(limit: Int = 25): List<AudioTrack>
+    @Query("UPDATE tracks SET sha256 = :sha256 WHERE id = :id")
+    suspend fun updateSha256(id: Long, sha256: String)
 }
 
 @Dao
@@ -111,7 +121,7 @@ interface PlaylistDao {
     suspend fun removeTrackFromAll(trackId: Long)
 }
 
-@Database(entities = [AudioTrack::class, RenameRecord::class, DownloadJob::class, LocalPlaylist::class, PlaylistTrackCrossRef::class], version = 3, exportSchema = true)
+@Database(entities = [AudioTrack::class, RenameRecord::class, DownloadJob::class, LocalPlaylist::class, PlaylistTrackCrossRef::class], version = 4, exportSchema = true)
 abstract class AudioDatabase : RoomDatabase() {
     /** Native library registers recovery on this DB instance, preserving existing queue/startup APIs.
      * Not persisted schema; no Android context is retained by the queue repository. */

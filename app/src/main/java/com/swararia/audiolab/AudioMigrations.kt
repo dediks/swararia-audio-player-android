@@ -30,4 +30,14 @@ object AudioMigrations {
             for (statement in MIGRATION_2_3_STATEMENTS) db.execSQL(statement)
         }
     }
+    // Executed verbatim by both Room and host sqlite migration tests for v3 -> v4.
+    internal val MIGRATION_3_4_STATEMENTS = listOf(
+        "ALTER TABLE tracks ADD COLUMN sha256 TEXT",
+        "CREATE INDEX IF NOT EXISTS `index_tracks_sha256` ON `tracks` (`sha256`)",
+    )
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            for (statement in MIGRATION_3_4_STATEMENTS) db.execSQL(statement)
+        }
+    }
 }
