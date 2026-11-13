@@ -1,6 +1,6 @@
-# Uji pada HP — BELUM dijalankan di mesin build
+# Uji pada HP — QA fitur interaktif belum selesai
 
-Tidak ada perangkat Android atau emulator pada lingkungan yang disetujui. Lolos kompilasi, unit test, tanda tangan APK, dan pemeriksaan native library bukan bukti alur berikut sudah berhasil pada HP.
+APK debug (`versionCode=6`, `0.5.0-spike`) sudah terpasang dan terbuka pada perangkat USB `SM_M156B` Android 16 via `adb.exe`, tetapi QA fitur lengkap belum dijalankan pada HP. Lolos kompilasi, unit test, tanda tangan APK, dan pemeriksaan native library bukan bukti alur berikut sudah berhasil pada HP.
 
 ## Persiapan
 - APK ditujukan untuk Android 10+; pilih ARM64 untuk HP 64-bit, atau ARMv7 bila perangkat menjalankan Android 32-bit.
@@ -11,12 +11,12 @@ Tidak ada perangkat Android atau emulator pada lingkungan yang disetujui. Lolos 
 - Gunakan sumber audio yang dimiliki atau secara jelas mengizinkan pengunduhan. Tidak ada cookies/login, pembobolan DRM, atau bypass paywall.
 
 ## Pembaruan 0.5.0 — prioritas uji Remote HP–PC
-- Ikuti `UPDATE-0.5.0.md`; pasang sebagai update tanpa uninstall/clear data. Koleksi, rename history, signer dan schema2 harus tetap ada.
-- Desktop harus menjalankan Native Remote v1 terbaru; installer/browser HTTP lama belum cukup. Aktifkan HTTPS dari PC, buat invite, tempel teks pairing ke tab Remote dan approve pada PC. Jangan mengirim kode/QR/token melalui Telegram.
+- Ikuti `UPDATE-0.5.0.md`; pasang sebagai update (`adb.exe install -r`) bila memakai debug keystore yang sama. Jika sebelumnya terpasang APK dari keystore berbeda dan ditolak (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`), `uninstall` sekali saja lalu `install` ulang (file di `Music/SwarariaAudioLab` tetap ada, sedangkan database Room privat ter-reset).
+- Desktop harus menjalankan Native Remote v1 terbaru (`audio-library-starter`); installer/browser HTTP lama belum cukup. Aktifkan HTTPS dari PC, buat invite, scan QR lewat tombol **`Scan QR dari PC`** atau tempel teks pairing ke tab Remote, lalu approve pada PC. Jangan mengirim kode/QR/token melalui Telegram.
 - Pilih track di PC. Uji judul/status dan Play/Pause/Stop: suara harus keluar di PC, bukan HP. Jangan menandai sukses hanya karena Accepted/Pending; tunggu hasil dan amati player/audio PC.
 - View-only harus menonaktifkan kontrol; revoke/expiry/sertifikat baru harus menolak sesi lama. Tidak boleh mengulang POST otomatis ketika respons hilang atau jaringan tersambung kembali.
 - Uji rotasi, Remote→tab lain, Back, Home/lock, Wi-Fi terputus dan restart PC. Disconnect/Home bukan Stop otomatis. Identitas output HP/Desktop harus jelas; Preview HP yang sedang aktif tidak berhenti hanya karena membuka/menutup Remote.
-- Uji font besar, landscape, keyboard dan paste kode. QR desktop berisi teks, bukan URL; kemampuan scanner eksternal menyalin teks perlu dicek pada HP. Tidak ada scanner/izin kamera baru dalam APK.
+- Uji font besar, landscape, keyboard, tombol **`Scan QR dari PC`** (Google Code Scanner / Play Services `barcode_ui`, tanpa izin `CAMERA`), dan paste kode manual `swararia1|...`. Catat bila Play Services meminta internet sekali saat unduh pertama `barcode_ui` pada APK sideload.
 - Ulangi Library offline, rename/undo, queue, Download/Delete dan Preview background. Host/JVM/compile/signature checks bukan bukti acceptance perangkat ini.
 
 ## Pembaruan 0.4.1 — matriks historis

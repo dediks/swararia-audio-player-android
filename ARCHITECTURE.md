@@ -2,9 +2,10 @@
 
 ## Desktop Remote client (0.5.0 candidate)
 
-`AppContainer → DesktopRemoteApi/DesktopRemoteHttpsApi → AppViewModel/DesktopRemoteSession → DesktopRemoteScreen`
+`AppContainer → DesktopRemoteApi/DesktopRemoteHttpsApi → AppViewModel/DesktopRemoteSession → DesktopRemoteScreen (+ DesktopRemoteQrScanner)`
 
 - Reuses existing manual DI, caller-owned ViewModel scope, identity-aware lifecycle guards, StateFlow, Compose components/icons/theme, Jackson and HttpsURLConnection. Concrete networking is constructed only at AppContainer, never as a ViewModel default.
+- `DesktopRemoteQrScanner` wraps Google Code Scanner (`play-services-code-scanner:16.1.0`) with `barcode_ui` manifest metadata and zero `CAMERA` permission; `DesktopRemoteScreen` buffers the scanned string across Play Services delegate `ON_PAUSE -> ON_RESUME` transitions in Compose memory (`pendingScanned`) so `DesktopRemoteSession.connect` stays decoupled from scanner hardware and only executes while foreground-visible.
 - Protocol/strict pairing/JSON, request-scoped pinned transport, RAM-only session and rendering are separate. Existing SearchSession, storage, Media3/Preview service and native payloads remain owners of their original work. Remote credentials never enter saved state, database or logs.
 - Remote only commands the desktop output. Foreground visibility controls read polling, not audio ownership; owner replacement/disposal cannot resurrect a stale session or send Stop. Mutations serialize with generation/permission guards, and ambiguous POST results are never replayed.
 - Bounds include private IPv4 endpoints, explicit certificate fingerprint/validity/IP SAN, no global SSL/cleartext override, bounded body/idle/total request duration and cancellation cleanup. Actual Kotlin-to-Desktop HTTPS probes are host/JVM evidence, not Android/Windows or physical audio evidence. See `UPDATE-0.5.0.md` and final versioned verification reports.
