@@ -5,10 +5,20 @@
 `AppContainer → DesktopRemoteApi/DesktopRemoteHttpsApi → AppViewModel/DesktopRemoteSession → DesktopRemoteScreen (+ DesktopRemoteQrScanner)`
 
 - Reuses existing manual DI, caller-owned ViewModel scope, identity-aware lifecycle guards, StateFlow, Compose components/icons/theme, Jackson and HttpsURLConnection. Concrete networking is constructed only at AppContainer, never as a ViewModel default.
+- Protocol v1 spans playback control (`play`/`pause`/`stop`/`fade_out`/`prev`/`next`), privacy-safe catalog browsing (`GET /v1/tracks`, `groups[]`, `active_group_id`, up to 250 sanitized tracks / 64 groups, bounded `98_304`-byte response ceiling) and `select_track` / `select_group` commands. `DesktopRemoteHttpsApi` tracks the request-scoped `SSLSocket` inside `DesktopRemoteSocketFactory` and closes it directly alongside `disconnect()` on cancellation or 8-second total deadline so in-flight HTTP header/body reads unblock promptly.
 - `DesktopRemoteQrScanner` wraps Google Code Scanner (`play-services-code-scanner:16.1.0`) with `barcode_ui` manifest metadata and zero `CAMERA` permission; `DesktopRemoteScreen` buffers the scanned string across Play Services delegate `ON_PAUSE -> ON_RESUME` transitions in Compose memory (`pendingScanned`) so `DesktopRemoteSession.connect` stays decoupled from scanner hardware and only executes while foreground-visible.
 - Protocol/strict pairing/JSON, request-scoped pinned transport, RAM-only session and rendering are separate. Existing SearchSession, storage, Media3/Preview service and native payloads remain owners of their original work. Remote credentials never enter saved state, database or logs.
 - Remote only commands the desktop output. Foreground visibility controls read polling, not audio ownership; owner replacement/disposal cannot resurrect a stale session or send Stop. Mutations serialize with generation/permission guards, and ambiguous POST results are never replayed.
 - Bounds include private IPv4 endpoints, explicit certificate fingerprint/validity/IP SAN, no global SSL/cleartext override, bounded body/idle/total request duration and cancellation cleanup. Actual Kotlin-to-Desktop HTTPS probes are host/JVM evidence, not Android/Windows or physical audio evidence. See `UPDATE-0.5.0.md` and final versioned verification reports.
+
+## Local Library Grouping, Metadata Extraction & Playlists (0.5.0 / Room v3)
+
+`LibraryRules / UiPresentation (pure JVM) ← LibraryScreen / SwarariaDialogs (UI) ← AppViewModel + PlaylistUiActions ← AudioLibraryRepository → MediaLibrary → Room v3 (AudioDatabase + AudioMigrations)`
+
+- **Schema migration (`2.json → 3.json`):** `AudioMigrations.MIGRATION_2_3` adds nullable `artist`, `album`, `genre`, `metadataCheckedAt` columns to `tracks`, plus `playlists` (`name` unique index) and `playlist_tracks` (`playlistId`/`trackId` composite PK with `ON DELETE CASCADE` foreign keys and covering indexes). Existing `MIGRATION_1_2` constants stay unchanged.
+- **Metadata extraction boundary:** `MediaLibrary` owns `MediaMetadataRetriever` inspection via `inspectAudioMetadata(uri)` during import (`publish`), download completion (`publicationStore.finish`), and lazy startup backfill (`scanMissingMetadata()` launched in `AppViewModel.init`), never inside Compose/UI or pure JVM presentation helpers.
+- **Pure domain/grouping rules:** `LibraryRules` (`validatedPlaylistName`, `sanitizedTag`, `audioFormatLabel`) and generic `UiPresentation.groupItems` / `trackSubtitle` / `groupSummary` remain Android/Room-free and covered by host JUnit tests (`test_ui_rules.py`, `LibraryRulesTest`, `UiPresentationTest`).
+- **Queue scoping:** Playing a track inside `Playlist`, `Artis`, `Album`, or `Format` mode delegates that group's track list via `onPlayQueue` to `MainActivity.playTrack(track, queue)` so `MediaController` advances within the active group without bypassing `PlaybackDeletion.canPlay` checks.
 
 ## Current Preview ownership (0.4.1 candidate)
 
