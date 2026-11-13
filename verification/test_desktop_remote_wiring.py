@@ -16,6 +16,9 @@ class DesktopRemoteWiring(unittest.TestCase):
         self.assertIn('container.desktopRemoteApi()', root)
         self.assertIn('AndroidKeystoreDesktopRemoteStore(', root)
         self.assertIn('container.desktopRemoteStore()', root)
+        self.assertIn('private val rememberedDesktopSession by lazy', root)
+        self.assertIn('fun desktopRemoteStore(): DesktopRemotePersistence = rememberedDesktopSession', root)
+        self.assertIn('persistence = desktopRemoteStore', vm)
         self.assertNotIn('AndroidKeystoreDesktopRemoteStore', vm)
         self.assertIn('desktopRemote.release()', vm)
 

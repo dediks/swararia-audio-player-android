@@ -4,6 +4,10 @@ Aplikasi Android native untuk menyiapkan, mengelola, dan memutar audio lokal. Ta
 
 ## Status pengembangan
 
+**Source saat ini: kandidat `0.5.1-spike` / versionCode `7`**, branch `fix/native-remote-review-0.5.1`. Memperbaiki urutan/lifetime penyimpanan sesi Remote, mengisolasi kegagalan katalog non-auth, dan mengirim opt-in capabilities `extended-v1`. Belum dibuat/dipasang APK 0.5.1; hasil build/perangkat 0.5.0 di bawah adalah historis, bukan bukti kandidat ini. Lihat [UPDATE-0.5.1.md](UPDATE-0.5.1.md).
+
+### Bukti historis 0.5.0
+
 Baseline source publik terakhir yang diverifikasi adalah **0.2.0-spike**. Baseline lokal **0.4.1-spike** ada pada `87932e8`. Branch `feature/android-desktop-remote-0.5` menambahkan kandidat **0.5.0-spike** termasuk Desktop Remote v1 (`Scan QR dari PC`, kontrol transport `Play`/`Pause`/`Prev`/`Next`/`Fade 3s`/`Stop`, katalog lagu & grouping folder PC `select_group`, serta **auto-reconnect terenkripsi via Android Keystore** di `noBackupFilesDir` sesudah aplikasi ditutup penuh) dan sistem grouping Library lokal Android (Room **schema v3**: custom Playlist CRUD, ekstraksi metadata `Artis`/`Album`/`Format` via `MediaMetadataRetriever`, grup collapsible, dan pemutaran antrean per grup): **100 unit tests**, `lintDebug`, `assembleDebug`, APK contract (`4/4`), migrasi SQLite `v2 -> v3` (`8/8`), dan Kotlin-to-Desktop wire probe lulus; instalasi APK & cold launch di `SM_M156B` Android 16 telah diuji lewat `adb.exe` (`RRCX602LKTY`), sementara uji interaktif UI Compose, QR scanner, auto-reconnect live, dan audio fisik HP–PC tetap perlu diuji langsung pengguna. Ini build debug/pengujian, bukan rilis produksi. Tidak ada push otomatis. Detail update/pairing: [UPDATE-0.5.0.md](UPDATE-0.5.0.md).
 
 - Android 10+ (minSdk 29), targetSdk 36; Kotlin/Compose, Media3, Room dan MediaStore/SAF.

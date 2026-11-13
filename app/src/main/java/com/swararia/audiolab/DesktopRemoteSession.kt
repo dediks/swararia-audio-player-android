@@ -25,21 +25,22 @@ data class DesktopRemoteUiState(
 }
 
 /** Android-free RAM owner. Like SearchSession, invoke on the caller's single UI thread.
- * Cancellation and disconnect forget credentials, never send Stop or replay a POST.
+ * Disconnect forgets remembered credentials; release drops RAM only. Never sends Stop or replays a POST.
  */
 class DesktopRemoteSession(
     private val api: DesktopRemoteApi,
     private val scope: CoroutineScope,
     private val pollMillis: Long = 1500,
     private val now: () -> Double = { System.currentTimeMillis() / 1000.0 },
-    private val store: DesktopRemoteSessionStore? = null,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    store: DesktopRemoteSessionStore? = null,
+    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val persistence: DesktopRemotePersistence? = store?.let { DesktopRemotePersistence(it, ioDispatcher) },
 ) {
     private val mutable = MutableStateFlow(DesktopRemoteUiState())
     val state = mutable.asStateFlow()
     private val serial = Mutex()
     private var generation = 0L
-    private var storeEpoch = 0L
+    private val storeOwner = persistence?.claim()
     private var pairing: DesktopRemotePairing? = null
     private var grant: DesktopRemoteGrant? = null
     private var expiresAt = 0.0
@@ -54,10 +55,10 @@ class DesktopRemoteSession(
     }
 
     private fun restore() {
-        val activeStore = store ?: return
+        val activeStore = persistence ?: return
         val ticket = generation
         scope.launch {
-            val loaded = withContext(ioDispatcher) { runCatching { activeStore.load() }.getOrNull() } ?: return@launch
+            val loaded = activeStore.load(storeOwner!!).await().getOrNull() ?: return@launch
             if (generation != ticket || pairing != null || grant != null) return@launch
             if (loaded.expiresAt <= now()) {
                 clearStore()
@@ -86,8 +87,8 @@ class DesktopRemoteSession(
         "$endpoint|$deviceId|$expiresAt"
 
     private fun clearStore() {
-        val activeStore = store ?: return
-        scope.launch(ioDispatcher) { runCatching { activeStore.clear() } }
+        val activeStore = persistence ?: return
+        activeStore.clear(storeOwner!!)
     }
 
     fun visible(owner: Any) {
@@ -136,6 +137,7 @@ class DesktopRemoteSession(
     fun release() {
         visibility = null
         clearMemoryState(null)
+        storeOwner?.let { persistence?.release(it) }
     }
 
     fun disconnect() = disconnectWith(null)
@@ -150,7 +152,6 @@ class DesktopRemoteSession(
     }
 
     private fun disconnectWith(message: String?) {
-        storeEpoch++
         clearMemoryState(message)
         clearStore()
     }
@@ -203,10 +204,9 @@ class DesktopRemoteSession(
                 return
             }
             if (approval.status != "active" || approval.role !in setOf("control", "view_only")) throw DesktopRemoteFailure()
-            val activeStore = store
+            val activeStore = persistence
             val snapshotKey = sessionKey(p.endpoint, g.deviceId, approval.expiresAt)
             if (activeStore != null && persistedKey != snapshotKey) {
-                val expectedEpoch = storeEpoch
                 val snapshot = PersistedDesktopRemoteSession(
                     endpoint = p.endpoint,
                     pinBytes = p.fingerprint(),
@@ -214,34 +214,42 @@ class DesktopRemoteSession(
                     credential = g.authorization(),
                     expiresAt = approval.expiresAt,
                 )
-                try {
-                    withContext(ioDispatcher) { runCatching { activeStore.save(snapshot) } }
-                } finally {
-                    if (storeEpoch != expectedEpoch) clearStore()
-                }
+                val saved = activeStore.save(storeOwner!!, snapshot).await().isSuccess
                 current(ticket, owner)
-                persistedKey = snapshotKey
+                if (saved) persistedKey = snapshotKey
             }
             val supported = api.capabilities(p, g)
             current(ticket, owner)
             val playback = api.state(p, g)
             current(ticket, owner)
             if (playback.role != approval.role) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.AUTH)
+            var catalogUnavailable = false
             val catalog = if ("select_track" in supported) {
-                api.tracks(p, g).also { current(ticket, owner) }
+                try {
+                    api.tracks(p, g).also { current(ticket, owner) }
+                } catch (cancel: CancellationException) { throw cancel }
+                  catch (failure: Exception) {
+                    current(ticket, owner)
+                    if (failure is DesktopRemoteFailure && failure.kind in setOf(
+                            DesktopRemoteFailure.Kind.AUTH, DesktopRemoteFailure.Kind.TRUST)) throw failure
+                    catalogUnavailable = true
+                    null
+                }
             } else null
+            val availableCommands = if (catalogUnavailable) supported - setOf("select_track", "select_group") else supported
             val id = commandId
             val outcome = if (id != null) api.commandStatus(p, g, id).also {
                 if (it.id != id) throw DesktopRemoteFailure()
             }.status else mutable.value.outcome
             current(ticket, owner)
             if (outcome !in setOf("accepted", "pending")) commandId = null
-            mutable.value = mutable.value.copy(phase = "active", role = approval.role, commands = supported,
+            mutable.value = mutable.value.copy(phase = "active", role = approval.role, commands = availableCommands,
                 playback = playback, playlist = catalog?.playlist, activeGroupId = catalog?.activeGroupId,
                 totalTracks = catalog?.totalTracks ?: 0, groups = catalog?.groups ?: emptyList(),
                 currentTrackId = catalog?.currentTrackId,
                 tracks = catalog?.tracks ?: emptyList(), fresh = true,
-                message = if (!playback.online) "Pemutar Desktop belum siap." else null, outcome = outcome)
+                message = if (catalogUnavailable) "Katalog Desktop tidak tersedia. Refresh untuk mencoba lagi."
+                    else if (!playback.online) "Pemutar Desktop belum siap." else null, outcome = outcome)
         } catch (cancel: CancellationException) { throw cancel }
           catch (failure: Exception) {
             current(ticket, owner)

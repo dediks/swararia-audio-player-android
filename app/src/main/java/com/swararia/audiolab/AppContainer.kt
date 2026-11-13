@@ -21,7 +21,10 @@ class AppContainer(context: Context) {
     }
     fun previewPlayback(): PreviewPlayback = PreviewRemote(appContext)
     fun desktopRemoteApi(): DesktopRemoteApi = DesktopRemoteHttpsApi()
-    fun desktopRemoteStore(): DesktopRemoteSessionStore = AndroidKeystoreDesktopRemoteStore(appContext)
+    private val rememberedDesktopSession by lazy {
+        DesktopRemotePersistence(AndroidKeystoreDesktopRemoteStore(appContext))
+    }
+    fun desktopRemoteStore(): DesktopRemotePersistence = rememberedDesktopSession
 }
 
 class SwarariaApp : Application() {

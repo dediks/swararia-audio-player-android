@@ -1,0 +1,139 @@
+{
+  "status": "verified_source_only_not_apk_built",
+  "base": "34fb6f7aac391ff8c7d83f9ee139d107337aaa6f",
+  "branch": "fix/native-remote-review-0.5.1",
+  "reviewed_candidate_sha256": "a48c64f326d47ddad750ec01118c9cc7c7f4f7560136ee09580483d8a5f0aea8",
+  "reviewed_rows": [
+    {
+      "path": "ARCHITECTURE.md",
+      "sha256": "37b2daf8132a852eee11ed8a3880d8cbf03ef21535657d0f247c92dea8faaf66"
+    },
+    {
+      "path": "README.md",
+      "sha256": "204c87abcc1b7e9d42b15fae4b52b9857e9d3f8399b175b0047338770dda3f81"
+    },
+    {
+      "path": "UPDATE-0.5.1.md",
+      "sha256": "9635e4186cec9aec97a09a7e59425b42999b94ef51274644ef48cb7a32258d75"
+    },
+    {
+      "path": "app/build.gradle",
+      "sha256": "53c2992047171cb85eb0c3c0da34278b809e69ea8adbd2312cef82a08c41e7bb"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/AppContainer.kt",
+      "sha256": "59a0e4df71e2480b701035efa58bb31e306d262f4f2ce4fb4eb35cc32381f6b7"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/AppViewModel.kt",
+      "sha256": "3d6014eb8b733feacb1ab4f2b8649edc6b6a60f2afc82d6fdec906fc23cbefad"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/DesktopRemoteHttpsApi.kt",
+      "sha256": "c1d6ad056ae78aab4ddfc0f9b0cec8c174164f2b6250992118071c6967d0db3f"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/DesktopRemotePersistence.kt",
+      "sha256": "ae0a49db1e4af15b1739e2104f06b3ac187cc67ab14fafe68d34e6a4c54f5080"
+    },
+    {
+      "path": "app/src/main/java/com/swararia/audiolab/DesktopRemoteSession.kt",
+      "sha256": "77efbf8a6b1bbdc647518e7625a23981a92377c2881ef29deccf5a87d3290941"
+    },
+    {
+      "path": "app/src/test/java/com/swararia/audiolab/DesktopRemotePersistenceTest.kt",
+      "sha256": "b01ebea755acb7a0cb3f980177d275a8adc3f237070a3a8de04f75c28aa805a0"
+    },
+    {
+      "path": "app/src/test/java/com/swararia/audiolab/DesktopRemoteSessionTest.kt",
+      "sha256": "07f9d06a762026c684750f0373fee045a8b8c1d04da806f0080feb24271b6548"
+    },
+    {
+      "path": "package_telegram.py",
+      "sha256": "63ef3c8e1a4b84b13a561c6f43175299b414fefd079c125fba756f759fe88a78"
+    },
+    {
+      "path": "test_apk_contract.py",
+      "sha256": "8c6f6a59b44c7e2a7c438b356d55c90d20ac82d8f239fe12fbb45b37a183a5dc"
+    },
+    {
+      "path": "verification/DesktopRemoteWireProbe.kt",
+      "sha256": "17ca3ddfed15bf57613c21b87d205eeaad3392ca4f9ba0319a4790833c2455d8"
+    },
+    {
+      "path": "verification/android-remote-review-fixes-0.5.1.md",
+      "sha256": "4a59c5750f46b064e1bb3be4dab933e984b8db519af5ddfa3da9c5f89093e4b9"
+    },
+    {
+      "path": "verification/desktop_remote_fixture.py",
+      "sha256": "45e484a0e0c8006f060f2d3aff2e79962012da75132b34e8cfd1b72b4a83d964"
+    },
+    {
+      "path": "verification/run_desktop_remote_session_checks.py",
+      "sha256": "1ff004ed151120e572fd62bf80c86515f3b5be23a5a847a60b17b4496bbeea38"
+    },
+    {
+      "path": "verification/test_current_source_version.py",
+      "sha256": "48008758b9c2bacaaabce49179ef9d353165bfaec41b9c11657fad77b386f5a4"
+    },
+    {
+      "path": "verification/test_desktop_remote_wiring.py",
+      "sha256": "51fc7ffa1195ef8cac5bb02dd031f2dfeb4d8d36e97f3d3c1aaf14ad11953b40"
+    }
+  ],
+  "independent_review": {
+    "passed": true,
+    "candidate_sha256": "a48c64f326d47ddad750ec01118c9cc7c7f4f7560136ee09580483d8a5f0aea8",
+    "delegation": "deleg_bb0c9090/task1",
+    "security_concerns": [],
+    "logic_errors": [],
+    "suggestions": [],
+    "summary": "Independent read-only source review passed: ordered app-owned persistence and owner fencing, catalog containment/auth fail-closed, route-only cap header and source7/0.5.1. All19frozen paths unchanged; index==worktree;231othertracked unchanged. Source/host approval only, not APK/device/process-death or physical deletion guarantee."
+  },
+  "parent_checks": {
+    "remote_junit_parent_rerun": 24,
+    "data_junit_parent_rerun": 13,
+    "sqlite_source_parent_rerun": 8,
+    "wiring_parent_rerun": 3,
+    "source_version_parent_rerun": 1,
+    "source_version": "7 / 0.5.1-spike",
+    "unchanged_tracked_files": 231
+  },
+  "actual_wire_checks": {
+    "compiler_exit": 0,
+    "wire_exit": 0,
+    "loopback_only": true,
+    "checks": [
+      "Wrong pin and IP SAN rejected before pairing",
+      "New client sends capability opt-in and receives extended commands",
+      "Actual released0610303 decoder accepts default and unsupported-header legacy response",
+      "CJK and astral Unicode catalog with64 groups parses within actual client bounds, truthful total250 and truncated list",
+      "Pairing, approval, state and accepted-to-rejected command through actual HTTPS",
+      "Lost response produces exactlyone POST, no replay",
+      "Slow-drip total deadline",
+      "Cancellation closes and joins IO",
+      "Role downgrade and revocation failclosed"
+    ],
+    "logs": [
+      "wire-compile.txt",
+      "wire-run.txt"
+    ],
+    "legacy_note": "Old production protocol decoder copied from0610303 with test-only package rename; no production endpoint policy weakened. No physical audio applied acknowledgements fabricated."
+  },
+  "limitations": [
+    "No Gradle/KSP/full Android APK build: scanner16.1.0 remains uncached; no download authorized",
+    "AppContainer/AppViewModel wiring source checked, not full Android compilation",
+    "No actual Windows PowerShell/UAC/firewall/WSL network or physical phone tests",
+    "No real Android Keystore, process-death durability, deletion success under I/O failure, scanner/Play Services, audio or font/lifecycle runtime claim",
+    "Existing URL(String) deprecation warning remains"
+  ],
+  "backup": {
+    "bundle": "/home/ubuntu/.local/share/swararia-private-backups/android-before-review-fixes-20261113T160512106440Z.bundle",
+    "bundle_sha256": "245566f083e07c10cded45a71de9c5d60318a64a29765858de201ed2df26f828",
+    "restore_verified": true
+  },
+  "installations": [],
+  "push": false,
+  "code_version": "7 / 0.5.1-spike",
+  "commit_identifier": "See dist release manifest; this report is part of the commit."
+}

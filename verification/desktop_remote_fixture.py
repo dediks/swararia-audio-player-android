@@ -14,12 +14,20 @@ from secure_remote import SecureRemote
 import secure_remote_tls as transport
 from web_ui import RemotePlayerHub
 
-control = {"slow": False, "drop": False, "role": "control", "posts": 0}
+control = {"slow": False, "drop": False, "role": "control", "posts": 0, "capability_headers": 0, "wrong_headers": 0}
 base_handler = transport.NativeHandler
 
 
 class FixtureHandler(base_handler):
     def _dispatch(self):
+        header = self.headers.get("X-Swararia-Capabilities")
+        if self.command == "GET" and self.path == "/v1/capabilities":
+            if header == "extended-v1":
+                control["capability_headers"] += 1
+            else:
+                control["wrong_headers"] += 1
+        elif header is not None:
+            control["wrong_headers"] += 1
         if self.command == "POST" and self.path == "/v1/commands":
             control["posts"] += 1
         return super()._dispatch()
@@ -103,7 +111,7 @@ try:
                 for d in list(remote.devices.values()):
                     remote.revoke(d["device_id"])
         elif command == "STATS":
-            print(json.dumps({"command_posts": control["posts"]}), flush=True)
+            print(json.dumps({"command_posts": control["posts"], "capability_headers": control["capability_headers"], "wrong_headers": control["wrong_headers"]}), flush=True)
             continue
         print("OK", flush=True)
 finally:

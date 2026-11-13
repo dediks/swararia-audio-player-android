@@ -1,8 +1,11 @@
 # Architecture
 
-## Desktop Remote client (0.5.0 candidate)
+## Desktop Remote client (0.5.1 source candidate)
 
-`AppContainer → DesktopRemoteApi/DesktopRemoteHttpsApi + DesktopRemoteSessionStore/AndroidKeystoreDesktopRemoteStore → AppViewModel/DesktopRemoteSession → DesktopRemoteScreen (+ DesktopRemoteQrScanner)`
+`AppContainer → DesktopRemoteApi/DesktopRemoteHttpsApi + application-singleton DesktopRemotePersistence → DesktopRemoteSessionStore/AndroidKeystoreDesktopRemoteStore → AppViewModel/DesktopRemoteSession → DesktopRemoteScreen (+ DesktopRemoteQrScanner)`
+
+- `DesktopRemotePersistence` reserves disk-operation order before dispatch, shares one owner lease/order chain across ViewModels, and owns finite disk tasks independently of the ViewModel scope. New owners cannot restore ahead of an already submitted forget; retired owners cannot enqueue writes/clears against replacements. Queued saves finish before a later forget. `release()` retires future submissions but preserves already submitted operations and remembered sessions. Actual AES-GCM framing/keys/file layout are unchanged. Cancellation safety is not a process-death or disk-success guarantee; storage failures are not retried forever, and reported failed saves are not marked remembered by the session (the unchanged Keystore adapter suppresses some I/O failures internally).
+- Only `GET /v1/capabilities` sends `X-Swararia-Capabilities: extended-v1`; legacy three-command replies remain accepted. Catalog-only non-auth failures clear catalog IDs/groups and disable catalog actions, retain freshly verified transport/role, and offer refresh feedback. Catalog AUTH/TRUST still disconnect/forget; coroutine cancellation propagates. The catalog byte ceiling remains `98_304`.
 
 - Reuses existing manual DI, caller-owned ViewModel scope, identity-aware lifecycle guards, StateFlow, Compose components/icons/theme, Jackson and HttpsURLConnection. Concrete networking (`DesktopRemoteHttpsApi`) and Keystore persistence (`AndroidKeystoreDesktopRemoteStore`) are constructed only at `AppContainer`, never inside `AppViewModel`.
 - Protocol v1 spans playback control (`play`/`pause`/`stop`/`fade_out`/`prev`/`next`), privacy-safe catalog browsing (`GET /v1/tracks`, `groups[]`, `active_group_id`, up to 250 sanitized tracks / 64 groups, bounded `98_304`-byte response ceiling) and `select_track` / `select_group` commands. `DesktopRemoteHttpsApi` tracks the request-scoped `SSLSocket` inside `DesktopRemoteSocketFactory` and closes it directly alongside `disconnect()` on cancellation or 8-second total deadline so in-flight HTTP header/body reads unblock promptly.
