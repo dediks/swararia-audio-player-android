@@ -14,6 +14,7 @@ data class DesktopRemoteUiState(
     val outcome: String? = null,
 ) {
     val canControl: Boolean get() = phase == "active" && role == "control" && playback?.online == true && fresh && !busy && outcome !in setOf("accepted", "pending")
+    val canFadeOut: Boolean get() = canControl && "fade_out" in commands && playback?.playing == true && playback?.transport != "FADING"
 }
 
 /** Android-free RAM owner. Like SearchSession, invoke on the caller's single UI thread.

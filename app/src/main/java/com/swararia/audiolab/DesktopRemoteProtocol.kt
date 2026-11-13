@@ -108,7 +108,7 @@ object DesktopRemoteJson {
     fun capabilities(node: JsonNode): Set<String> {
         protocol(node)
         val commands = node.get("commands") ?: throw DesktopRemoteFailure()
-        if (!commands.isArray || commands.size() !in 0..3 || commands.any { !it.isTextual || it.textValue() !in setOf("play", "pause", "stop") }) throw DesktopRemoteFailure()
+        if (!commands.isArray || commands.size() !in 0..4 || commands.any { !it.isTextual || it.textValue() !in setOf("play", "pause", "stop", "fade_out") }) throw DesktopRemoteFailure()
         return commands.map { it.textValue() }.toSet().also { if (it.size != commands.size()) throw DesktopRemoteFailure() }
     }
     fun playback(node: JsonNode): DesktopRemotePlayback {
@@ -129,7 +129,7 @@ object DesktopRemoteJson {
         return DesktopRemoteCommand(id(node, "command_id"), status)
     }
     fun commandBody(action: String, key: String): ByteArray {
-        if (action !in setOf("play", "pause", "stop") || !key.matches(Regex("[A-Za-z0-9_-]{8,80}"))) throw DesktopRemoteFailure()
+        if (action !in setOf("play", "pause", "stop", "fade_out") || !key.matches(Regex("[A-Za-z0-9_-]{8,80}"))) throw DesktopRemoteFailure()
         return mapper.writeValueAsBytes(mapOf("action" to action, "idempotency_key" to key))
     }
 }

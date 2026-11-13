@@ -49,7 +49,7 @@ object DesktopRemoteWireProbe {
                 if (approval.status != "active") { delay(50); approval = api.session(connection, grant) }
             }
             check(approval.status == "active" && approval.role == "control")
-            check(api.capabilities(connection, grant) == setOf("play", "pause", "stop"))
+            check(api.capabilities(connection, grant) == setOf("play", "pause", "stop", "fade_out"))
             val state = api.state(connection, grant)
             check(state.online && state.title == "Wire fixture.wav")
             val sent = api.command(connection, grant, "play", UUID.randomUUID().toString())
