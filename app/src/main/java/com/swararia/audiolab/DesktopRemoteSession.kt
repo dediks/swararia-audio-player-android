@@ -27,19 +27,68 @@ data class DesktopRemoteUiState(
 /** Android-free RAM owner. Like SearchSession, invoke on the caller's single UI thread.
  * Cancellation and disconnect forget credentials, never send Stop or replay a POST.
  */
-class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope: CoroutineScope,
-    private val pollMillis: Long = 1500, private val now: () -> Double = { System.currentTimeMillis() / 1000.0 }) {
+class DesktopRemoteSession(
+    private val api: DesktopRemoteApi,
+    private val scope: CoroutineScope,
+    private val pollMillis: Long = 1500,
+    private val now: () -> Double = { System.currentTimeMillis() / 1000.0 },
+    private val store: DesktopRemoteSessionStore? = null,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) {
     private val mutable = MutableStateFlow(DesktopRemoteUiState())
     val state = mutable.asStateFlow()
     private val serial = Mutex()
     private var generation = 0L
+    private var storeEpoch = 0L
     private var pairing: DesktopRemotePairing? = null
     private var grant: DesktopRemoteGrant? = null
     private var expiresAt = 0.0
+    private var persistedKey: String? = null
     private var visibility: Any? = null
     private var poll: Job? = null
     private var mutation: Job? = null
     private var commandId: String? = null
+
+    init {
+        restore()
+    }
+
+    private fun restore() {
+        val activeStore = store ?: return
+        val ticket = generation
+        scope.launch {
+            val loaded = withContext(ioDispatcher) { runCatching { activeStore.load() }.getOrNull() } ?: return@launch
+            if (generation != ticket || pairing != null || grant != null) return@launch
+            if (loaded.expiresAt <= now()) {
+                clearStore()
+                return@launch
+            }
+            val savedPairing = runCatching {
+                DesktopRemotePairing.fromSaved(loaded.endpoint, loaded.fingerprint())
+            }.getOrNull() ?: run {
+                clearStore()
+                return@launch
+            }
+            pairing = savedPairing
+            grant = DesktopRemoteGrant(loaded.deviceId, loaded.secret())
+            expiresAt = loaded.expiresAt
+            persistedKey = sessionKey(savedPairing.endpoint, loaded.deviceId, loaded.expiresAt)
+            mutable.value = DesktopRemoteUiState(
+                endpoint = savedPairing.endpoint,
+                phase = "active",
+                message = "Menyambung ulang ke Desktop…",
+            )
+            startPolling()
+        }
+    }
+
+    private fun sessionKey(endpoint: String, deviceId: String, expiresAt: Double): String =
+        "$endpoint|$deviceId|$expiresAt"
+
+    private fun clearStore() {
+        val activeStore = store ?: return
+        scope.launch(ioDispatcher) { runCatching { activeStore.clear() } }
+    }
 
     fun visible(owner: Any) {
         visibility = owner
@@ -83,22 +132,45 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
             }
         }
     }
+    /** Drops RAM state when the ViewModel clears without removing encrypted auto-reconnect credentials. */
+    fun release() {
+        visibility = null
+        clearMemoryState(null)
+    }
+
     fun disconnect() = disconnectWith(null)
-    private fun disconnectWith(message: String?) {
+
+    private fun clearMemoryState(message: String?) {
         generation++
         poll?.cancel(); poll = null
         mutation?.cancel(); mutation = null
-        pairing?.forgetInvitation(); pairing = null; grant = null; commandId = null; expiresAt = 0.0
+        pairing?.forgetInvitation(); pairing = null; grant = null; commandId = null
+        expiresAt = 0.0; persistedKey = null
         mutable.value = DesktopRemoteUiState(message = message)
     }
+
+    private fun disconnectWith(message: String?) {
+        storeEpoch++
+        clearMemoryState(message)
+        clearStore()
+    }
+
     private fun startPolling() {
         val owner = visibility ?: return
         val p = pairing ?: return
         val g = grant ?: return
         if (poll != null) return
+        if (expiresAt > 0.0 && expiresAt <= now()) {
+            disconnectWith("Sesi kedaluwarsa. Pair ulang di PC.")
+            return
+        }
         val ticket = generation
         poll = scope.launch {
             while (isActive && visibility === owner && generation == ticket) {
+                if (expiresAt > 0.0 && expiresAt <= now()) {
+                    disconnectWith("Sesi kedaluwarsa. Pair ulang di PC.")
+                    break
+                }
                 serial.withLock { read(p, g, ticket, owner) }
                 delay(pollMillis)
             }
@@ -120,6 +192,10 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
             if (approval.deviceId != g.deviceId || approval.expiresAt <= now()) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.AUTH)
             expiresAt = approval.expiresAt
             if (approval.status == "pending") {
+                if (persistedKey != null) {
+                    persistedKey = null
+                    clearStore()
+                }
                 mutable.value = mutable.value.copy(phase = "pending", role = null, playback = null,
                     commands = emptySet(), playlist = null, activeGroupId = null, totalTracks = 0,
                     groups = emptyList(), currentTrackId = null, tracks = emptyList(),
@@ -127,6 +203,25 @@ class DesktopRemoteSession(private val api: DesktopRemoteApi, private val scope:
                 return
             }
             if (approval.status != "active" || approval.role !in setOf("control", "view_only")) throw DesktopRemoteFailure()
+            val activeStore = store
+            val snapshotKey = sessionKey(p.endpoint, g.deviceId, approval.expiresAt)
+            if (activeStore != null && persistedKey != snapshotKey) {
+                val expectedEpoch = storeEpoch
+                val snapshot = PersistedDesktopRemoteSession(
+                    endpoint = p.endpoint,
+                    pinBytes = p.fingerprint(),
+                    deviceId = g.deviceId,
+                    credential = g.authorization(),
+                    expiresAt = approval.expiresAt,
+                )
+                try {
+                    withContext(ioDispatcher) { runCatching { activeStore.save(snapshot) } }
+                } finally {
+                    if (storeEpoch != expectedEpoch) clearStore()
+                }
+                current(ticket, owner)
+                persistedKey = snapshotKey
+            }
             val supported = api.capabilities(p, g)
             current(ticket, owner)
             val playback = api.state(p, g)

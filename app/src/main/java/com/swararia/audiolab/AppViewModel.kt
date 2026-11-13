@@ -14,8 +14,9 @@ class AppViewModel(
     private val downloadQueue: DownloadQueueRepository,
     previewPlayback: PreviewPlayback? = null,
     desktopRemoteApi: DesktopRemoteApi,
+    desktopRemoteStore: DesktopRemoteSessionStore? = null,
 ) : ViewModel() {
-    val desktopRemote = DesktopRemoteSession(desktopRemoteApi, viewModelScope)
+    val desktopRemote = DesktopRemoteSession(desktopRemoteApi, viewModelScope, store = desktopRemoteStore)
     private val session: SearchSession = SearchSession(searchRepository, viewModelScope,
         { ingest.value.busy || busy.value || operations.busy.value }, ::message, previewPlayback)
     val search = session.search
@@ -35,7 +36,7 @@ class AppViewModel(
         preview.value.hit?.videoId?.let(searchRepository::invalidatePreview)
         session.previewError()
     }
-    override fun onCleared() { desktopRemote.disconnect(); session.close(); super.onCleared() }
+    override fun onCleared() { desktopRemote.release(); session.close(); super.onCleared() }
     val tracks = library.tracks.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val playlists = library.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val lastRename = library.lastRename.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)

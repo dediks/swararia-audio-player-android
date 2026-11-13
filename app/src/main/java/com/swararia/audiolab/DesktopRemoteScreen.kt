@@ -229,7 +229,13 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     RemoteHeaderBar(state)
                     if (!state.fresh) {
-                        NoticeCard("Menyegarkan status terbaru dari PC… kontrol terkunci sementara.")
+                        NoticeCard(
+                            if (state.role == null) {
+                                state.message ?: "Menyambung ulang ke Desktop… kontrol terkunci sementara."
+                            } else {
+                                "Menyegarkan status terbaru dari PC… kontrol terkunci sementara."
+                            },
+                        )
                     } else if (playback?.online != true) {
                         NoticeCard("Pemutar web PC belum aktif. Buka halaman Swararia di browser PC.", isError = true)
                     } else if (state.role == "view_only") {
@@ -253,7 +259,10 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
                         val (label, isError) = formatOutcomeFeedback(outcome)
                         NoticeCard(label, isError = isError, icon = if (isError) UiIcons.Info else UiIcons.Check)
                     }
-                    state.message?.let { message -> NoticeCard(message, isError = state.outcome == null) }
+                    val reconnecting = !state.fresh && state.role == null
+                    if (!reconnecting) {
+                        state.message?.let { message -> NoticeCard(message, isError = state.outcome == null) }
+                    }
                 }
             }
             if (supportsSelectTrack) {
@@ -374,7 +383,7 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
                         }
                     }
                     Text(
-                        "Menutup layar atau pindah aplikasi tidak menghentikan audio PC. Sesi disimpan di RAM saja.",
+                        "Menutup aplikasi tidak menghentikan audio PC. Sesi aktif dienkripsi di Android Keystore untuk auto-reconnect saat dibuka ulang, dan otomatis dihapus saat menekan Putuskan, dicabut PC, atau kedaluwarsa.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

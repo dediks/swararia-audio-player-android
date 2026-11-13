@@ -14,6 +14,10 @@ class DesktopRemoteWiring(unittest.TestCase):
                          'ViewModel must consume injected reusable port, not construct network implementation')
         self.assertIn('DesktopRemoteHttpsApi()', root)
         self.assertIn('container.desktopRemoteApi()', root)
+        self.assertIn('AndroidKeystoreDesktopRemoteStore(', root)
+        self.assertIn('container.desktopRemoteStore()', root)
+        self.assertNotIn('AndroidKeystoreDesktopRemoteStore', vm)
+        self.assertIn('desktopRemote.release()', vm)
 
     def test_remote_feature_never_owns_phone_player_or_durable_credentials(self):
         names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteScreen', 'DesktopRemoteQrScanner']
@@ -25,6 +29,13 @@ class DesktopRemoteWiring(unittest.TestCase):
         manifest = (ROOT / 'app/src/main/AndroidManifest.xml').read_text()
         self.assertNotIn('android.permission.CAMERA', manifest)
         self.assertIn('com.google.mlkit.vision.DEPENDENCIES', manifest)
+
+    def test_keystore_store_uses_android_keystore_aes_gcm_without_shared_preferences(self):
+        store = (SRC / 'AndroidKeystoreDesktopRemoteStore.kt').read_text()
+        for required in ['AndroidKeyStore', 'AES/GCM/NoPadding', 'noBackupFilesDir']:
+            self.assertIn(required, store)
+        for forbidden in ['SharedPreferences', 'MODE_PRIVATE', 'MODE_WORLD_READABLE', 'AES/ECB', 'AES/CBC']:
+            self.assertNotIn(forbidden, store)
 
 
 if __name__ == '__main__':

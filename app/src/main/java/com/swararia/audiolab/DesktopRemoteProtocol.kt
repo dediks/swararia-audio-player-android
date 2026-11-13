@@ -12,6 +12,7 @@ class DesktopRemoteFailure(val kind: Kind = Kind.PROTOCOL) : Exception("Desktop 
 
 class DesktopRemoteSecret(private val value: String) {
     fun bearer(): String = "Bearer $value"
+    internal fun rawValue(): String = value
     override fun toString() = "[redacted]"
 }
 
@@ -23,12 +24,10 @@ class DesktopRemotePairing private constructor(val endpoint: String, private val
     fun forgetInvitation() { invite = null }
     override fun toString() = "DesktopRemotePairing($endpoint)"
     companion object {
-        fun parse(text: String): DesktopRemotePairing {
-            fun invalid(): Nothing = throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.INPUT)
-            if (text.length !in 80..256) invalid()
-            val parts = text.split('|')
-            if (parts.size != 4 || parts[0] != "swararia1") invalid()
-            val ep = parts[1].split(':')
+        private fun invalid(): Nothing = throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.INPUT)
+
+        private fun validatePrivateEndpoint(endpoint: String) {
+            val ep = endpoint.split(':')
             if (ep.size != 2) invalid()
             val octets = ep[0].split('.')
             if (octets.size != 4) invalid()
@@ -38,6 +37,19 @@ class DesktopRemotePairing private constructor(val endpoint: String, private val
             }
             if (!(ip[0] == 10 || ip[0] == 172 && ip[1] in 16..31 || ip[0] == 192 && ip[1] == 168)) invalid()
             if (!ep[1].matches(Regex("[1-9][0-9]{0,4}")) || ep[1].toInt() !in 1..65535) invalid()
+        }
+
+        fun fromSaved(endpoint: String, pinBytes: ByteArray): DesktopRemotePairing {
+            validatePrivateEndpoint(endpoint)
+            if (pinBytes.size != 32) invalid()
+            return DesktopRemotePairing(endpoint, pinBytes.copyOf(), null)
+        }
+
+        fun parse(text: String): DesktopRemotePairing {
+            if (text.length !in 80..256) invalid()
+            val parts = text.split('|')
+            if (parts.size != 4 || parts[0] != "swararia1") invalid()
+            validatePrivateEndpoint(parts[1])
             if (!parts[2].matches(Regex("[A-Za-z0-9_-]{43}")) || !parts[3].matches(Regex("[A-Za-z0-9_-]{43}"))) invalid()
             val pin = try { Base64.getUrlDecoder().decode(parts[2]) } catch (_: IllegalArgumentException) { invalid() }
             if (pin.size != 32 || Base64.getUrlEncoder().withoutPadding().encodeToString(pin) != parts[2]) invalid()
@@ -49,6 +61,37 @@ class DesktopRemotePairing private constructor(val endpoint: String, private val
 class DesktopRemoteGrant(val deviceId: String, private val credential: DesktopRemoteSecret) {
     fun authorization() = credential
     override fun toString() = "DesktopRemoteGrant([redacted])"
+}
+
+/** Approved grant snapshot kept encrypted at rest for auto-reconnect across app restarts. */
+data class PersistedDesktopRemoteSession(
+    val endpoint: String,
+    private val pinBytes: ByteArray,
+    val deviceId: String,
+    private val credential: DesktopRemoteSecret,
+    val expiresAt: Double,
+) {
+    fun fingerprint(): ByteArray = pinBytes.copyOf()
+    fun secret(): DesktopRemoteSecret = credential
+    override fun equals(other: Any?): Boolean = other is PersistedDesktopRemoteSession &&
+        endpoint == other.endpoint && pinBytes.contentEquals(other.pinBytes) &&
+        deviceId == other.deviceId && credential.rawValue() == other.credential.rawValue() &&
+        expiresAt == other.expiresAt
+    override fun hashCode(): Int {
+        var result = endpoint.hashCode()
+        result = 31 * result + pinBytes.contentHashCode()
+        result = 31 * result + deviceId.hashCode()
+        result = 31 * result + credential.rawValue().hashCode()
+        result = 31 * result + expiresAt.hashCode()
+        return result
+    }
+    override fun toString() = "PersistedDesktopRemoteSession($endpoint)"
+}
+
+interface DesktopRemoteSessionStore {
+    fun load(): PersistedDesktopRemoteSession? = null
+    fun save(session: PersistedDesktopRemoteSession) {}
+    fun clear() {}
 }
 data class DesktopRemoteApproval(val deviceId: String, val status: String, val role: String?, val expiresAt: Double)
 data class DesktopRemotePlayback(val role: String, val online: Boolean, val playing: Boolean?,
@@ -223,5 +266,37 @@ object DesktopRemoteJson {
         }
         if (trackId != null || autoPlay || groupId != null) throw DesktopRemoteFailure()
         return mapper.writeValueAsBytes(mapOf("action" to action, "idempotency_key" to key))
+    }
+
+    fun encodePersistedSession(session: PersistedDesktopRemoteSession): ByteArray {
+        val pin = Base64.getUrlEncoder().withoutPadding().encodeToString(session.fingerprint())
+        return mapper.writeValueAsBytes(mapOf(
+            "endpoint" to session.endpoint,
+            "pin" to pin,
+            "device_id" to session.deviceId,
+            "token" to session.secret().rawValue(),
+            "expires_at" to session.expiresAt,
+        ))
+    }
+
+    fun decodePersistedSession(bytes: ByteArray): PersistedDesktopRemoteSession {
+        val node = objectValue(bytes, maxBytes = 4_096)
+        val endpoint = text(node, "endpoint", 32)
+        val pinEncoded = text(node, "pin", 64)
+        if (!pinEncoded.matches(Regex("[A-Za-z0-9_-]{43}"))) throw DesktopRemoteFailure()
+        val pinBytes = try { Base64.getUrlDecoder().decode(pinEncoded) } catch (_: IllegalArgumentException) { throw DesktopRemoteFailure() }
+        val validated = DesktopRemotePairing.fromSaved(endpoint, pinBytes)
+        val deviceId = id(node, "device_id")
+        val token = text(node, "token", 128)
+        if (!token.matches(Regex("[A-Za-z0-9_-]{20,128}"))) throw DesktopRemoteFailure()
+        val expiresAt = number(node, "expires_at") ?: throw DesktopRemoteFailure()
+        if (expiresAt <= 0.0) throw DesktopRemoteFailure()
+        return PersistedDesktopRemoteSession(
+            endpoint = validated.endpoint,
+            pinBytes = validated.fingerprint(),
+            deviceId = deviceId,
+            credential = DesktopRemoteSecret(token),
+            expiresAt = expiresAt,
+        )
     }
 }

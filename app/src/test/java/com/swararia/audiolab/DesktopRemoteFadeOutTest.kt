@@ -138,4 +138,42 @@ class DesktopRemoteFadeOutTest {
         assertEquals("select_group", groupCmd.get("action").asText())
         assertEquals("g_open", groupCmd.get("group_id").asText())
     }
+
+    @Test
+    fun persisted_session_roundtrips_valid_grant_and_fails_closed_on_tampered_or_public_fields() {
+        val pin = ByteArray(32) { idx -> (idx + 7).toByte() }
+        val valid = PersistedDesktopRemoteSession(
+            endpoint = "192.168.1.44:8766",
+            pinBytes = pin,
+            deviceId = "d".repeat(24),
+            credential = DesktopRemoteSecret("t".repeat(43)),
+            expiresAt = 2_000_000_000.0,
+        )
+        val encoded = DesktopRemoteJson.encodePersistedSession(valid)
+        val decoded = DesktopRemoteJson.decodePersistedSession(encoded)
+        assertEquals(valid, decoded)
+        assertEquals("192.168.1.44:8766", DesktopRemotePairing.fromSaved(decoded.endpoint, decoded.fingerprint()).endpoint)
+
+        // Fail closed on non-private / loopback / invalid endpoints, invalid pin lengths, bad credentials, or corrupt JSON.
+        for (badEndpoint in listOf("8.8.8.8:8766", "172.32.0.1:8766", "127.0.0.1:8766", "192.168.1.44:0")) {
+            assertTrue(runCatching { DesktopRemotePairing.fromSaved(badEndpoint, pin) }.isFailure)
+        }
+        assertTrue(runCatching { DesktopRemotePairing.fromSaved("192.168.1.44:8766", ByteArray(16)) }.isFailure)
+        assertTrue(runCatching { DesktopRemoteJson.decodePersistedSession("{\"v\":1}".toByteArray()) }.isFailure)
+        assertTrue(runCatching {
+            DesktopRemoteJson.decodePersistedSession(
+                """{"v":1,"endpoint":"192.168.1.44:8766","pin":"AAAA","device_id":"${"d".repeat(24)}","token":"${"t".repeat(43)}","expires_at":2000000000.0}""".toByteArray(),
+            )
+        }.isFailure)
+        assertTrue(runCatching {
+            DesktopRemoteJson.decodePersistedSession(
+                """{"v":1,"endpoint":"192.168.1.44:8766","pin":"${java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(pin)}","device_id":"bad","token":"${"t".repeat(43)}","expires_at":2000000000.0}""".toByteArray(),
+            )
+        }.isFailure)
+        assertTrue(runCatching {
+            DesktopRemoteJson.decodePersistedSession(
+                """{"v":1,"endpoint":"192.168.1.44:8766","pin":"${java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(pin)}","device_id":"${"d".repeat(24)}","token":"${"t".repeat(43)}","expires_at":0}""".toByteArray(),
+            )
+        }.isFailure)
+    }
 }
