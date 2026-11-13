@@ -16,12 +16,15 @@ class DesktopRemoteWiring(unittest.TestCase):
         self.assertIn('container.desktopRemoteApi()', root)
 
     def test_remote_feature_never_owns_phone_player_or_durable_credentials(self):
-        names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteScreen']
+        names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteScreen', 'DesktopRemoteQrScanner']
         source = '\n'.join((SRC / (n + '.kt')).read_text() for n in names)
         for forbidden in ['MediaController', 'ExoPlayer', 'PlaybackService', 'SharedPreferences',
                           'SavedStateHandle', 'rememberSaveable', 'setDefaultSSLSocketFactory',
                           'setDefaultHostnameVerifier', 'setHostnameVerifier']:
             self.assertNotIn(forbidden, source)
+        manifest = (ROOT / 'app/src/main/AndroidManifest.xml').read_text()
+        self.assertNotIn('android.permission.CAMERA', manifest)
+        self.assertIn('com.google.mlkit.vision.DEPENDENCIES', manifest)
 
 
 if __name__ == '__main__':

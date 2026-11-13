@@ -123,6 +123,16 @@ internal object UiIcons {
     val Check = outline("Check") {
         moveTo(4f, 12f); lineTo(9f, 17f); lineTo(20f, 6f)
     }
+    val QrScan = outline("QrScan") {
+        moveTo(3f, 8f); lineTo(3f, 3f); lineTo(8f, 3f)
+        moveTo(16f, 3f); lineTo(21f, 3f); lineTo(21f, 8f)
+        moveTo(3f, 16f); lineTo(3f, 21f); lineTo(8f, 21f)
+        moveTo(16f, 21f); lineTo(21f, 21f); lineTo(21f, 16f)
+        moveTo(7f, 7f); lineTo(10f, 7f); lineTo(10f, 10f); lineTo(7f, 10f); close()
+        moveTo(14f, 7f); lineTo(17f, 7f); lineTo(17f, 10f); lineTo(14f, 10f); close()
+        moveTo(7f, 14f); lineTo(10f, 14f); lineTo(10f, 17f); lineTo(7f, 17f); close()
+        moveTo(14f, 14f); lineTo(17f, 14f); lineTo(17f, 17f)
+    }
 
     private fun outline(name: String, draw: PathBuilder.() -> Unit) =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {

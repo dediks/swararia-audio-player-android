@@ -6,7 +6,7 @@
       "hash": "d7f5d5cf865a2902b70ff549b97586a7d3f234e016f041ab447ea740c7d66d1c",
       "algorithm": "sha256",
       "file": "jdk21.tar.gz",
-      "dest": "/home/ubuntu/projects/audio-library-android-spike/.toolchain/jdk"
+      "dest": "/home/dedik/project/swararia-audio-player-android/.toolchain/jdk"
     },
     {
       "name": "gradle8.13",
@@ -14,7 +14,7 @@
       "hash": "20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78",
       "algorithm": "sha256",
       "file": "gradle8.13.zip",
-      "dest": "/home/ubuntu/projects/audio-library-android-spike/.toolchain/gradle"
+      "dest": "/home/dedik/project/swararia-audio-player-android/.toolchain/gradle"
     },
     {
       "name": "android-commandline23",
@@ -22,7 +22,7 @@
       "hash": "e025545c62a8e64c7559119566a569fb1dec5f60",
       "algorithm": "sha1",
       "file": "cmdline-tools23.zip",
-      "dest": "/home/ubuntu/projects/audio-library-android-spike/.toolchain/android-sdk/cmdline-tools/latest"
+      "dest": "/home/dedik/project/swararia-audio-player-android/.toolchain/android-sdk/cmdline-tools/latest"
     },
     {
       "name": "android-platform36-r02",
@@ -30,7 +30,7 @@
       "hash": "2c1a80dd4d9f7d0e6dd336ec603d9b5c55a6f576",
       "algorithm": "sha1",
       "file": "platform36.zip",
-      "dest": "/home/ubuntu/projects/audio-library-android-spike/.toolchain/android-sdk/platforms/android-36"
+      "dest": "/home/dedik/project/swararia-audio-player-android/.toolchain/android-sdk/platforms/android-36"
     },
     {
       "name": "android-buildtools36.0.0",
@@ -38,7 +38,7 @@
       "hash": "b0b6376977657e8ad9b969bacf4093601da2c6fb",
       "algorithm": "sha1",
       "file": "build-tools36.zip",
-      "dest": "/home/ubuntu/projects/audio-library-android-spike/.toolchain/android-sdk/build-tools/36.0.0"
+      "dest": "/home/dedik/project/swararia-audio-player-android/.toolchain/android-sdk/build-tools/36.0.0"
     }
   ],
   "scope": "Local to prototype; no root, global PATH changes, Android Studio, emulator or NDK",

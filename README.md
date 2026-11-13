@@ -4,7 +4,7 @@ Aplikasi Android native untuk menyiapkan, mengelola, dan memutar audio lokal. Ta
 
 ## Status pengembangan
 
-Baseline source publik terakhir yang diverifikasi adalah **0.2.0-spike**. Baseline lokal **0.4.1-spike** ada pada `87932e8`. Branch `feature/android-desktop-remote-0.5` menambahkan kandidat **0.5.0-spike**: tab Remote, 21 gate/88 unit tests dan review runtime independen lulus; uji HP–PC nyata tetap diperlukan. Ini build debug/pengujian, bukan rilis produksi. Tidak ada push otomatis. Detail update/pairing: `UPDATE-0.5.0.md`.
+Baseline source publik terakhir yang diverifikasi adalah **0.2.0-spike**. Baseline lokal **0.4.1-spike** ada pada `87932e8`. Branch `feature/android-desktop-remote-0.5` menambahkan kandidat **0.5.0-spike** beserta pembaruan QR scanner Desktop Remote (Google Code Scanner): tab Remote, 91 unit tests, `lintDebug`, APK contract, dan Kotlin-to-Desktop wire probe lulus; instalasi APK & launch di `SM_M156B` Android 16 telah diuji lewat `adb.exe`, sementara uji interaktif scan QR & Remote HP–PC nyata tetap perlu diuji pengguna. Ini build debug/pengujian, bukan rilis produksi. Tidak ada push otomatis. Detail update/pairing: [UPDATE-0.5.0.md](UPDATE-0.5.0.md).
 
 - Android 10+ (minSdk 29), targetSdk 36; Kotlin/Compose, Media3, Room dan MediaStore/SAF.
 - Pustaka: pencarian lokal, urutan terbaru/A–Z, rename file dan riwayat undo.
@@ -19,7 +19,7 @@ Baseline source publik terakhir yang diverifikasi adalah **0.2.0-spike**. Baseli
 
 0.4.1 memindahkan resolusi/player Preview ke service, menambahkan notifikasi awal yang dapat dibatalkan, reconnect controller, pemulihan queue lokal paused, serta numeric startup timing. Cap tetap 120 detik; tidak ada dependency/schema baru. Pengguna melaporkan Preview bisa di-minimize; lock/rotasi dan perbaikan latensi belum diverifikasi lengkap. Detail dan acceptance historis: `UPDATE-0.4.1.md`; hasil di `verification/checks-0.4.1.json`.
 
-0.5.0 memakai ulang Compose, komponen/ikon/tema, manual DI, Coroutines, Jackson dan HTTPS bawaan untuk client Remote. Pairing/pin sertifikat dan token session berada di RAM; Play/Pause/Stop mengendalikan output PC, bukan streaming ke HP. Tidak ada dependency/permission/schema baru. Prototype scanner QR baru tidak ditambahkan; gunakan teks pairing dari PC, jangan kirim secret lewat chat. Desktop source Native Remote v1 diperlukan; installer/browser remote HTTP lama tidak otomatis kompatibel. Gate aktual: `verification/checks-0.5.json`; probe mandiri: `python verification/run_desktop_remote_checks.py` dengan checkout desktop dan Python test-nya tersedia. JVM wire tests bukan bukti runtime Android/Windows/audio fisik.
+0.5.0 memakai ulang Compose, komponen/ikon/tema, manual DI, Coroutines, Jackson dan HTTPS bawaan untuk client Remote, serta menambahkan **`DesktopRemoteQrScanner`** berbasis Google Code Scanner (`com.google.android.gms:play-services-code-scanner:16.1.0`) dengan metadata `com.google.mlkit.vision.DEPENDENCIES=barcode_ui` **tanpa izin `CAMERA` di aplikasi** dan tanpa perubahan Room schema2. Pairing/pin sertifikat dan token session berada di RAM; Play/Pause/Stop mengendalikan output PC, bukan streaming ke HP. Tab **Remote** menyediakan tombol utama **`Scan QR dari PC`** untuk memindai QR `swararia1|...` dan langsung pairing, serta tetap mempertahankan kolom tempel teks manual sebagai fallback. Jangan kirim secret lewat chat. Desktop source Native Remote v1 diperlukan; installer/browser remote HTTP lama tidak otomatis kompatibel. Probe wire mandiri: `TMPDIR="$PWD/.cache/tmp" SWARARIA_DESKTOP_REPO=/home/dedik/project/audio-library-starter python3 verification/run_desktop_remote_checks.py`. JVM wire tests bukan bukti runtime kamera/Android/Windows/audio fisik.
 
 Branch `refactor/architecture-foundation` merapikan dependency/state dan memisahkan UI tanpa menerapkan mockup baru. Pada repository ini, build memakai toolchain/cache yang sudah ada: 33 unit test, kompilasi, kedua APK ABI, kontrak APK dan signature lulus. Lint: 15 warning, tidak ada Error/Fatal. Batas dan alur pengembangan dijelaskan di `ARCHITECTURE.md` serta `CONTRIBUTING.md`. Review versi 0.3.0 lulus sesudah perbaikan temuan awal; review refactor juga lulus dan dicatat terpisah pada `verification/architecture-review.json`.
 
@@ -37,14 +37,36 @@ Pengguna melaporkan 0.1.0, 0.2.0, dan fungsi 0.3.0 bekerja pada Samsung M15 Andr
 Butuh Python 3.12+. Pelajari dan setujui persyaratan SDK sebelum menjalankan setup. Script setup mengunduh JDK 21, Gradle 8.13, SDK platform 36 dan Build Tools 36.0.0 yang dipin/checksum ke direktori project-local. Tidak memerlukan root, Android Studio, emulator atau NDK. Tidak ada toolchain di dalam Git.
 
 ```sh
-python setup_toolchain.py
+python3 setup_toolchain.py
 bash build.sh compileDebugKotlin
-bash build.sh testDebugUnitTest
-bash build.sh assembleDebug
-bash build.sh -Pandroid.experimental.lint.heapSize=384m lintDebug
-python -m unittest test_engine_payload test_apk_contract -v
-python verify_artifacts.py
+bash build.sh -Dorg.gradle.jvmargs="-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8" testDebugUnitTest
+bash build.sh -Dorg.gradle.jvmargs="-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8" assembleDebug
+bash build.sh -Dorg.gradle.jvmargs="-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8" -Pandroid.experimental.lint.heapSize=512m lintDebug
+python3 -m unittest test_engine_payload test_apk_contract -v
+python3 verify_artifacts.py
 ```
+
+Proyek ini memakai `build.sh` (pengganti `gradlew`) agar otomatis mengarahkan JDK, SDK, Gradle 8.13, dan cache ke `.toolchain/` serta `.cache/` tanpa Android Studio. Tambahan `-Dorg.gradle.jvmargs=...` menaikkan batas `MaxMetaspaceSize` sementara dari default `gradle.properties` (256m) bila host mengalami `OutOfMemoryError: Metaspace`.
+
+### Pemasangan ke HP dari Terminal WSL2 (Tanpa Android Studio)
+
+1. Pasang `platform-tools` (`adb`) secara lokal ke `.toolchain/`:
+   - Linux WSL: `JAVA_HOME="$PWD/.toolchain/jdk" ANDROID_SDK_ROOT="$PWD/.toolchain/android-sdk" .toolchain/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools"`
+   - Windows host (agar kabel USB terdeteksi langsung dari terminal WSL2 tanpa `usbipd`): unduh/ekstrak `platform-tools-latest-windows.zip` ke `.toolchain/platform-tools-win/adb.exe`.
+2. Aktifkan **Opsi developer → Debugging USB** di HP (pastikan *Auto Blocker* / *Pemblokir Otomatis* nonaktif selama install debug APK), sambungkan kabel USB, lalu pasang & jalankan:
+   ```sh
+   ADB_WIN="$PWD/.toolchain/platform-tools-win/adb.exe"
+   $ADB_WIN devices -l
+   $ADB_WIN install -r "$(wslpath -w app/build/outputs/apk/debug/app-arm64-v8a-debug.apk)"
+   $ADB_WIN shell am start -n com.swararia.audiolab.spike/com.swararia.audiolab.MainActivity
+   ```
+   *(Jika mengganti APK dari mesin/keystore lain dan muncul `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, jalankan `$ADB_WIN uninstall com.swararia.audiolab.spike` sekali terlebih dahulu; file audio di `Music/SwarariaAudioLab` tetap aman meski database internal app ter-reset. Update berikutnya dari laptop ini cukup memakai `install -r`.)*
+3. Opsional — mengaktifkan ADB Wi-Fi port tetap (`5555`) lewat kabel sekali:
+   ```sh
+   $ADB_WIN tcpip 5555
+   $ADB_WIN connect <IP_WIFI_HP>:5555
+   ```
+   *(USB dan Wi-Fi `:5555` tetap dapat berjalan bersamaan; jika keduanya aktif serentak di `adb devices`, pilih target spesifik dengan `-s <serial>`, atau kembalikan ke USB-only lewat `$ADB_WIN -s <serial> usb`. Port tetap `5555` lebih stabil dibanding port acak *Wireless debugging* Android 11+ untuk upload APK ~92 MB.)*
 
 Jalankan build/test dan lint terpisah pada host dengan RAM terbatas. Wrapper downloader dipin 0.19.0; override yt-dlp resmi 2026.10.26 diperiksa melalui `engine-lock.json` serta byte resource di APK.
 
