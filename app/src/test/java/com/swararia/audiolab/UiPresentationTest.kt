@@ -71,4 +71,25 @@ class UiPresentationTest {
         assertEquals("Wedding Akad", UiPresentation.playlistMembershipBadge(listOf("Wedding Akad")))
         assertEquals("Wedding Akad +2", UiPresentation.playlistMembershipBadge(listOf("Wedding Akad", "MC Bed", "Finale")))
     }
+
+    @Test fun searchErrorsAndRecentQueriesStayUserFriendly() {
+        assertEquals(
+            "Koneksi terlalu lambat. Periksa Wi-Fi atau paket data lalu tekan Coba lagi.",
+            UiPresentation.friendlySearchError("java.net.SocketTimeoutException: Connect timed out"),
+        )
+        assertEquals(
+            "Tidak tersambung ke internet. Periksa koneksi lalu tekan Coba lagi.",
+            UiPresentation.friendlySearchError("Unable to resolve host \"music.youtube.com\""),
+        )
+        assertEquals(
+            "Kata pencarian tidak valid.",
+            UiPresentation.friendlySearchError("Kata pencarian tidak valid."),
+        )
+
+        var recents = UiPresentation.recordRecentQuery(emptyList(), "  Hadrah Banjari  ")
+        recents = UiPresentation.recordRecentQuery(recents, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        recents = UiPresentation.recordRecentQuery(recents, "Sholawat")
+        recents = UiPresentation.recordRecentQuery(recents, "hadrah banjari")
+        assertEquals(listOf("hadrah banjari", "Sholawat"), recents)
+    }
 }

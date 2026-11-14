@@ -93,4 +93,40 @@ object UiPresentation {
             }
     }
     fun artworkIndex(id: Long): Int = Math.floorMod(id, 5L).toInt()
+
+    /** Maps low-level search/network exception messages into plain, non-technical Indonesian guidance. */
+    fun friendlySearchError(raw: String?): String {
+        val text = raw?.trim().orEmpty()
+        if (text.isEmpty()) return "Pencarian belum berhasil. Periksa internet lalu coba lagi."
+        val lower = text.lowercase(Locale.ROOT)
+        return when {
+            "timed out" in lower || "timeout" in lower || "sockettimeout" in lower ->
+                "Koneksi terlalu lambat. Periksa Wi-Fi atau paket data lalu tekan Coba lagi."
+            "unknownhost" in lower || "unable to resolve host" in lower || "connect" in lower ||
+                "network" in lower || "no address" in lower || "eof" in lower ->
+                "Tidak tersambung ke internet. Periksa koneksi lalu tekan Coba lagi."
+            "429" in lower || "too many requests" in lower ->
+                "Server sedang padat. Tunggu beberapa detik lalu coba lagi."
+            "ssl" in lower || "cert" in lower ->
+                "Koneksi aman belum berhasil dibuat. Periksa tanggal HP dan jaringan Anda."
+            else -> text
+        }
+    }
+
+    /** Records a valid non-URL query to the front of recent history without case-insensitive duplicates. */
+    fun recordRecentQuery(existing: List<String>, rawQuery: String, limit: Int = 5): List<String> {
+        val clean = rawQuery.trim()
+        if (clean.isEmpty() || clean.startsWith("http://", ignoreCase = true) || clean.startsWith("https://", ignoreCase = true)) {
+            return existing
+        }
+        val cap = limit.coerceAtLeast(1)
+        return buildList {
+            add(clean)
+            for (item in existing) {
+                val trimmed = item.trim()
+                if (trimmed.isNotEmpty() && !trimmed.equals(clean, ignoreCase = true)) add(trimmed)
+                if (size >= cap) break
+            }
+        }
+    }
 }

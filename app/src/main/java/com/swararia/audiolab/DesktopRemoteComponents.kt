@@ -370,7 +370,7 @@ internal fun RemoteSearchFilterStrip(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
-                            imageVector = if (groupBySections) UiIcons.Check else UiIcons.Library,
+                            imageVector = if (groupBySections) UiIcons.Check else UiIcons.Folder,
                             contentDescription = null,
                             tint = if (groupBySections) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp),

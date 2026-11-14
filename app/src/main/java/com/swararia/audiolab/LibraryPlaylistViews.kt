@@ -43,7 +43,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -84,14 +83,14 @@ internal fun LibraryCompactHeader(
                 modifier = Modifier.weight(1f),
             )
             if (section == LibrarySectionTab.ALL_TRACKS) {
-                LibraryHeaderChipButton(
+                FohHeaderChipButton(
                     label = "Import",
                     icon = UiIcons.Plus,
                     active = false,
                     enabled = importEnabled,
                     onClick = onImport,
                 )
-                LibraryHeaderChipButton(
+                FohHeaderChipButton(
                     label = "Select",
                     icon = UiIcons.Check,
                     active = selectionMode,
@@ -99,7 +98,7 @@ internal fun LibraryCompactHeader(
                     onClick = onToggleSelectionMode,
                 )
             } else {
-                LibraryHeaderChipButton(
+                FohHeaderChipButton(
                     label = "New Playlist",
                     icon = UiIcons.Plus,
                     active = true,
@@ -131,11 +130,14 @@ internal fun LibraryCompactHeader(
             }
         }
 
-        LibrarySectionSegmentedBar(
-            section = section,
-            trackCount = trackCount,
-            playlistCount = playlistCount,
-            onSelectSection = onSelectSection,
+        FohSegmentedBar(
+            options = LibrarySectionTab.entries,
+            selected = section,
+            label = { tab ->
+                val count = if (tab == LibrarySectionTab.ALL_TRACKS) trackCount else playlistCount
+                "${tab.label} ($count)"
+            },
+            onSelect = onSelectSection,
         )
 
         OutlinedTextField(
@@ -179,25 +181,11 @@ internal fun LibraryCompactHeader(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     LibraryGroupMode.entries.forEach { mode ->
-                        val active = mode == groupMode
-                        Surface(
+                        FohFilterChip(
+                            label = mode.label,
+                            selected = mode == groupMode,
                             onClick = { onSelectGroupMode(mode) },
-                            shape = RoundedCornerShape(999.dp),
-                            color = if (active) FohTheme.colors.safeBg else FohTheme.colors.surfaceCard,
-                            border = BorderStroke(
-                                1.dp,
-                                if (active) FohTheme.colors.safeBorder else FohTheme.colors.borderSubtle,
-                            ),
-                        ) {
-                            Text(
-                                text = mode.label,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                                color = if (active) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                maxLines = 1,
-                            )
-                        }
+                        )
                     }
                 }
                 Box {
@@ -240,98 +228,6 @@ internal fun LibraryCompactHeader(
                             trailingIcon = if (alphabetical) ({ Icon(UiIcons.Check, null) }) else null,
                         )
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibraryHeaderChipButton(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    active: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        shape = RoundedCornerShape(999.dp),
-        color = if (active) FohTheme.colors.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(
-            1.dp,
-            if (active) FohTheme.colors.safeBorder else FohTheme.colors.borderSubtle,
-        ),
-    ) {
-        Row(
-            modifier = Modifier
-                .heightIn(min = 36.dp)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (!enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                else if (active) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(15.dp),
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = if (!enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                else if (active) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                softWrap = false,
-            )
-        }
-    }
-}
-
-@Composable
-private fun LibrarySectionSegmentedBar(
-    section: LibrarySectionTab,
-    trackCount: Int,
-    playlistCount: Int,
-    onSelectSection: (LibrarySectionTab) -> Unit,
-) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = FohTheme.colors.surfaceDeep,
-        border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            LibrarySectionTab.entries.forEach { tab ->
-                val active = tab == section
-                val count = if (tab == LibrarySectionTab.ALL_TRACKS) trackCount else playlistCount
-                Surface(
-                    onClick = { onSelectSection(tab) },
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (active) FohTheme.colors.safeBg else Color.Transparent,
-                    border = if (active) BorderStroke(1.dp, FohTheme.colors.safeBorder) else null,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        text = "${tab.label} ($count)",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                        color = if (active) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 9.dp),
-                    )
                 }
             }
         }

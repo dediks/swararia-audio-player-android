@@ -48,6 +48,7 @@ fun SwarariaUi(
     val current = remember(tracks, playback.mediaId) {
         tracks.firstOrNull { it.id.toString() == playback.mediaId }
     }
+    val downloadedTrackIds = remember(tracks) { tracks.mapTo(HashSet()) { it.id } }
     val previewActive = searchActions.preview.let { it.hit != null || it.loading || it.media != null || it.error != null }
     val onlineBusy = ingest.busy || upgrade.operationBusy || search.busy || searchActions.preview.loading
     val navigate: (Int) -> Unit = { target ->
@@ -174,12 +175,14 @@ fun SwarariaUi(
                 )
                 1 -> AddAudioScreen(ingest = ingest, search = search, controller = controller, actions = searchActions,
                     modifier = contentModifier, upgrade = upgrade,
+                    downloadedTrackIds = downloadedTrackIds,
+                    onOpenDownloads = { navigate(2) },
                     onDownload = { url, authorized -> if (!onlineBusy && authorized) { searchActions.stopPreview(); onDownload(url, true) } },
                     onDownloadBatch = { hits, authorized ->
                         if (!onlineBusy && authorized && hits.isNotEmpty()) {
                             searchActions.stopPreview()
                             upgrade.onDownloadBatch(hits, true)
-                            navigate(2)
+                            if (hits.size > 1) navigate(2)
                         }
                     },
                     onImport = { if (!onlineBusy) onImport() },

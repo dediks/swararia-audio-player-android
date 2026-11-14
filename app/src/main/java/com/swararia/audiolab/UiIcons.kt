@@ -12,8 +12,11 @@ import androidx.compose.ui.unit.dp
 /** A single, local 24 dp icon family. No font glyphs or icon-library dependency. */
 internal object UiIcons {
     val Library = outline("Library") {
-        moveTo(5f, 4f); lineTo(9f, 4f); lineTo(9f, 20f); lineTo(5f, 20f); close()
-        moveTo(14f, 4f); lineTo(18f, 4f); lineTo(18f, 20f); lineTo(14f, 20f); close()
+        moveTo(3.5f, 7.5f); lineTo(3.5f, 20.5f); lineTo(16.5f, 20.5f)
+        moveTo(7.5f, 3.5f); lineTo(20.5f, 3.5f); lineTo(20.5f, 16.5f); lineTo(7.5f, 16.5f); close()
+        moveTo(14.05f, 12.1f); arcTo(1.65f, 1.65f, 0f, true, true, 10.75f, 12.1f)
+        arcTo(1.65f, 1.65f, 0f, true, true, 14.05f, 12.1f)
+        lineTo(14.05f, 6.4f); lineTo(17.1f, 7.6f)
     }
     val Plus = outline("Plus") {
         moveTo(12f, 4f); lineTo(12f, 20f); moveTo(4f, 12f); lineTo(20f, 12f)
@@ -211,6 +214,10 @@ internal object UiIcons {
     val ArrowDown = outline("ArrowDown") {
         moveTo(12f, 5f); lineTo(12f, 19f)
         moveTo(6f, 13f); lineTo(12f, 19f); lineTo(18f, 13f)
+    }
+    val Folder = outline("Folder") {
+        moveTo(3.5f, 6f); lineTo(9.5f, 6f); lineTo(11.5f, 8.5f); lineTo(20.5f, 8.5f)
+        lineTo(20.5f, 18.5f); lineTo(3.5f, 18.5f); close()
     }
 
     private fun outline(name: String, draw: PathBuilder.() -> Unit) =

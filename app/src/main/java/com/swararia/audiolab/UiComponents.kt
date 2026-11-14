@@ -2,10 +2,12 @@ package com.swararia.audiolab
 
 import androidx.compose.foundation.layout.heightIn
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -22,6 +24,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -175,4 +180,147 @@ internal fun FohDeckButton(
             content = content,
         )
     }
+}
+
+/** Shared header pill action shared across Library and Search screens. */
+@Composable
+internal fun FohHeaderChipButton(
+    label: String,
+    icon: ImageVector,
+    active: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(999.dp),
+        color = if (active) FohTheme.colors.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(
+            1.dp,
+            if (active) FohTheme.colors.safeBorder else FohTheme.colors.borderSubtle,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .heightIn(min = 36.dp)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (!enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                else if (active) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(15.dp),
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = if (!enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                else if (active) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+}
+
+/** Full-width 2-choice (or multi-choice) scope segmented bar matching the Library tab look. */
+@Composable
+internal fun <T> FohSegmentedBar(
+    options: List<T>,
+    selected: T,
+    label: (T) -> String,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = FohTheme.colors.surfaceDeep,
+        border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            options.forEach { option ->
+                val active = option == selected
+                Surface(
+                    onClick = { onSelect(option) },
+                    enabled = enabled,
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (active) FohTheme.colors.safeBg else Color.Transparent,
+                    border = if (active) BorderStroke(1.dp, FohTheme.colors.safeBorder) else null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = label(option),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                        color = when {
+                            !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                            active -> FohTheme.colors.safeAccent
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 9.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Compact pill filter chip shared across Library grouping and Search result type filters. */
+@Composable
+internal fun FohFilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(999.dp),
+        color = if (selected) FohTheme.colors.safeBg else FohTheme.colors.surfaceCard,
+        border = BorderStroke(
+            1.dp,
+            if (selected) FohTheme.colors.safeBorder else FohTheme.colors.borderSubtle,
+        ),
+        modifier = modifier.heightIn(min = 36.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = when {
+                    !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                    selected -> FohTheme.colors.safeAccent
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+}
+
+/** Compact 18 dp spinner shared by status banners in Library and Search. */
+@Composable
+internal fun CircularProgressIndicatorCompact() {
+    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
 }

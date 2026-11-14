@@ -1,5 +1,6 @@
 package com.swararia.audiolab
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -113,35 +114,109 @@ internal fun DeleteBatchAudioDialog(
 }
 
 @Composable
-internal fun DownloadLinkDialog(busy: Boolean, onDismiss: () -> Unit, onDownload: (String) -> Unit) {
-    var url by remember { mutableStateOf("") }
+internal fun DownloadLinkDialog(
+    busy: Boolean,
+    initialUrl: String = "",
+    onDismiss: () -> Unit,
+    onDownload: (String) -> Unit,
+) {
+    var url by remember(initialUrl) { mutableStateOf(initialUrl) }
     var authorized by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val validUrl = remember(url) { runCatching { DownloadQueueRules.validatedPublicSourceUrl(url) }.getOrNull() }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Download link") },
+    val pasteFromClipboard = {
+        clipboard.getText()?.text?.let {
+            url = it.trim()
+            authorized = false
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Unduh dari Link") },
         text = {
-            Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(value = url, onValueChange = { url = it; authorized = false }, enabled = !busy,
-                    label = { Text("YouTube / YT Music link") }, modifier = Modifier.fillMaxWidth(), maxLines = 3,
+            Column(
+                Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "Salin link video dari YouTube / YT Music, lalu tempel di bawah ini.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it; authorized = false },
+                    enabled = !busy,
+                    label = { Text("YouTube / YT Music link") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 3,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    trailingIcon = { GlyphButton(UiIcons.Paste, "Paste link", {
-                        clipboard.getText()?.text?.let { url = it.trim(); authorized = false }
-                    }, enabled = !busy) })
-                if (url.isNotBlank() && validUrl == null) Text("Gunakan link video publik YouTube / YT Music, bukan Playlist atau link bertoken.", color = MaterialTheme.colorScheme.error)
+                    trailingIcon = {
+                        GlyphButton(UiIcons.Paste, "Tempel link", { pasteFromClipboard() }, enabled = !busy)
+                    },
+                )
+                if (url.isBlank()) {
+                    OutlinedButton(
+                        onClick = { pasteFromClipboard() },
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(UiIcons.Paste, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Tempel Link dari Clipboard")
+                    }
+                }
+                if (url.isNotBlank() && validUrl == null) {
+                    Text(
+                        text = "Gunakan link video YouTube / YT Music publik biasa (bukan link playlist atau privat).",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 RightsConsent(authorized, { authorized = it }, !busy)
+                if (!authorized) {
+                    Text(
+                        text = "Centang kotak di atas untuk mengaktifkan tombol Download.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-        }, confirmButton = { TextButton(onClick = {
-            if (!busy && authorized && validUrl != null) { authorized = false; onDownload(validUrl) }
-        }, enabled = !busy && authorized && validUrl != null) { Text("Download") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (!busy && authorized && validUrl != null) { authorized = false; onDownload(validUrl) } },
+                enabled = !busy && authorized && validUrl != null,
+            ) { Text("Download") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
 private fun RightsConsent(checked: Boolean, change: (Boolean) -> Unit, enabled: Boolean) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = checked, onCheckedChange = change, enabled = enabled)
-        Text("Saya memiliki izin untuk download audio ini.", style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f))
+    Surface(
+        onClick = { if (enabled) change(!checked) },
+        enabled = enabled,
+        shape = RoundedCornerShape(12.dp),
+        color = if (checked) FohTheme.colors.safeBg else FohTheme.colors.surfaceCard,
+        border = BorderStroke(
+            1.dp,
+            if (checked) FohTheme.colors.safeBorder else FohTheme.colors.borderSubtle,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(end = 12.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = checked, onCheckedChange = change, enabled = enabled)
+            Text(
+                text = "Saya memiliki izin untuk download audio ini.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
@@ -149,21 +224,42 @@ private fun RightsConsent(checked: Boolean, change: (Boolean) -> Unit, enabled: 
 @Composable
 internal fun DownloadConsentDialog(hits: List<SearchHit>, busy: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     var authorized by remember { mutableStateOf(false) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Download (${hits.size})?") },
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Download (${hits.size})?") },
         text = {
-            Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 hits.forEach { hit ->
                     Column {
                         Text(hit.title, style = MaterialTheme.typography.titleSmall)
-                        Text(hit.channel.orEmpty(), style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            hit.channel.orEmpty(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
                 RightsConsent(authorized, { authorized = it }, !busy)
+                if (!authorized) {
+                    Text(
+                        text = "Centang kotak di atas untuk mengaktifkan tombol Download.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-        }, confirmButton = {
-            TextButton(onClick = { if (authorized && !busy) { authorized = false; onConfirm() } }, enabled = authorized && !busy) { Text("Download") }
-        }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (authorized && !busy) { authorized = false; onConfirm() } },
+                enabled = authorized && !busy,
+            ) { Text("Download") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
