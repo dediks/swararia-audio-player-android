@@ -338,6 +338,8 @@ private fun DiagnosticsDialog(state: IngestState, onDismiss: () -> Unit) {
 internal fun EngineSettingsDialog(
     ingest: IngestState,
     searchBusy: Boolean,
+    ytMusic: YoutubeMusicAccountState = YoutubeMusicAccountState(),
+    ytMusicActions: YoutubeMusicAccountActions = YoutubeMusicAccountActions(),
     onDismiss: () -> Unit,
     onUpdate: () -> Unit,
     onCancel: () -> Unit,
@@ -345,7 +347,94 @@ internal fun EngineSettingsDialog(
     var details by remember { mutableStateOf(false) }
     AlertDialog(onDismissRequest = onDismiss, icon = { BrandLogo(36.dp) }, title = { Text("Pengaturan & tentang") },
         text = {
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Akun YouTube Music (Opsional)", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Opsional untuk akun YT Music Premium (peluang audio hingga 256k AAC M4A). Disarankan pakai akun sekunder / slot Family, bukan akun Google utama.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (ytMusic.connected) {
+                    val statusLabel = when {
+                        ytMusic.needsReauth -> "Perlu masuk ulang (sesi kadaluarsa)"
+                        ytMusic.tier == YoutubeMusicPremiumTier.PREMIUM -> "Terhubung • YT Music Premium"
+                        ytMusic.tier == YoutubeMusicPremiumTier.FREE -> "Terhubung • Akun standar"
+                        ytMusic.source == YoutubeMusicAuthSource.COOKIES_TXT -> "Terhubung (cookies.txt terenkripsi)"
+                        else -> "Terhubung (sesi WebView terenkripsi)"
+                    }
+                    Text(
+                        statusLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (ytMusic.needsReauth) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    )
+                    if (!ytMusic.statusNote.isNullOrBlank()) {
+                        Text(
+                            ytMusic.statusNote,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (ytMusic.checking) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text("Gunakan saat mengunduh", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Pencarian & preview tetap tanpa akun agar aman.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = ytMusic.enabledForDownloads,
+                            onCheckedChange = ytMusicActions.onToggleEnabled,
+                            enabled = !ingest.busy && !ytMusic.checking,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = if (ytMusic.needsReauth) ytMusicActions.onOpenSignIn else ytMusicActions.onVerifyAccount,
+                            enabled = !ingest.busy && !ytMusic.checking,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(if (ytMusic.needsReauth) "Masuk ulang" else "Cek status")
+                        }
+                        TextButton(
+                            onClick = ytMusicActions.onDisconnect,
+                            enabled = !ingest.busy && !ytMusic.checking,
+                        ) {
+                            Text("Putuskan", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                } else {
+                    if (!ytMusic.statusNote.isNullOrBlank()) {
+                        Text(
+                            ytMusic.statusNote,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (ytMusic.needsReauth) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = ytMusicActions.onOpenSignIn,
+                        enabled = !ingest.busy && !ytMusic.checking,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+                    ) {
+                        Text("Masuk YouTube Music")
+                    }
+                    TextButton(
+                        onClick = ytMusicActions.onOpenImportCookies,
+                        enabled = !ingest.busy && !ytMusic.checking,
+                    ) {
+                        Text("Impor cookies.txt (jika WebView diblokir)")
+                    }
+                }
+                HorizontalDivider()
                 Text("Mesin audio", style = MaterialTheme.typography.titleMedium)
                 Text("yt-dlp: ${ingest.engineVersion}", style = MaterialTheme.typography.bodyMedium)
                 Text("Pembaruan opsional mengambil versi stabil dari GitHub resmi. Memerlukan internet dan tidak memasang Termux.",
@@ -363,7 +452,7 @@ internal fun EngineSettingsDialog(
                 Text("Tentang Swararia", style = MaterialTheme.typography.titleMedium)
                 Text("Audio tersimpan di Music/SwarariaAudioLab. Impor membuat salinan tanpa mengubah file asli. Pemutar memakai file lokal; pencarian, tautan, dan pembaruan memerlukan internet.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Tanpa akun, server pendamping, atau analitik aplikasi. Unduh hanya audio yang boleh Anda gunakan. Engine downloader dan FFmpeg memiliki kewajiban lisensi; lihat source dan catatan lisensi sebelum distribusi.",
+                Text("Default tanpa akun (opsional masuk YT Music Premium dienkripsi Android Keystore tanpa backup cloud), tanpa server luar, atau analitik aplikasi. Unduh hanya audio yang boleh Anda gunakan. Engine downloader dan FFmpeg memiliki kewajiban lisensi; lihat source dan catatan lisensi sebelum distribusi.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }, confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } })

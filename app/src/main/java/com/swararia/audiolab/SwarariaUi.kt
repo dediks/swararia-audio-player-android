@@ -38,6 +38,8 @@ fun SwarariaUi(
     desktopRemote: DesktopRemoteSession,
     remoteServerState: RemoteServerUiState = RemoteServerUiState(),
     remoteServerActions: RemoteServerUiActions = RemoteServerUiActions(),
+    ytMusicState: YoutubeMusicAccountState = YoutubeMusicAccountState(),
+    ytMusicActions: YoutubeMusicAccountActions = YoutubeMusicAccountActions(),
 ) {
     var destination by rememberSaveable { mutableIntStateOf(0) }
     var fullPlayer by rememberSaveable { mutableStateOf(false) }
@@ -245,11 +247,31 @@ fun SwarariaUi(
         }
         SwarariaModal.RenameHistory -> RenameHistoryDialog(lastRename, organizerBusy, { activeModal = null }, onUndo)
         SwarariaModal.EngineSettings -> EngineSettingsDialog(
-            ingest,
-            search.busy || searchActions.preview.loading || upgrade.operationBusy,
+            ingest = ingest,
+            searchBusy = search.busy || searchActions.preview.loading || upgrade.operationBusy,
+            ytMusic = ytMusicState,
+            ytMusicActions = ytMusicActions.copy(
+                onOpenSignIn = { activeModal = SwarariaModal.YoutubeMusicSignIn },
+                onOpenImportCookies = { activeModal = SwarariaModal.YoutubeMusicImportCookies },
+            ),
             onDismiss = { activeModal = null },
             onUpdate = { if (!onlineBusy) onUpdate() },
             onCancel = { if (ingest.busy && ingest.cancelable) onCancel() },
+        )
+        SwarariaModal.YoutubeMusicSignIn -> YoutubeMusicSignInDialog(
+            onDismiss = { activeModal = SwarariaModal.EngineSettings },
+            onSwitchToImportCookies = { activeModal = SwarariaModal.YoutubeMusicImportCookies },
+            onCompleteSignIn = { wwwCookies, musicCookies ->
+                ytMusicActions.onCompleteWebViewSignIn(wwwCookies, musicCookies)
+                activeModal = SwarariaModal.EngineSettings
+            },
+        )
+        SwarariaModal.YoutubeMusicImportCookies -> ImportYoutubeMusicCookiesDialog(
+            onDismiss = { activeModal = SwarariaModal.EngineSettings },
+            onImportCookies = { raw ->
+                ytMusicActions.onImportCookiesText(raw)
+                activeModal = SwarariaModal.EngineSettings
+            },
         )
         null -> Unit
     }
@@ -266,6 +288,8 @@ private sealed interface SwarariaModal {
     ) : SwarariaModal
     data object RenameHistory : SwarariaModal
     data object EngineSettings : SwarariaModal
+    data object YoutubeMusicSignIn : SwarariaModal
+    data object YoutubeMusicImportCookies : SwarariaModal
 }
 
 @Composable

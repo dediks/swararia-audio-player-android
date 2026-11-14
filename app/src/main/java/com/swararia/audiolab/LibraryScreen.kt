@@ -664,17 +664,31 @@ private fun LibraryAudioRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = UiPresentation.trackSubtitle(track.displayName, track.artist, track.durationMs),
+                    text = UiPresentation.trackSubtitleWithQuality(
+                        track.displayName,
+                        track.artist,
+                        track.sizeBytes,
+                        track.durationMs,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (selected || playlistBadge != null || reorderBadge != null) {
+                val qualityBadge = UiPresentation.highBitrateBadge(track.displayName, track.sizeBytes, track.durationMs)
+                if (qualityBadge != null || selected || playlistBadge != null || reorderBadge != null) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        if (qualityBadge != null) {
+                            LibraryMiniBadge(
+                                label = qualityBadge,
+                                containerColor = FohTheme.colors.safeBg,
+                                borderColor = FohTheme.colors.safeBorder,
+                                contentColor = FohTheme.colors.safeAccent,
+                            )
+                        }
                         if (selected) {
                             LibraryMiniBadge(
                                 label = if (wantsPlay) "PLAYING" else "STANDBY",

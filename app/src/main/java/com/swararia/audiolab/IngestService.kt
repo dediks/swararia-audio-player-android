@@ -4,6 +4,7 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.IBinder
 import android.os.PowerManager
@@ -53,6 +54,7 @@ class IngestService : Service() {
     private var lastNotification = 0L
     private val queue get() = (application as SwarariaApp).container.downloadQueue
     private val library get() = (application as SwarariaApp).library
+    private val ytMusicAccount get() = (application as SwarariaApp).container.ytMusicAccount
 
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
@@ -150,9 +152,11 @@ class IngestService : Service() {
 
     private suspend fun downloadOne(job: DownloadJob, control: BatchDownloadRunner.Control) {
         var work: File? = null
+        var cookieFile: File? = null
         try {
             require(job.authorized)
             val url = DownloadQueueRules.validatedPublicSourceUrl(job.sourceUrl)
+            val videoId = url.substringAfter("v=")
             synchronized(phaseLock) { interruptible = true; checkNotCanceled() }
             control.progress(null, "Menyiapkan mesin")
             report("Menyiapkan Python dan FFmpeg di HP...", null)
@@ -168,63 +172,54 @@ class IngestService : Service() {
             val root = File(cacheDir, "ingest").apply { check(mkdirs() || isDirectory) }
             val directory = File(root, UUID.randomUUID().toString()).apply { check(mkdir()) }
             work = directory
-            val request = YoutubeDLRequest(url)
-                .addOption("--no-playlist")
-                .addOption("--ignore-config")
-                .addOption("--playlist-items", "1")
-                .addOption("--restrict-filenames")
-                .addOption("--no-mtime")
-                .addOption("--newline")
-                .addOption("--socket-timeout", 20)
-                .addOption("--retries", 2)
-                .addOption("--fragment-retries", 2)
-                .addOption("--max-filesize", "512M")
-                .addOption("-f", "bestaudio/best")
-                .addOption("--extract-audio")
-                .addOption("--audio-format", "best")
-                .addOption("-o", File(directory, "%(title).100B [%(id)s].%(ext)s").absolutePath)
-            val id = UUID.randomUUID().toString()
-            synchronized(phaseLock) { checkNotCanceled(); processId = id }
-            var lastPersist = 0L
-            var lastStage = ""
-            var budgetExceeded = false
-            control.progress(null, "Mengunduh audio")
-            val executeStarted = System.nanoTime()
-            var firstProgressRecorded = false
-            try {
-                YoutubeDL.execute(request, id) { percentage, _, _ ->
-                    // Native line deliberately discarded, not logged, shown, or persisted.
-                    val actual = percentage.takeIf { it.isFinite() && it >= 0 }?.coerceIn(0f, 100f)
-                    if (!firstProgressRecorded && actual != null) {
-                        firstProgressRecorded = true
-                        // First valid yt-dlp progress callback, NOT a network-first-byte measurement.
-                        android.util.Log.d("SwarariaTiming", "download_execute_to_first_progress_ms=${((System.nanoTime() - executeStarted) / 1_000_000L).coerceAtLeast(0)}")
-                    }
-                    val postprocess = actual != null && actual >= 100f
-                    val stage = if (postprocess) "Menyelesaikan audio" else "Mengunduh audio"
-                    synchronized(phaseLock) {
-                        if (postprocess) interruptible = false // sticky until this job exits
-                        if (canceled.get() && interruptible) runCatching { YoutubeDL.destroyProcessById(id) }
-                    }
-                    val now = android.os.SystemClock.elapsedRealtime()
-                    if (now - lastPersist >= 700 || stage != lastStage) {
-                        // Bounded per-job workspace; postprocessing may temporarily hold input plus output.
-                        budgetExceeded = directory.walkTopDown().filter { it.isFile }.sumOf { it.length() } > MAX_WORK_BYTES
-                        if (budgetExceeded) runCatching { YoutubeDL.destroyProcessById(id) }
-                        val progress = if (postprocess) null else actual?.div(100f)
-                        runBlocking { control.progress(progress, stage) }
-                        report("$stage...", progress, cancelable = synchronized(phaseLock) { interruptible })
-                        lastPersist = now; lastStage = stage
-                    }
+            val outputTemplate = File(directory, "%(title).100B [%(id)s].%(ext)s").absolutePath
+            val activeCookies = ytMusicAccount.activeNetscapeCookiesForDownload()
+            cookieFile = activeCookies?.let { text ->
+                File(directory, "ytm-cookies.txt").apply {
+                    writeText(text, Charsets.UTF_8)
+                    setReadable(false, false); setReadable(true, true)
+                    setWritable(false, false); setWritable(true, true)
                 }
+            }
+            val targetUrl = if (cookieFile != null) "https://music.youtube.com/watch?v=$videoId" else url
+            var usedCookies = cookieFile != null
+            control.progress(null, "Mengunduh audio")
+            var budgetExceeded = false
+            try {
+                budgetExceeded = runYtDlpAttempt(
+                    request = buildDownloadRequest(targetUrl, outputTemplate, cookieFile),
+                    directory = directory,
+                    control = control,
+                )
             } catch (failure: Exception) {
                 if (canceled.get()) throw CancellationException("Dibatalkan")
-                throw failure
-            } finally {
-                // execute returned/unwound before the runner resolves the RUNNING row.
-                runCatching { YoutubeDL.destroyProcessById(id) }
-                synchronized(phaseLock) { processId = null }
+                val activeCookieFile = cookieFile
+                if (activeCookieFile == null || budgetExceeded) throw failure
+                val updatedText = runCatching { activeCookieFile.takeIf { it.isFile }?.readText() }.getOrNull()
+                val stillValid = updatedText?.let {
+                    runCatching { YoutubeMusicCookieRules.sanitizeNetscapeCookies(it) }.getOrNull()
+                }
+                wipeCookieFile(activeCookieFile)
+                cookieFile = null
+                if (stillValid == null) ytMusicAccount.markNeedsReauth()
+                directory.listFiles().orEmpty().forEach { it.deleteRecursively() }
+                usedCookies = false
+                control.progress(null, "Mengulang tanpa akun")
+                budgetExceeded = runYtDlpAttempt(
+                    request = buildDownloadRequest(url, outputTemplate, cookieFile = null),
+                    directory = directory,
+                    control = control,
+                )
             }
+            if (usedCookies) {
+                val activeCookieFile = cookieFile
+                if (activeCookieFile != null && activeCookieFile.isFile) {
+                    val updated = runCatching { activeCookieFile.readText(Charsets.UTF_8) }.getOrNull()
+                    if (updated != null) ytMusicAccount.refreshFromYtDlpOutput(updated)
+                }
+            }
+            wipeCookieFile(cookieFile)
+            cookieFile = null
             check(!budgetExceeded && directory.walkTopDown().filter { it.isFile }.sumOf { it.length() } <= MAX_WORK_BYTES)
             currentCoroutineContext().ensureActive()
             val output = directory.listFiles().orEmpty().filter {
@@ -232,6 +227,16 @@ class IngestService : Service() {
                     it.canonicalFile.parentFile == directory.canonicalFile
             }
             require(output.size == 1)
+            val downloadedFile = output.single()
+            android.util.Log.i(
+                "SwarariaIngest",
+                "downloaded ext=${downloadedFile.extension.lowercase()} bytes=${downloadedFile.length()} usedCookies=$usedCookies",
+            )
+            if (usedCookies) {
+                inspectHighBitratePremiumLabel(downloadedFile)?.let { label ->
+                    ytMusicAccount.confirmPremiumFromDownload(label)
+                }
+            }
             // A cancellation during postprocess may finish this current item, never the pending items.
             synchronized(phaseLock) {
                 if (interruptible) checkNotCanceled()
@@ -241,13 +246,169 @@ class IngestService : Service() {
             report("Menyimpan ke Music/SwarariaAudioLab/...", null, cancelable = false)
             var trackId: Long? = null
             control.commitDurably {
-                trackId = library.addDownloadedFile(output.single(), job.id).id
+                trackId = library.addDownloadedFile(downloadedFile, job.id).id
             }
             // Optional artwork is strictly AFTER the durable audio + job transaction.
             runCatching { library.attachArtwork(requireNotNull(trackId), job.thumbnailUrl) }
         } finally {
+            wipeCookieFile(cookieFile)
             runCatching { work?.deleteRecursively() }
             synchronized(phaseLock) { interruptible = true }
+        }
+    }
+
+    private fun buildDownloadRequest(
+        url: String,
+        outputTemplate: String,
+        cookieFile: File?,
+    ): YoutubeDLRequest = YoutubeDLRequest(url)
+        .addOption("--no-playlist")
+        .addOption("--ignore-config")
+        .addOption("--playlist-items", "1")
+        .addOption("--restrict-filenames")
+        .addOption("--no-mtime")
+        .addOption("--newline")
+        .addOption("--socket-timeout", 20)
+        .addOption("--retries", 2)
+        .addOption("--fragment-retries", 2)
+        .addOption("--max-filesize", "512M")
+        .addOption("-f", "bestaudio/best")
+        .addOption("--extract-audio")
+        .addOption("--audio-format", "best")
+        .addOption("-o", outputTemplate)
+        .apply {
+            if (cookieFile != null) {
+                addOption("--cookies", cookieFile.absolutePath)
+                if (ytMusicAccount.state.value.tier == YoutubeMusicPremiumTier.PREMIUM) {
+                    addOption(
+                        "--extractor-args",
+                        "youtube:player_client=web_music,web_creator,tv_samsung,web;formats=missing_pot",
+                    )
+                }
+            }
+        }
+
+    private fun runYtDlpAttempt(
+        request: YoutubeDLRequest,
+        directory: File,
+        control: BatchDownloadRunner.Control,
+    ): Boolean {
+        val id = UUID.randomUUID().toString()
+        synchronized(phaseLock) { checkNotCanceled(); processId = id }
+        var lastPersist = 0L
+        var lastStage = ""
+        var budgetExceeded = false
+        val executeStarted = System.nanoTime()
+        var firstProgressRecorded = false
+        try {
+            val response = YoutubeDL.execute(request, id) { percentage, _, _ ->
+                // Native line deliberately discarded, not logged, shown, or persisted.
+                val actual = percentage.takeIf { it.isFinite() && it >= 0 }?.coerceIn(0f, 100f)
+                if (!firstProgressRecorded && actual != null) {
+                    firstProgressRecorded = true
+                    // First valid yt-dlp progress callback, NOT a network-first-byte measurement.
+                    android.util.Log.d("SwarariaTiming", "download_execute_to_first_progress_ms=${((System.nanoTime() - executeStarted) / 1_000_000L).coerceAtLeast(0)}")
+                }
+                val postprocess = actual != null && actual >= 100f
+                val stage = if (postprocess) "Menyelesaikan audio" else "Mengunduh audio"
+                synchronized(phaseLock) {
+                    if (postprocess) interruptible = false // sticky until this job exits
+                    if (canceled.get() && interruptible) runCatching { YoutubeDL.destroyProcessById(id) }
+                }
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastPersist >= 700 || stage != lastStage) {
+                    // Bounded per-job workspace; postprocessing may temporarily hold input plus output.
+                    budgetExceeded = directory.walkTopDown().filter { it.isFile }.sumOf { it.length() } > MAX_WORK_BYTES
+                    if (budgetExceeded) runCatching { YoutubeDL.destroyProcessById(id) }
+                    val progress = if (postprocess) null else actual?.div(100f)
+                    runBlocking { control.progress(progress, stage) }
+                    report("$stage...", progress, cancelable = synchronized(phaseLock) { interruptible })
+                    lastPersist = now; lastStage = stage
+                }
+            }
+            logSanitizedYtDlpDiagnostics(response.out.orEmpty(), response.err.orEmpty())
+            return budgetExceeded
+        } catch (failure: Exception) {
+            failure.message?.let { logSanitizedYtDlpDiagnostics(it) }
+            if (canceled.get()) throw CancellationException("Dibatalkan")
+            throw failure
+        } finally {
+            // execute returned/unwound before the runner resolves the RUNNING row.
+            runCatching { YoutubeDL.destroyProcessById(id) }
+            synchronized(phaseLock) { processId = null }
+        }
+    }
+
+    private fun wipeCookieFile(file: File?) {
+        if (file == null) return
+        runCatching {
+            if (file.isFile) {
+                file.writeBytes(ByteArray(0))
+                file.delete()
+            }
+        }
+    }
+
+    private fun logSanitizedYtDlpDiagnostics(vararg streams: String) {
+        val urlRegex = Regex("https?://\\S+")
+        val sensitiveRegex = Regex("(?i)(cookie\\s*[:=]|token=|pot=|sig=|sapisid|login_info|__secure-|__host-|authorization\\s*[:=])\\S*")
+        val allowedPrefixes = listOf("[youtube]", "[info]", "WARNING:", "ERROR:")
+        val allowedSignals = listOf(
+            "Downloading 1 format(s):",
+            "Detected YouTube Premium",
+            "player API JSON",
+            "initial data",
+            "PO Token",
+            "n challenge",
+            "JavaScript runtime",
+            "no longer valid",
+            "Skipping client",
+            "Requested format",
+            "Some web",
+            "Sign in to confirm",
+        )
+        streams.asSequence()
+            .flatMap { it.lineSequence() }
+            .map { it.trim() }
+            .filter { line ->
+                line.isNotEmpty() &&
+                    allowedPrefixes.any { line.startsWith(it) } &&
+                    allowedSignals.any { line.contains(it, ignoreCase = true) }
+            }
+            .map { line ->
+                line.replace(urlRegex, "<url>")
+                    .replace(sensitiveRegex, "<redacted>")
+                    .take(220)
+            }
+            .distinct()
+            .take(10)
+            .forEach { android.util.Log.i("SwarariaIngest", it) }
+    }
+
+    private fun inspectHighBitratePremiumLabel(file: File): String? {
+        val ext = file.extension.lowercase()
+        if (ext != "m4a" && ext != "opus") return null
+        val reader = MediaMetadataRetriever()
+        return try {
+            reader.setDataSource(file.absolutePath)
+            val reportedBps = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull() ?: 0L
+            val durationMs = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            val effectiveBps = when {
+                reportedBps > 0L -> reportedBps
+                durationMs >= 1_000L && file.length() > 0L -> (file.length() * 8_000L) / durationMs
+                else -> 0L
+            }
+            if (effectiveBps < 192_000L) {
+                null
+            } else {
+                val kbps = ((effectiveBps + 500L) / 1_000L).toInt()
+                val codec = if (ext == "opus") "Opus" else "AAC M4A"
+                "${kbps}k $codec"
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { reader.release() }
         }
     }
 

@@ -92,4 +92,27 @@ class UiPresentationTest {
         recents = UiPresentation.recordRecentQuery(recents, "hadrah banjari")
         assertEquals(listOf("hadrah banjari", "Sholawat"), recents)
     }
+
+    @Test fun audioQualityMetricsShowBitrateSizeAndHighBitrateBadge() {
+        assertEquals(134, UiPresentation.effectiveBitrateKbps(6_118_928L, 366_000L))
+        assertEquals("5.8 MB", UiPresentation.fileSizeLabel(6_118_928L))
+        assertEquals("500 KB", UiPresentation.fileSizeLabel(512_000L))
+        assertEquals(
+            "OPUS · 134 kbps · 5.8 MB · 6:06",
+            UiPresentation.qualitySummary("I_Will_Remember.opus", 6_118_928L, 366_000L),
+        )
+        assertNull(UiPresentation.highBitrateBadge("I_Will_Remember.opus", 6_118_928L, 366_000L))
+
+        assertEquals(256, UiPresentation.effectiveBitrateKbps(11_712_000L, 366_000L))
+        assertEquals(
+            "Toto · M4A · 256 kbps · 11.2 MB · 6:06",
+            UiPresentation.trackSubtitleWithQuality("I_Will_Remember.m4a", "Toto", 11_712_000L, 366_000L),
+        )
+        assertEquals("HQ 256k", UiPresentation.highBitrateBadge("I_Will_Remember.m4a", 11_712_000L, 366_000L))
+        assertEquals("HQ 256k", UiPresentation.highBitrateBadge("I_Will_Remember.opus", 11_712_000L, 366_000L))
+        assertEquals("LOSSLESS", UiPresentation.highBitrateBadge("Monokrom.flac", 24_000_000L, 185_000L))
+        assertNull(UiPresentation.effectiveBitrateKbps(0L, 185_000L))
+        assertNull(UiPresentation.effectiveBitrateKbps(5_000_000L, null))
+        assertEquals("FLAC · --:--", UiPresentation.qualitySummary("Monokrom.flac", 0L, null))
+    }
 }

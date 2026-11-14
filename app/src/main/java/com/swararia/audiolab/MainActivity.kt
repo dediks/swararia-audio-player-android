@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
                 val operationBusy by model.operationBusy.collectAsStateWithLifecycle()
                 val jobs by model.jobs.collectAsStateWithLifecycle()
                 val remoteServerState by model.remoteServerState.collectAsStateWithLifecycle()
+                val ytMusicState by model.ytMusicState.collectAsStateWithLifecycle()
                 val snackbars = remember { SnackbarHostState() }
                 LaunchedEffect(model) { model.messages.collect { snackbars.showSnackbar(it) } }
                 LaunchedEffect(tracks, controller) {
@@ -140,6 +141,14 @@ class MainActivity : ComponentActivity() {
                     desktopRemote = model.desktopRemote,
                     remoteServerState = remoteServerState,
                     remoteServerActions = model.remoteServerActions,
+                    ytMusicState = ytMusicState,
+                    ytMusicActions = YoutubeMusicAccountActions(
+                        onCompleteWebViewSignIn = { www, music -> model.connectYtMusicWebView(www, music) },
+                        onImportCookiesText = { raw -> model.importYtMusicCookies(raw) },
+                        onToggleEnabled = { enabled -> model.setYtMusicEnabled(enabled) },
+                        onVerifyAccount = { model.verifyYtMusicAccount() },
+                        onDisconnect = { model.disconnectYtMusic() },
+                    ),
                     upgrade = UpgradeUiActions(
                         jobs = jobs, operationBusy = operationBusy,
                         onDownloadBatch = { hits, authorized -> whenOnlineIdle {

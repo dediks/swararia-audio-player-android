@@ -19,6 +19,7 @@ class AppViewModel(
     desktopRemoteStore: DesktopRemotePersistence? = null,
     private val remoteServer: AndroidRemoteServerController? = null,
     desktopRemoteMediaImporter: DesktopRemoteMediaImporter? = null,
+    private val ytMusicAccount: YoutubeMusicAccountManager? = null,
 ) : ViewModel() {
     val desktopRemote = DesktopRemoteSession(
         desktopRemoteApi,
@@ -77,6 +78,8 @@ class AppViewModel(
     val operationBusy = operations.busy
     val remoteServerState: StateFlow<RemoteServerUiState> =
         remoteServer?.state ?: MutableStateFlow(RemoteServerUiState())
+    val ytMusicState: StateFlow<YoutubeMusicAccountState> =
+        ytMusicAccount?.state ?: MutableStateFlow(YoutubeMusicAccountState())
     val remoteServerActions = RemoteServerUiActions(
         onRefreshInterfaces = ::refreshServerInterfaces,
         onStartServer = ::startRemoteServer,
@@ -119,6 +122,52 @@ class AppViewModel(
         remoteServer?.denyOrRevokeDevice(deviceId, deny)
     }
     fun clearServerError() { remoteServer?.clearError() }
+    fun connectYtMusicWebView(wwwCookies: String?, musicCookies: String?) {
+        val manager = ytMusicAccount ?: return
+        viewModelScope.launch {
+            runCatching { manager.connectFromWebView(wwwCookies, musicCookies) }
+                .onSuccess { state ->
+                    message(state.statusNote ?: "Akun YouTube Music terhubung.")
+                }
+                .onFailure { failure ->
+                    message(failure.message ?: "Gagal menyimpan sesi YouTube Music.")
+                }
+        }
+    }
+    fun importYtMusicCookies(rawText: String) {
+        val manager = ytMusicAccount ?: return
+        viewModelScope.launch {
+            runCatching { manager.connectFromNetscapeText(rawText) }
+                .onSuccess { state ->
+                    message(state.statusNote ?: "Cookies YouTube Music tersimpan terenkripsi.")
+                }
+                .onFailure { failure ->
+                    message(failure.message ?: "Gagal mengimpor cookies YouTube Music.")
+                }
+        }
+    }
+    fun setYtMusicEnabled(enabled: Boolean) {
+        val manager = ytMusicAccount ?: return
+        viewModelScope.launch {
+            runCatching { manager.setEnabledForDownloads(enabled) }
+                .onFailure { failure -> message(failure.message ?: "Gagal mengubah setelan akun.") }
+        }
+    }
+    fun verifyYtMusicAccount() {
+        val manager = ytMusicAccount ?: return
+        viewModelScope.launch {
+            val state = runCatching { manager.verifyAccount() }.getOrNull()
+            if (state?.statusNote != null) message(state.statusNote)
+        }
+    }
+    fun disconnectYtMusic() {
+        val manager = ytMusicAccount ?: return
+        viewModelScope.launch {
+            runCatching { manager.disconnect() }
+                .onSuccess { message("Akun YouTube Music diputuskan & cookie dihapus.") }
+                .onFailure { failure -> message(failure.message ?: "Gagal memutus akun.") }
+        }
+    }
     fun enqueueDownloads(requests: List<DownloadRequest>, authorized: Boolean, start: (String) -> Unit) {
         if (!canStartOnlineOperation()) { message("Tunggu proses yang sedang berjalan."); return }
         cancelPreview(); operations.enqueue(requests, authorized, start)

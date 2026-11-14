@@ -21,6 +21,13 @@ class AppContainer(context: Context) {
     val searchRepository: AudioSearchRepository by lazy {
         YoutubeSearchRepository(appContext, { ingestState.value.busy })
     }
+    val ytMusicAccount: YoutubeMusicAccountManager by lazy {
+        YoutubeMusicAccountManager(
+            store = AndroidKeystoreYoutubeMusicStore(appContext),
+            verifier = YoutubeMusicWebTierVerifier(appContext),
+            onPlatformCookiesCleared = ::clearAndroidWebViewYoutubeSession,
+        ).apply { initialize() }
+    }
     fun previewPlayback(): PreviewPlayback = PreviewRemote(appContext)
     fun desktopRemoteApi(): DesktopRemoteApi = DesktopRemoteHttpsApi()
     private val rememberedDesktopSession by lazy {
@@ -76,6 +83,7 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
             container.desktopRemoteStore(),
             container.remoteServerController,
             container.desktopRemoteMediaImporter(),
+            container.ytMusicAccount,
         ) as T
     }
 }

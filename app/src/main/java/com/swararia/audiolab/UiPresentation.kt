@@ -42,6 +42,46 @@ object UiPresentation {
         val cleanArtist = artist?.trim()?.takeIf { it.isNotEmpty() }
         return if (cleanArtist != null) "$cleanArtist · $base" else base
     }
+    fun effectiveBitrateKbps(sizeBytes: Long, durationMs: Long?): Int? {
+        if (sizeBytes <= 0L || durationMs == null || durationMs < 1_000L) return null
+        val kbps = (sizeBytes * 8L + durationMs / 2L) / durationMs
+        return kbps.takeIf { it > 0L }?.coerceAtMost(20_000L)?.toInt()
+    }
+    fun fileSizeLabel(sizeBytes: Long): String {
+        if (sizeBytes <= 0L) return ""
+        return if (sizeBytes < 1024L * 1024L) {
+            "${maxOf(1L, (sizeBytes + 512L) / 1024L)} KB"
+        } else {
+            String.format(Locale.US, "%.1f MB", sizeBytes / (1024.0 * 1024.0))
+        }
+    }
+    fun qualitySummary(displayName: String, sizeBytes: Long, durationMs: Long?): String {
+        val type = displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        val label = if (type in audioExtensions) type.uppercase(Locale.ROOT) else "Audio"
+        val parts = buildList {
+            add(label)
+            effectiveBitrateKbps(sizeBytes, durationMs)?.let { add("$it kbps") }
+            fileSizeLabel(sizeBytes).takeIf { it.isNotEmpty() }?.let { add(it) }
+            add(LibraryRules.durationLabel(durationMs))
+        }
+        return parts.joinToString(" · ")
+    }
+    fun trackSubtitleWithQuality(
+        displayName: String,
+        artist: String?,
+        sizeBytes: Long,
+        durationMs: Long?,
+    ): String {
+        val base = qualitySummary(displayName, sizeBytes, durationMs)
+        val cleanArtist = artist?.trim()?.takeIf { it.isNotEmpty() }
+        return if (cleanArtist != null) "$cleanArtist · $base" else base
+    }
+    fun highBitrateBadge(displayName: String, sizeBytes: Long, durationMs: Long?): String? {
+        val ext = displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        if (ext == "flac" || ext == "wav") return "LOSSLESS"
+        val kbps = effectiveBitrateKbps(sizeBytes, durationMs) ?: return null
+        return if (kbps >= 192 && ext in audioExtensions) "HQ ${kbps}k" else null
+    }
     fun groupSummary(count: Int, totalDurationMs: Long): String =
         if (totalDurationMs > 0L) "$count lagu · ${LibraryRules.durationLabel(totalDurationMs)}"
         else "$count lagu"
