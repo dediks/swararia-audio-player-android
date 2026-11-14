@@ -2,10 +2,14 @@ package com.swararia.audiolab
 
 import java.util.Locale
 
+enum class LibrarySectionTab(val label: String) {
+    ALL_TRACKS("All Tracks"),
+    PLAYLISTS("Playlists"),
+}
+
 enum class LibraryGroupMode(val label: String) {
-    ALL("Semua"),
-    PLAYLIST("Playlist"),
-    ARTIST("Artis"),
+    ALL("All"),
+    ARTIST("Artist"),
     ALBUM("Album"),
     FORMAT("Format"),
 }
@@ -41,6 +45,28 @@ object UiPresentation {
     fun groupSummary(count: Int, totalDurationMs: Long): String =
         if (totalDurationMs > 0L) "$count lagu · ${LibraryRules.durationLabel(totalDurationMs)}"
         else "$count lagu"
+    fun playlistStatsSummary(trackCount: Int, totalDurationMs: Long): String =
+        if (totalDurationMs > 0L) "$trackCount tracks · Total ${LibraryRules.durationLabel(totalDurationMs)}"
+        else "$trackCount tracks"
+    fun playlistPreviewSummary(
+        trackIds: List<Long>,
+        resolveDisplayName: (Long) -> String?,
+        maxItems: Int = 3,
+    ): String {
+        val resolvedTitles = trackIds.mapNotNull { id -> resolveDisplayName(id)?.let(::title) }
+        if (resolvedTitles.isEmpty()) return "Playlist kosong · tap + untuk tambah track"
+        val limit = maxItems.coerceAtLeast(1)
+        val shown = resolvedTitles.take(limit).mapIndexed { index, label ->
+            String.format(Locale.ROOT, "%02d %s", index + 1, label)
+        }
+        val extra = resolvedTitles.size - shown.size
+        return if (extra > 0) "${shown.joinToString(" · ")} · +$extra" else shown.joinToString(" · ")
+    }
+    fun playlistMembershipBadge(names: List<String>): String? {
+        val clean = names.map { it.trim() }.filter { it.isNotEmpty() }
+        if (clean.isEmpty()) return null
+        return if (clean.size == 1) clean.first() else "${clean.first()} +${clean.size - 1}"
+    }
     fun <T> groupItems(
         items: List<T>,
         keySelector: (T) -> String,

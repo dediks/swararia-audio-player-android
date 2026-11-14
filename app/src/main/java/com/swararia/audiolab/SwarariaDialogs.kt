@@ -50,6 +50,66 @@ internal fun DeleteAudioDialog(track: AudioTrack, busy: Boolean, onDismiss: () -
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun DeleteBatchAudioDialog(
+    tracks: List<AudioTrack>,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onDeleteBatch: (List<AudioTrack>, () -> Unit) -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = { if (!busy) onDismiss() },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text("Delete ${tracks.size} audio?", style = MaterialTheme.typography.headlineSmall)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                tracks.take(5).forEach { track ->
+                    Text(
+                        "• ${UiPresentation.title(track.displayName)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (tracks.size > 5) {
+                    Text(
+                        "…dan ${tracks.size - 5} track lainnya",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Text(
+                "${tracks.size} file salinan yang dikelola aplikasi di HP akan dihapus permanen. Sumber import asli tetap aman.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                ) { Text("Cancel") }
+                Button(
+                    onClick = { if (!busy) onDeleteBatch(tracks, onDismiss) },
+                    enabled = !busy && tracks.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                ) { Text("Delete (${tracks.size})") }
+            }
+        }
+    }
+}
+
 @Composable
 internal fun DownloadLinkDialog(busy: Boolean, onDismiss: () -> Unit, onDownload: (String) -> Unit) {
     var url by remember { mutableStateOf("") }
@@ -313,8 +373,6 @@ internal fun PlaylistPickerDialog(
     onCreatePlaylistWithTrack: (String, Long) -> Unit,
 ) {
     var creating by remember { mutableStateOf(playlists.isEmpty()) }
-    var newName by remember { mutableStateOf("") }
-    val validatedNew = remember(newName) { runCatching { LibraryRules.validatedPlaylistName(newName) } }
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         icon = { Icon(UiIcons.Queue, null) },
@@ -363,55 +421,20 @@ internal fun PlaylistPickerDialog(
                             )
                             Column(Modifier.weight(1f)) {
                                 Text(playlist.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${playlist.trackIds.size} lagu", style = MaterialTheme.typography.bodySmall,
+                                Text("${playlist.trackIds.size} track", style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
                 }
-                if (creating) {
-                    HorizontalDivider()
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        enabled = !busy,
-                        singleLine = true,
-                        label = { Text("Nama playlist baru") },
-                        isError = newName.isNotBlank() && validatedNew.isFailure,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    if (newName.isNotBlank() && validatedNew.isFailure) {
-                        Text(
-                            validatedNew.exceptionOrNull()?.message ?: "Nama playlist tidak valid.",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        if (playlists.isNotEmpty()) {
-                            TextButton(onClick = { creating = false; newName = "" }, enabled = !busy) { Text("Batal") }
-                        }
-                        TextButton(
-                            onClick = {
-                                val clean = validatedNew.getOrNull() ?: return@TextButton
-                                onCreatePlaylistWithTrack(clean, track.id)
-                                newName = ""
-                                creating = false
-                            },
-                            enabled = !busy && validatedNew.isSuccess,
-                        ) { Text("Buat & tambahkan") }
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = { creating = true },
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                    ) {
-                        Icon(UiIcons.Plus, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Buat playlist baru")
-                    }
-                }
+                InlineCreatePlaylistSection(
+                    creating = creating,
+                    hasExistingPlaylists = playlists.isNotEmpty(),
+                    busy = busy,
+                    onStartCreate = { creating = true },
+                    onCancelCreate = { creating = false },
+                    onCreate = { clean -> onCreatePlaylistWithTrack(clean, track.id) },
+                )
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             }
         },
@@ -419,6 +442,160 @@ internal fun PlaylistPickerDialog(
             TextButton(onClick = onDismiss, enabled = !busy) { Text("Selesai") }
         },
     )
+}
+
+@Composable
+internal fun BatchPlaylistPickerDialog(
+    selectedTracks: List<AudioTrack>,
+    playlists: List<LibraryPlaylist>,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onAddTracksToPlaylist: (Long, List<Long>) -> Unit,
+    onCreatePlaylistWithTracks: (String, List<Long>) -> Unit,
+) {
+    var creating by remember { mutableStateOf(playlists.isEmpty()) }
+    val selectedIds = remember(selectedTracks) { selectedTracks.map { it.id } }
+    val selectedSet = remember(selectedIds) { selectedIds.toSet() }
+    val subtitle = remember(selectedTracks) {
+        val first = selectedTracks.firstOrNull()?.let { UiPresentation.title(it.displayName) }.orEmpty()
+        when {
+            selectedTracks.isEmpty() -> "0 track dipilih"
+            selectedTracks.size == 1 -> first
+            else -> "$first & ${selectedTracks.size - 1} lainnya"
+        }
+    }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        icon = { Icon(UiIcons.Queue, null) },
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Masukkan ${selectedIds.size} track ke playlist")
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                playlists.forEach { playlist ->
+                    val existing = playlist.trackIds.count { it in selectedSet }
+                    val allIncluded = selectedIds.isNotEmpty() && existing == selectedIds.size
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (allIncluded) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable(enabled = !busy && !allIncluded && selectedIds.isNotEmpty()) {
+                                    onAddTracksToPlaylist(playlist.id, selectedIds)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(playlist.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                val membershipInfo = when {
+                                    allIncluded -> "Semua sudah ada di playlist"
+                                    existing > 0 -> "$existing dari ${selectedIds.size} sudah ada"
+                                    else -> "${playlist.trackIds.size} track"
+                                }
+                                Text(membershipInfo, style = MaterialTheme.typography.bodySmall,
+                                    color = if (allIncluded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (allIncluded) {
+                                Icon(UiIcons.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            } else {
+                                Text(
+                                    "+ Tambah",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    }
+                }
+                InlineCreatePlaylistSection(
+                    creating = creating,
+                    hasExistingPlaylists = playlists.isNotEmpty(),
+                    busy = busy,
+                    onStartCreate = { creating = true },
+                    onCancelCreate = { creating = false },
+                    onCreate = { clean -> onCreatePlaylistWithTracks(clean, selectedIds) },
+                )
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("Selesai") }
+        },
+    )
+}
+
+@Composable
+private fun InlineCreatePlaylistSection(
+    creating: Boolean,
+    hasExistingPlaylists: Boolean,
+    busy: Boolean,
+    onStartCreate: () -> Unit,
+    onCancelCreate: () -> Unit,
+    onCreate: (String) -> Unit,
+) {
+    var newName by remember { mutableStateOf("") }
+    val validatedNew = remember(newName) { runCatching { LibraryRules.validatedPlaylistName(newName) } }
+    if (creating) {
+        HorizontalDivider()
+        OutlinedTextField(
+            value = newName,
+            onValueChange = { newName = it },
+            enabled = !busy,
+            singleLine = true,
+            label = { Text("Nama playlist baru") },
+            placeholder = { Text("Misal: Wedding Akad, Pengajian") },
+            isError = newName.isNotBlank() && validatedNew.isFailure,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (newName.isNotBlank() && validatedNew.isFailure) {
+            Text(
+                validatedNew.exceptionOrNull()?.message ?: "Nama playlist tidak valid.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            if (hasExistingPlaylists) {
+                TextButton(onClick = { newName = ""; onCancelCreate() }, enabled = !busy) { Text("Batal") }
+            }
+            TextButton(
+                onClick = {
+                    val clean = validatedNew.getOrNull() ?: return@TextButton
+                    onCreate(clean)
+                    newName = ""
+                    onCancelCreate()
+                },
+                enabled = !busy && validatedNew.isSuccess,
+            ) { Text("Buat & tambahkan") }
+        }
+    } else {
+        OutlinedButton(
+            onClick = onStartCreate,
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+        ) {
+            Icon(UiIcons.Plus, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Buat playlist baru")
+        }
+    }
 }
 
 @Composable

@@ -75,5 +75,28 @@ class UpgradeOperations(
             finally {state.value=false}
         }
     }
+    fun deleteBatch(trackIds:List<Long>,onSuccess:()->Unit) {
+        val distinct=trackIds.distinct()
+        if(distinct.isEmpty() || !allowed())return
+        state.value=true
+        scope.launch {
+            var deletedCount=0
+            var firstError:Exception?=null
+            try {
+                for(id in distinct) {
+                    try {deleteAudio(id);deletedCount++}
+                    catch(c:CancellationException) {throw c}
+                    catch(f:Exception) {if(firstError==null) firstError=f}
+                }
+                if(deletedCount>0) onSuccess()
+                val summary=when {
+                    firstError==null -> "$deletedCount audio dihapus."
+                    deletedCount==0 -> firstError?.message?.take(300) ?: "Audio belum dapat dihapus."
+                    else -> "$deletedCount audio dihapus; sebagian gagal: ${firstError?.message?.take(120).orEmpty()}"
+                }
+                message(summary)
+            } finally {state.value=false}
+        }
+    }
     private fun validBatch(id:String)=runCatching {UUID.fromString(id).toString()==id}.getOrDefault(false)
 }

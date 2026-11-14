@@ -447,14 +447,31 @@ class MediaLibrary(private val context: Context, private val database: AudioData
     }
 
     override suspend fun addTrackToPlaylist(playlistId: Long, trackId: Long) {
-        withContext(Dispatchers.IO) {
-            mutationMutex.withLock {
-                database.withTransaction {
-                    check(database.playlists().findPlaylist(playlistId) != null) { "Playlist tidak ditemukan." }
+        addTracksToPlaylist(playlistId, listOf(trackId))
+    }
+
+    override suspend fun addTracksToPlaylist(playlistId: Long, trackIds: List<Long>): Int = withContext(Dispatchers.IO) {
+        val distinctIds = trackIds.distinct()
+        if (distinctIds.isEmpty()) return@withContext 0
+        mutationMutex.withLock {
+            database.withTransaction {
+                check(database.playlists().findPlaylist(playlistId) != null) { "Playlist tidak ditemukan." }
+                val existingIds = database.playlists().entriesForPlaylist(playlistId).mapTo(HashSet()) { it.trackId }
+                var pos = database.playlists().nextPosition(playlistId)
+                var addedCount = 0
+                for (trackId in distinctIds) {
                     check(database.tracks().find(trackId) != null) { "Audio tidak ada di library." }
-                    val pos = database.playlists().nextPosition(playlistId)
-                    database.playlists().insertEntry(PlaylistTrackCrossRef(playlistId = playlistId, trackId = trackId, position = pos))
+                    if (trackId in existingIds) continue
+                    if (database.playlists().insertEntry(
+                            PlaylistTrackCrossRef(playlistId = playlistId, trackId = trackId, position = pos)
+                        ) > 0L
+                    ) {
+                        pos++
+                        addedCount++
+                        existingIds.add(trackId)
+                    }
                 }
+                addedCount
             }
         }
     }
@@ -462,6 +479,28 @@ class MediaLibrary(private val context: Context, private val database: AudioData
     override suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: Long) = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
             database.playlists().removeEntry(playlistId, trackId)
+        }
+    }
+
+    override suspend fun reorderPlaylistTracks(playlistId: Long, orderedTrackIds: List<Long>) = withContext(Dispatchers.IO) {
+        mutationMutex.withLock {
+            database.withTransaction {
+                check(database.playlists().findPlaylist(playlistId) != null) { "Playlist tidak ditemukan." }
+                val current = database.playlists().entriesForPlaylist(playlistId)
+                val existingIds = current.mapTo(HashSet()) { it.trackId }
+                val seen = HashSet<Long>(existingIds.size)
+                val mergedOrder = buildList(existingIds.size) {
+                    for (id in orderedTrackIds) {
+                        if (id in existingIds && seen.add(id)) add(id)
+                    }
+                    for (entry in current) {
+                        if (seen.add(entry.trackId)) add(entry.trackId)
+                    }
+                }
+                mergedOrder.forEachIndexed { index, trackId ->
+                    database.playlists().updateEntryPosition(playlistId, trackId, index)
+                }
+            }
         }
     }
 

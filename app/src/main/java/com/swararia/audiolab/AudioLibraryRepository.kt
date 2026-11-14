@@ -32,7 +32,9 @@ interface AudioLibraryRepository {
     suspend fun renamePlaylist(playlistId: Long, name: String) {}
     suspend fun deletePlaylist(playlistId: Long) {}
     suspend fun addTrackToPlaylist(playlistId: Long, trackId: Long) {}
+    suspend fun addTracksToPlaylist(playlistId: Long, trackIds: List<Long>): Int = 0
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: Long) {}
+    suspend fun reorderPlaylistTracks(playlistId: Long, orderedTrackIds: List<Long>) {}
     suspend fun scanMissingMetadata() {}
     suspend fun findTrackBySha256AndSize(sha256: String, sizeBytes: Long): AudioTrack? = null
     suspend fun importValidatedUpload(

@@ -111,10 +111,14 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists WHERE LOWER(name) = LOWER(:name) LIMIT 1") suspend fun findPlaylistByName(name: String): LocalPlaylist?
     @Query("UPDATE playlists SET name = :name WHERE id = :id") suspend fun renamePlaylist(id: Long, name: String)
     @Query("DELETE FROM playlists WHERE id = :id") suspend fun deletePlaylist(id: Long)
+    @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY position ASC, addedAt ASC")
+    suspend fun entriesForPlaylist(playlistId: Long): List<PlaylistTrackCrossRef>
     @Query("SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_tracks WHERE playlistId = :playlistId")
     suspend fun nextPosition(playlistId: Long): Int
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertEntry(entry: PlaylistTrackCrossRef): Long
+    @Query("UPDATE playlist_tracks SET position = :position WHERE playlistId = :playlistId AND trackId = :trackId")
+    suspend fun updateEntryPosition(playlistId: Long, trackId: Long, position: Int)
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
     suspend fun removeEntry(playlistId: Long, trackId: Long)
     @Query("DELETE FROM playlist_tracks WHERE trackId = :trackId")

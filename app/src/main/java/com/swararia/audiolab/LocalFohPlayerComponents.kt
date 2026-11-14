@@ -228,7 +228,7 @@ internal object LocalFohRules {
     }
 }
 
-private object FohPalette {
+internal object FohPalette {
     val SafeBg = Color(0xFF132B21)
     val SafeBorder = Color(0xFF285944)
     val SafeAccent = Color(0xFF8CE3C7)
@@ -1152,6 +1152,8 @@ internal fun LocalFohBottomDeck(
 internal fun LocalTrackSwitchGuardDialog(
     targetTitle: String,
     activeTitle: String,
+    cueButtonLabel: String = "Cue Only (Standby 00:00)",
+    detailText: String = "Track \"$activeTitle\" sedang live. Pilih tindakan untuk \"$targetTitle\":",
     onCueOnly: () -> Unit,
     onCutAndPlay: () -> Unit,
     onDismiss: () -> Unit,
@@ -1163,7 +1165,7 @@ internal fun LocalTrackSwitchGuardDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "Track \"$activeTitle\" sedang live. Pilih tindakan untuk \"$targetTitle\":",
+                    text = detailText,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1176,7 +1178,7 @@ internal fun LocalTrackSwitchGuardDialog(
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Cue Only (Standby 00:00)", fontWeight = FontWeight.SemiBold)
+                    Text(cueButtonLabel, fontWeight = FontWeight.SemiBold)
                 }
                 Button(
                     onClick = onCutAndPlay,

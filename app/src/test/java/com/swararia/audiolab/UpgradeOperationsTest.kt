@@ -59,5 +59,29 @@ class UpgradeOperationsTest {
             o.initialize();assertTrue(q.calls.isEmpty());assertFalse(o.busy.value)
         } finally {s.cancel()}
     }
+    @Test(timeout=5000) fun batchDeleteDeduplicatesIdsAndHandlesPartialFailures()=runBlocking {
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
+        val queue=Queue()
+        val deletedIds=mutableListOf<Long>()
+        val messages=mutableListOf<String>()
+        var succeeded=false
+        val ops=UpgradeOperations(
+            queue, scope, {true}, {false}, {emptyList()},
+            deleteAudio = { id ->
+                if (id == 2L) throw IllegalStateException("locked")
+                deletedIds.add(id)
+            },
+            message = { messages.add(it) },
+        )
+        try {
+            ops.initialize()
+            ops.deleteBatch(listOf(1L, 2L, 1L, 3L)) { succeeded = true }
+            assertEquals(listOf(1L, 3L), deletedIds)
+            assertTrue(succeeded)
+            assertFalse(ops.busy.value)
+            assertTrue(messages.last().contains("2 audio dihapus"))
+            assertTrue(messages.last().contains("sebagian gagal"))
+        } finally { scope.cancel() }
+    }
     companion object { const val ID="11111111-1111-4111-8111-111111111111" }
 }

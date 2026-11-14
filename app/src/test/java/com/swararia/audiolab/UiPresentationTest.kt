@@ -45,4 +45,30 @@ class UiPresentationTest {
         assertEquals(150_000L, grouped.first().totalDurationMs)
         assertEquals(2, grouped.first().items.size)
     }
+
+    @Test fun playlistWorkflowSummariesAndBadgesFormatCleanly() {
+        assertEquals(listOf("All Tracks", "Playlists"), LibrarySectionTab.entries.map { it.label })
+        assertEquals(listOf("All", "Artist", "Album", "Format"), LibraryGroupMode.entries.map { it.label })
+        assertEquals("5 tracks · Total 22:45", UiPresentation.playlistStatsSummary(5, 1_365_000L))
+        assertEquals("2 tracks", UiPresentation.playlistStatsSummary(2, 0L))
+
+        val names = mapOf(
+            1L to "01_Opening_Gala.wav",
+            2L to "Instrumen_Akad.mp3",
+            3L to "Doa_Penutup.opus",
+            4L to "Backsound_MC.flac",
+            5L to "Closing.m4a",
+        )
+        assertEquals(
+            "Playlist kosong · tap + untuk tambah track",
+            UiPresentation.playlistPreviewSummary(emptyList(), names::get),
+        )
+        assertEquals(
+            "01 01 Opening Gala · 02 Instrumen Akad · 03 Doa Penutup · +2",
+            UiPresentation.playlistPreviewSummary(listOf(1L, 2L, 3L, 4L, 5L), names::get),
+        )
+        assertNull(UiPresentation.playlistMembershipBadge(emptyList()))
+        assertEquals("Wedding Akad", UiPresentation.playlistMembershipBadge(listOf("Wedding Akad")))
+        assertEquals("Wedding Akad +2", UiPresentation.playlistMembershipBadge(listOf("Wedding Akad", "MC Bed", "Finale")))
+    }
 }

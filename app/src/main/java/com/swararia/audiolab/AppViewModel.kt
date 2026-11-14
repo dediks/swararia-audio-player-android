@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** Activity state adapter; dependencies are supplied at the platform composition root. */
 class AppViewModel(
@@ -107,6 +109,7 @@ class AppViewModel(
     }
     fun cancelQueuedBatch(batchId: String) = operations.cancelQueued(batchId)
     fun delete(trackId: Long, onSuccess: () -> Unit) = operations.delete(trackId, onSuccess)
+    fun deleteBatch(trackIds: List<Long>, onSuccess: () -> Unit) = operations.deleteBatch(trackIds, onSuccess)
     fun message(text: String) { viewModelScope.launch { messageChannel.send(text) } }
     fun rename(trackId: Long, title: String, onSuccess: () -> Unit) {
         if (busy.value || operations.busy.value) return
@@ -131,12 +134,18 @@ class AppViewModel(
         }
     }
 
-    fun createPlaylist(name: String, initialTrackId: Long? = null) = runPlaylistAction("Gagal membuat playlist.") {
+    private val reorderMutex = Mutex()
+
+    fun createPlaylist(name: String, initialTrackId: Long? = null) =
+        createPlaylistWithTracks(name, listOfNotNull(initialTrackId))
+
+    fun createPlaylistWithTracks(name: String, trackIds: List<Long>) = runPlaylistAction("Gagal membuat playlist.") {
         val cleanName = LibraryRules.validatedPlaylistName(name)
         val playlistId = library.createPlaylist(cleanName)
-        if (initialTrackId != null) {
-            library.addTrackToPlaylist(playlistId, initialTrackId)
-            "Playlist \"$cleanName\" dibuat & lagu ditambahkan."
+        val distinctIds = trackIds.distinct()
+        if (distinctIds.isNotEmpty()) {
+            val added = library.addTracksToPlaylist(playlistId, distinctIds)
+            "Playlist \"$cleanName\" dibuat ($added track ditambahkan)."
         } else {
             "Playlist \"$cleanName\" dibuat."
         }
@@ -153,14 +162,32 @@ class AppViewModel(
         "Playlist dihapus."
     }
 
-    fun addTrackToPlaylist(playlistId: Long, trackId: Long) = runPlaylistAction("Gagal menambahkan lagu ke playlist.") {
-        library.addTrackToPlaylist(playlistId, trackId)
-        "Lagu ditambahkan ke playlist."
+    fun addTrackToPlaylist(playlistId: Long, trackId: Long) = addTracksToPlaylist(playlistId, listOf(trackId))
+
+    fun addTracksToPlaylist(playlistId: Long, trackIds: List<Long>) = runPlaylistAction("Gagal menambahkan track ke playlist.") {
+        val added = library.addTracksToPlaylist(playlistId, trackIds)
+        if (added > 0) "$added track ditambahkan ke playlist."
+        else "Semua track terpilih sudah ada di playlist."
     }
 
-    fun removeTrackFromPlaylist(playlistId: Long, trackId: Long) = runPlaylistAction("Gagal mengeluarkan lagu dari playlist.") {
+    fun removeTrackFromPlaylist(playlistId: Long, trackId: Long) = runPlaylistAction("Gagal mengeluarkan track dari playlist.") {
         library.removeTrackFromPlaylist(playlistId, trackId)
-        "Lagu dikeluarkan dari playlist."
+        "Track dikeluarkan dari playlist."
+    }
+
+    fun reorderPlaylistTracks(playlistId: Long, orderedTrackIds: List<Long>) {
+        if (operations.busy.value) return
+        viewModelScope.launch {
+            try {
+                reorderMutex.withLock {
+                    library.reorderPlaylistTracks(playlistId, orderedTrackIds)
+                }
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (failure: Exception) {
+                messageChannel.send(failure.message ?: "Gagal menyimpan urutan rundown.")
+            }
+        }
     }
 
     private fun runPlaylistAction(fallbackError: String, block: suspend () -> String) {

@@ -57,4 +57,14 @@ class LibraryRulesTest {
         assertEquals("FLAC", LibraryRules.audioFormatLabel("track.flac"))
         assertEquals("AUDIO", LibraryRules.audioFormatLabel("noext"))
     }
+
+    @Test fun movePlaylistItemRespectsBoundsAndPreservesElements() {
+        val initial = listOf(10L, 20L, 30L, 40L)
+        assertEquals(listOf(10L, 30L, 20L, 40L), LibraryRules.movePlaylistItem(initial, index = 2, delta = -1))
+        assertEquals(listOf(20L, 10L, 30L, 40L), LibraryRules.movePlaylistItem(initial, index = 0, delta = 1))
+        assertEquals(initial, LibraryRules.movePlaylistItem(initial, index = 0, delta = -1))
+        assertEquals(initial, LibraryRules.movePlaylistItem(initial, index = 3, delta = 1))
+        assertEquals(initial, LibraryRules.movePlaylistItem(initial, index = -1, delta = 1))
+        assertEquals(initial, LibraryRules.movePlaylistItem(initial, index = 1, delta = 0))
+    }
 }

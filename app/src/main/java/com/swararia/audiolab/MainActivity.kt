@@ -113,15 +113,22 @@ class MainActivity : ComponentActivity() {
                             .onFailure { model.message(it.message ?: "Audio tidak dapat diputar.") }
                     } },
                     onPlayQueue = { track, queue -> withNotificationPermission {
-                        runCatching { playTrack(track, queue.ifEmpty { tracks }) }
+                        runCatching { playTrack(track, queue.ifEmpty { tracks }, autoPlay = true) }
                             .onFailure { model.message(it.message ?: "Audio tidak dapat diputar.") }
+                    } },
+                    onCueQueue = { track, queue -> withNotificationPermission {
+                        runCatching { playTrack(track, queue.ifEmpty { tracks }, autoPlay = false) }
+                            .onFailure { model.message(it.message ?: "Cue belum dapat dimuat.") }
                     } },
                     playlistActions = PlaylistUiActions(
                         onCreatePlaylist = { name, trackId -> model.createPlaylist(name, trackId) },
+                        onCreatePlaylistWithTracks = { name, trackIds -> model.createPlaylistWithTracks(name, trackIds) },
                         onRenamePlaylist = { playlistId, name -> model.renamePlaylist(playlistId, name) },
                         onDeletePlaylist = { playlistId -> model.deletePlaylist(playlistId) },
                         onAddTrackToPlaylist = { playlistId, trackId -> model.addTrackToPlaylist(playlistId, trackId) },
+                        onAddTracksToPlaylist = { playlistId, trackIds -> model.addTracksToPlaylist(playlistId, trackIds) },
                         onRemoveTrackFromPlaylist = { playlistId, trackId -> model.removeTrackFromPlaylist(playlistId, trackId) },
+                        onReorderPlaylistTracks = { playlistId, orderedIds -> model.reorderPlaylistTracks(playlistId, orderedIds) },
                     ),
                     onRename = { id, title, done -> model.rename(id, title, done) },
                     onUndo = { model.undoRename() },
@@ -150,6 +157,7 @@ class MainActivity : ComponentActivity() {
                             } }
                         } },
                         onDelete = { track, done -> deleteTrack(track, done) },
+                        onDeleteBatch = { selectedTracks, done -> deleteTracks(selectedTracks, done) },
                     ),
                 )
             }
@@ -242,7 +250,7 @@ class MainActivity : ComponentActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun playTrack(track: AudioTrack, tracks: List<AudioTrack>) {
+    private fun playTrack(track: AudioTrack, tracks: List<AudioTrack>, autoPlay: Boolean = true) {
         model.cancelPreview()
         val player = controller ?: error("Pemutar masih menghubungkan. Coba lagi sebentar.")
         check(player.isConnected) { "Pemutar terputus. Tutup dan buka aplikasi untuk menghubungkan lagi." }
@@ -252,8 +260,16 @@ class MainActivity : ComponentActivity() {
             MediaItem.Builder().setMediaId(item.id.toString()).setUri(Uri.parse(item.uri))
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(UiPresentation.title(item.displayName)).build()).build()
         }
-        player.setMediaItems(queue, playable.indexOfFirst { it.id == track.id }.coerceAtLeast(0), 0)
-        player.prepare(); player.play()
+        val targetIndex = playable.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+        if (autoPlay) {
+            player.setMediaItems(queue, targetIndex, 0)
+            player.prepare(); player.play()
+        } else {
+            player.pause()
+            player.setMediaItems(queue, targetIndex, 0)
+            player.prepare()
+            model.message("Cue Standby 00:00: ${UiPresentation.title(track.displayName)}")
+        }
     }
 
     private fun withNotificationPermission(action: () -> Unit) {
@@ -265,6 +281,50 @@ class MainActivity : ComponentActivity() {
             pendingPermissionAction = action
             notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else action()
+    }
+
+    private fun deleteTracks(tracksToDelete: List<AudioTrack>, done: () -> Unit) {
+        val distinct = tracksToDelete.distinctBy { it.id }
+        if (distinct.isEmpty()) return
+        if (!model.canStartOnlineOperation()) { model.message("Tunggu proses yang sedang berjalan."); return }
+        val player = controller
+        if (player == null || !player.isConnected) { model.message("Player belum terhubung. Coba lagi."); return }
+        val targetIds = distinct.map { it.id.toString() }.toSet()
+        val anyQueued = (0 until player.mediaItemCount).any { player.getMediaItemAt(it).mediaId in targetIds }
+        if (anyQueued && !player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) {
+            model.message("Queue player belum dapat diperbarui."); return
+        }
+        if (player.currentMediaItem?.mediaId in targetIds) {
+            if (!player.isCommandAvailable(Player.COMMAND_STOP) || !player.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) {
+                model.message("Hentikan audio sebelum Delete."); return
+            }
+            player.pause(); player.stop()
+        }
+        forgetDeletedSequence(player, distinct.map { it.id.toString() }, 0) {
+            model.deleteBatch(distinct.map { it.id }, done)
+        }
+    }
+
+    private fun forgetDeletedSequence(
+        player: MediaController,
+        ids: List<String>,
+        index: Int,
+        onReady: () -> Unit,
+    ) {
+        if (index >= ids.size) {
+            onReady()
+            return
+        }
+        val future = player.sendCustomCommand(PreviewProtocol.forget, Bundle().apply {
+            putString(PreviewProtocol.ID, ids[index])
+        })
+        future.addListener({
+            if (runCatching { future.get().resultCode }.getOrNull() == androidx.media3.session.SessionResult.RESULT_SUCCESS) {
+                forgetDeletedSequence(player, ids, index + 1, onReady)
+            } else {
+                model.message("Queue player belum dapat diperbarui. Coba Delete lagi.")
+            }
+        }, ContextCompat.getMainExecutor(this))
     }
 
     override fun onDestroy() {

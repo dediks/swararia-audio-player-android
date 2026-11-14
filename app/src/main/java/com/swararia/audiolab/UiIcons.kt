@@ -198,6 +198,20 @@ internal object UiIcons {
         moveTo(18.4f, 5.6f); lineTo(16.6f, 7.4f)
         moveTo(7.4f, 16.6f); lineTo(5.6f, 18.4f)
     }
+    val Reorder = outline("Reorder") {
+        moveTo(8f, 5f); lineTo(8f, 19f)
+        moveTo(5f, 8f); lineTo(8f, 5f); lineTo(11f, 8f)
+        moveTo(16f, 19f); lineTo(16f, 5f)
+        moveTo(13f, 16f); lineTo(16f, 19f); lineTo(19f, 16f)
+    }
+    val ArrowUp = outline("ArrowUp") {
+        moveTo(12f, 5f); lineTo(12f, 19f)
+        moveTo(6f, 11f); lineTo(12f, 5f); lineTo(18f, 11f)
+    }
+    val ArrowDown = outline("ArrowDown") {
+        moveTo(12f, 5f); lineTo(12f, 19f)
+        moveTo(6f, 13f); lineTo(12f, 19f); lineTo(18f, 13f)
+    }
 
     private fun outline(name: String, draw: PathBuilder.() -> Unit) =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {

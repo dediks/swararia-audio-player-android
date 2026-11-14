@@ -28,6 +28,7 @@ fun SwarariaUi(
     onCancel: () -> Unit,
     onPlay: (AudioTrack) -> Unit,
     onPlayQueue: (AudioTrack, List<AudioTrack>) -> Unit = { track, _ -> onPlay(track) },
+    onCueQueue: (AudioTrack, List<AudioTrack>) -> Unit = { _, _ -> },
     playlistActions: PlaylistUiActions = PlaylistUiActions(),
     onRename: (Long, String, () -> Unit) -> Unit,
     onUndo: () -> Unit,
@@ -45,6 +46,8 @@ fun SwarariaUi(
     var history by rememberSaveable { mutableStateOf(false) }
     var editing by remember { mutableStateOf<AudioTrack?>(null) }
     var deleting by remember { mutableStateOf<AudioTrack?>(null) }
+    var deletingBatch by remember { mutableStateOf<List<AudioTrack>?>(null) }
+    var pendingQueueSwitch by remember { mutableStateOf<PendingQueueSwitch?>(null) }
     val pages = rememberSaveableStateHolder()
     val playback = rememberSwarariaPlayback(controller)
     val current = tracks.firstOrNull { it.id.toString() == playback.mediaId }
@@ -55,15 +58,29 @@ fun SwarariaUi(
         fullPlayer = false
         destination = target
     }
-    val playQueuedTrack: (AudioTrack, List<AudioTrack>?) -> Unit = { track, queue ->
+    val playQueuedTrack: (AudioTrack, List<AudioTrack>?, Boolean) -> Unit = { track, queue, cueOnly ->
         if (playback.connected) {
-            searchActions.stopPreview()
-            if (track.id.toString() == playback.mediaId) toggleSwarariaPlayback(controller)
-            else if (queue != null) onPlayQueue(track, queue)
-            else onPlay(track)
+            if (!cueOnly && queue == null && track.id.toString() == playback.mediaId) {
+                searchActions.stopPreview()
+                toggleSwarariaPlayback(controller)
+            } else if (!cueOnly && queue != null && track.id.toString() == playback.mediaId && !playback.wantsPlay) {
+                searchActions.stopPreview()
+                toggleSwarariaPlayback(controller)
+            } else if (playback.wantsPlay) {
+                pendingQueueSwitch = PendingQueueSwitch(
+                    targetTitle = UiPresentation.title(track.displayName),
+                    track = track,
+                    queue = queue.orEmpty(),
+                )
+            } else {
+                searchActions.stopPreview()
+                if (cueOnly) onCueQueue(track, queue.orEmpty())
+                else if (queue != null) onPlayQueue(track, queue)
+                else onPlay(track)
+            }
         }
     }
-    val playTrack: (AudioTrack) -> Unit = { track -> playQueuedTrack(track, null) }
+    val playTrack: (AudioTrack) -> Unit = { track -> playQueuedTrack(track, null, false) }
     LaunchedEffect(previewActive) { if (previewActive) fullPlayer = false }
     BackHandler(enabled = fullPlayer || destination != 0 || previewActive) {
         if (destination != 3) searchActions.stopPreview()
@@ -118,12 +135,42 @@ fun SwarariaUi(
             onRename = { editing = it }, onSettings = { settings = true },
         ) else pages.SaveableStateProvider(destination) {
             when (destination) {
-                0 -> LibraryPage(tracks = tracks, playlists = playlists, currentId = playback.mediaId, connected = playback.connected,
-                    ingest = ingest, search = search, organizerBusy = organizerBusy || upgrade.operationBusy,
-                    modifier = contentModifier, onAdd = { navigate(1) }, onPlay = playTrack,
-                    onPlayQueue = playQueuedTrack, playlistActions = playlistActions,
-                    onRename = { editing = it }, onHistory = { history = true }, onSettings = { settings = true },
-                    onDelete = { deleting = it }, onImport = { if (!onlineBusy) onImport() })
+                0 -> LibraryPage(
+                    tracks = tracks,
+                    playlists = playlists,
+                    currentId = playback.mediaId,
+                    wantsPlay = playback.wantsPlay,
+                    connected = playback.connected,
+                    ingest = ingest,
+                    search = search,
+                    organizerBusy = organizerBusy || upgrade.operationBusy,
+                    modifier = contentModifier,
+                    onAdd = { navigate(1) },
+                    onPlay = playTrack,
+                    onPlayQueue = { track, queue -> playQueuedTrack(track, queue, false) },
+                    onCueQueue = { track, queue -> playQueuedTrack(track, queue, true) },
+                    onGuardPlayOrCue = { showTitle, track, queue, cueOnly ->
+                        if (playback.connected) {
+                            if (playback.wantsPlay) {
+                                pendingQueueSwitch = PendingQueueSwitch(
+                                    targetTitle = showTitle,
+                                    track = track,
+                                    queue = queue,
+                                )
+                            } else {
+                                searchActions.stopPreview()
+                                if (cueOnly) onCueQueue(track, queue) else onPlayQueue(track, queue)
+                            }
+                        }
+                    },
+                    playlistActions = playlistActions,
+                    onRename = { editing = it },
+                    onHistory = { history = true },
+                    onSettings = { settings = true },
+                    onDelete = { deleting = it },
+                    onDeleteBatch = { selected -> deletingBatch = selected },
+                    onImport = { if (!onlineBusy) onImport() },
+                )
                 1 -> AddAudioScreen(ingest = ingest, search = search, controller = controller, actions = searchActions,
                     modifier = contentModifier, upgrade = upgrade,
                     onDownload = { url, authorized -> if (!onlineBusy && authorized) { searchActions.stopPreview(); onDownload(url, true) } },
@@ -164,11 +211,48 @@ fun SwarariaUi(
     deleting?.let { track -> key(track.id) {
         DeleteAudioDialog(track, organizerBusy || upgrade.operationBusy, { deleting = null }, upgrade.onDelete)
     } }
+    deletingBatch?.let { batch ->
+        DeleteBatchAudioDialog(
+            tracks = batch,
+            busy = organizerBusy || upgrade.operationBusy,
+            onDismiss = { deletingBatch = null },
+            onDeleteBatch = upgrade.onDeleteBatch,
+        )
+    }
+    pendingQueueSwitch?.let { pending ->
+        val activeTitle = current?.let { UiPresentation.title(it.displayName) }
+            ?: playback.title?.takeIf { it.isNotBlank() }?.let(UiPresentation::title)
+            ?: "Audio aktif"
+        LocalTrackSwitchGuardDialog(
+            targetTitle = pending.targetTitle,
+            activeTitle = activeTitle,
+            cueButtonLabel = "Load Cue (00:00 · Standby)",
+            detailText = "\"$activeTitle\" sedang live. Memuat \"${pending.targetTitle}\" akan mengganti antrean aktif:",
+            onCueOnly = {
+                pendingQueueSwitch = null
+                searchActions.stopPreview()
+                onCueQueue(pending.track, pending.queue)
+            },
+            onCutAndPlay = {
+                pendingQueueSwitch = null
+                searchActions.stopPreview()
+                if (pending.queue.isNotEmpty()) onPlayQueue(pending.track, pending.queue)
+                else onPlay(pending.track)
+            },
+            onDismiss = { pendingQueueSwitch = null },
+        )
+    }
     if (history) RenameHistoryDialog(lastRename, organizerBusy, { history = false }, onUndo)
     if (settings) EngineSettingsDialog(ingest, search.busy || searchActions.preview.loading || upgrade.operationBusy,
         onDismiss = { settings = false }, onUpdate = { if (!onlineBusy) onUpdate() },
         onCancel = { if (ingest.busy && ingest.cancelable) onCancel() })
 }
+
+private data class PendingQueueSwitch(
+    val targetTitle: String,
+    val track: AudioTrack,
+    val queue: List<AudioTrack>,
+)
 
 @Composable
 private fun navigationColors() = NavigationBarItemDefaults.colors(

@@ -8,15 +8,19 @@ data class UpgradeUiActions(
     val onCancelBatch: () -> Unit,
     val onRetryFailed: (String) -> Unit,
     val onDelete: (AudioTrack, () -> Unit) -> Unit,
+    val onDeleteBatch: (List<AudioTrack>, () -> Unit) -> Unit = { _, _ -> },
 )
 
 /** Playlist actions supplied by the ViewModel owner; presentation never opens storage. */
 data class PlaylistUiActions(
     val onCreatePlaylist: (String, Long?) -> Unit = { _, _ -> },
+    val onCreatePlaylistWithTracks: (String, List<Long>) -> Unit = { _, _ -> },
     val onRenamePlaylist: (Long, String) -> Unit = { _, _ -> },
     val onDeletePlaylist: (Long) -> Unit = {},
     val onAddTrackToPlaylist: (Long, Long) -> Unit = { _, _ -> },
+    val onAddTracksToPlaylist: (Long, List<Long>) -> Unit = { _, _ -> },
     val onRemoveTrackFromPlaylist: (Long, Long) -> Unit = { _, _ -> },
+    val onReorderPlaylistTracks: (Long, List<Long>) -> Unit = { _, _ -> },
 )
 
 /** Server mode actions supplied by the owner; presentation never handles keys, sockets, or DB. */

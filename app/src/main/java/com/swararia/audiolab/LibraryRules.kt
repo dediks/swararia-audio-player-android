@@ -54,4 +54,13 @@ object LibraryRules {
         val ext = displayName.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
         return ext.takeIf { it.isNotEmpty() }?.uppercase(java.util.Locale.ROOT) ?: "AUDIO"
     }
+
+    fun movePlaylistItem(orderedIds: List<Long>, index: Int, delta: Int): List<Long> {
+        val targetIndex = index + delta
+        if (delta == 0 || index !in orderedIds.indices || targetIndex !in orderedIds.indices) return orderedIds
+        val mutable = orderedIds.toMutableList()
+        val moved = mutable.removeAt(index)
+        mutable.add(targetIndex, moved)
+        return mutable
+    }
 }
