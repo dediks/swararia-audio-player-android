@@ -1129,7 +1129,7 @@ private fun ExpandedFohTransportBody(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                DeckActionButton(
+                FohDeckButton(
                     label = "Prev",
                     icon = UiIcons.Previous,
                     enabled = supportsPrevNext && state.canStepTrack && "prev" in state.commands,
@@ -1138,7 +1138,7 @@ private fun ExpandedFohTransportBody(
                     onClick = { onCommand("prev") },
                     modifier = Modifier.weight(1f),
                 )
-                DeckActionButton(
+                FohDeckButton(
                     label = if (showPause) "Pause" else "Play",
                     icon = if (showPause) UiIcons.Pause else UiIcons.Play,
                     enabled = playEnabled,
@@ -1147,7 +1147,7 @@ private fun ExpandedFohTransportBody(
                     onClick = onTogglePlayPause,
                     modifier = Modifier.weight(1f),
                 )
-                DeckActionButton(
+                FohDeckButton(
                     label = "Stop",
                     icon = UiIcons.Stop,
                     enabled = stopEnabled,
@@ -1156,7 +1156,7 @@ private fun ExpandedFohTransportBody(
                     onClick = onStop,
                     modifier = Modifier.weight(1f),
                 )
-                DeckActionButton(
+                FohDeckButton(
                     label = "Next",
                     icon = UiIcons.Next,
                     enabled = supportsPrevNext && state.canStepTrack && "next" in state.commands,
@@ -1511,28 +1511,3 @@ internal fun SessionInfoDialog(
     )
 }
 
-@Composable
-private fun DeckActionButton(
-    label: String,
-    icon: ImageVector,
-    enabled: Boolean,
-    filled: Boolean,
-    outlined: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val content: @Composable RowScope.() -> Unit = {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
-        }
-    }
-    val shape = RoundedCornerShape(14.dp)
-    val padding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
-    val sizedModifier = modifier.heightIn(min = 52.dp)
-    when {
-        filled -> Button(onClick = onClick, enabled = enabled, shape = shape, contentPadding = padding, modifier = sizedModifier, content = content)
-        outlined -> OutlinedButton(onClick = onClick, enabled = enabled, shape = shape, contentPadding = padding, modifier = sizedModifier, content = content)
-        else -> FilledTonalButton(onClick = onClick, enabled = enabled, shape = shape, contentPadding = padding, modifier = sizedModifier, content = content)
-    }
-}

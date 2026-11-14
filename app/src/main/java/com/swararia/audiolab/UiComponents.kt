@@ -1,5 +1,7 @@
 package com.swararia.audiolab
 
+import androidx.compose.foundation.layout.heightIn
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -125,5 +127,52 @@ internal fun EmptyMessage(title: String, description: String, icon: ImageVector,
         Text(description, style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         action?.invoke()
+    }
+}
+
+@Composable
+internal fun FohDeckButton(
+    label: String,
+    icon: ImageVector,
+    enabled: Boolean,
+    filled: Boolean,
+    outlined: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+        }
+    }
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp)
+    val padding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+    val sizedModifier = modifier.heightIn(min = 52.dp)
+    when {
+        filled -> androidx.compose.material3.Button(
+            onClick = onClick,
+            enabled = enabled,
+            shape = shape,
+            contentPadding = padding,
+            modifier = sizedModifier,
+            content = content,
+        )
+        outlined -> androidx.compose.material3.OutlinedButton(
+            onClick = onClick,
+            enabled = enabled,
+            shape = shape,
+            contentPadding = padding,
+            modifier = sizedModifier,
+            content = content,
+        )
+        else -> androidx.compose.material3.FilledTonalButton(
+            onClick = onClick,
+            enabled = enabled,
+            shape = shape,
+            contentPadding = padding,
+            modifier = sizedModifier,
+            content = content,
+        )
     }
 }

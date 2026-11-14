@@ -164,6 +164,40 @@ internal object UiIcons {
         moveTo(8f, 3f); lineTo(16f, 3f); lineTo(17f, 4f); lineTo(17f, 20f); lineTo(16f, 21f); lineTo(8f, 21f); lineTo(7f, 20f); lineTo(7f, 4f); close()
         moveTo(11f, 18f); lineTo(13f, 18f)
     }
+    val CueStart = outline("CueStart") {
+        moveTo(6f, 6f); lineTo(6f, 18f)
+        moveTo(10f, 6f); lineTo(19f, 12f); lineTo(10f, 18f); close()
+    }
+    val Plug = outline("Plug") {
+        moveTo(10.5f, 4f); lineTo(10.5f, 8f)
+        moveTo(13.5f, 4f); lineTo(13.5f, 8f)
+        moveTo(8.5f, 8f); lineTo(15.5f, 8f); lineTo(15.5f, 13f); lineTo(12f, 16.5f); lineTo(8.5f, 13f); close()
+        moveTo(12f, 16.5f); lineTo(12f, 20.5f)
+    }
+    val Bluetooth = outline("Bluetooth") {
+        moveTo(7f, 7f); lineTo(17f, 17f); lineTo(12f, 21f); lineTo(12f, 3f); lineTo(17f, 7f); lineTo(7f, 17f)
+    }
+    val Warning = outline("Warning") {
+        moveTo(12f, 3f); lineTo(21f, 19f); lineTo(3f, 19f); close()
+        moveTo(12f, 9.5f); lineTo(12f, 14f)
+        moveTo(12f, 16.5f); lineTo(12f, 17f)
+    }
+    val Shield = outline("Shield") {
+        moveTo(12f, 3f); lineTo(19f, 6f); lineTo(19f, 12f); lineTo(12f, 20.5f); lineTo(5f, 12f); lineTo(5f, 6f); close()
+        moveTo(9.5f, 11.5f); lineTo(11.3f, 13.5f); lineTo(15f, 9.5f)
+    }
+    val KeepAwake = outline("KeepAwake") {
+        moveTo(15.5f, 12f); arcTo(3.5f, 3.5f, 0f, true, true, 8.5f, 12f)
+        arcTo(3.5f, 3.5f, 0f, true, true, 15.5f, 12f)
+        moveTo(12f, 3f); lineTo(12f, 5.5f)
+        moveTo(12f, 18.5f); lineTo(12f, 21f)
+        moveTo(3f, 12f); lineTo(5.5f, 12f)
+        moveTo(18.5f, 12f); lineTo(21f, 12f)
+        moveTo(5.6f, 5.6f); lineTo(7.4f, 7.4f)
+        moveTo(16.6f, 16.6f); lineTo(18.4f, 18.4f)
+        moveTo(18.4f, 5.6f); lineTo(16.6f, 7.4f)
+        moveTo(7.4f, 16.6f); lineTo(5.6f, 18.4f)
+    }
 
     private fun outline(name: String, draw: PathBuilder.() -> Unit) =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {

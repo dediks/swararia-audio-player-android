@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -394,132 +396,190 @@ internal fun FocusedPlayer(
     onRename: (AudioTrack) -> Unit,
     onSettings: () -> Unit,
 ) {
-    var queueOpen by rememberSaveable { mutableStateOf(false) }
-    var menu by remember { mutableStateOf(false) }
+    var viewMode by rememberSaveable { mutableStateOf(LocalPlayerViewMode.CUE_LIST) }
+    var deckCollapsed by rememberSaveable { mutableStateOf(false) }
+    var keepScreenOn by rememberSaveable { mutableStateOf(true) }
+    var guardEnabled by rememberSaveable { mutableStateOf(true) }
+    var pendingGuardEntry by remember { mutableStateOf<SessionQueueItem?>(null) }
+    var routeDialogOpen by remember { mutableStateOf(false) }
     var seekPosition by remember(playback.mediaId, playback.currentIndex) { mutableStateOf<Float?>(null) }
-    BoxWithConstraints(modifier) {
-        val coverSize = minOf(maxWidth - 64.dp, maxHeight * .39f, 320.dp).coerceAtLeast(80.dp)
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                GlyphButton(UiIcons.Back, "Kembali", onBack)
-                Text("Now playing", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                BrandLogo(32.dp)
-                Box {
-                    GlyphButton(UiIcons.More, "Menu pemutar", { menu = true })
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Ubah nama audio") }, leadingIcon = { Icon(UiIcons.Rename, null) },
-                            enabled = current != null, onClick = { menu = false; current?.let(onRename) })
-                        DropdownMenuItem(text = { Text("Pengaturan & tentang") }, leadingIcon = { Icon(UiIcons.Settings, null) },
-                            onClick = { menu = false; onSettings() })
-                    }
-                }
-            }
-            Text("AUDIO LOKAL", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            TrackArtwork(current?.artworkKey,
-                Modifier.size(coverSize).clip(RoundedCornerShape(24.dp)))
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(playbackTitle(current, playback), style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.SemiBold, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                Text(current?.let { "${it.displayName.substringAfterLast('.', "Audio").uppercase()} · Disimpan di HP" }
-                    ?: playbackStatus(playback), style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Column(Modifier.fillMaxWidth()) {
-                val duration = playback.durationMs ?: 1L
-                val displayed = if (playback.durationMs == null) 0f else (seekPosition ?: playback.positionMs.toFloat()).coerceIn(0f, duration.toFloat())
-                Slider(value = displayed, onValueChange = { seekPosition = it },
-                    valueRange = 0f..duration.toFloat(), enabled = playback.connected && playback.canSeek && playback.durationMs != null,
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Posisi pemutaran audio" },
-                    onValueChangeFinished = {
-                        val requested = seekPosition
-                        seekPosition = null
-                        if (requested != null) connectedCommand(controller, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) { p ->
-                            if (p.currentMediaItem?.mediaId == playback.mediaId && p.currentMediaItemIndex == playback.currentIndex) p.seekTo(requested.toLong())
-                        }
-                    })
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(LibraryRules.durationLabel(seekPosition?.toLong() ?: playback.positionMs.takeIf { playback.connected && playback.mediaId != null }),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(LibraryRules.durationLabel(playback.durationMs), style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            if (playback.buffering) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (!playback.connected) Text("Pemutar belum terhubung. Kembali ke Pustaka untuk memilih audio setelah tersambung.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            playback.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                GlyphButton(UiIcons.Previous, "Audio sebelumnya", {
-                    connectedCommand(controller, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) { p -> if (p.hasPreviousMediaItem()) p.seekToPreviousMediaItem() }
-                }, modifier = Modifier.size(56.dp), enabled = playback.connected && playback.hasPrevious)
-                GlyphButton(if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
-                    if (playback.wantsPlay) "Jeda audio" else "Putar atau lanjutkan audio", { toggleSwarariaPlayback(controller) },
-                    modifier = Modifier.size(80.dp), enabled = playback.connected && playback.mediaId != null && playback.canPlay,
-                    filled = true, iconSize = 32.dp)
-                GlyphButton(UiIcons.Next, "Audio berikutnya", {
-                    connectedCommand(controller, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) { p -> if (p.hasNextMediaItem()) p.seekToNextMediaItem() }
-                }, modifier = Modifier.size(56.dp), enabled = playback.connected && playback.hasNext)
-            }
-            TextButton(onClick = { connectedCommand(controller, Player.COMMAND_STOP) { it.stop() } },
-                enabled = playback.connected && playback.mediaId != null && playback.canStop,
-                modifier = Modifier.heightIn(min = 48.dp)) {
-                Icon(UiIcons.Stop, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("Stop")
-            }
-            PlaybackModeBar(controller, Modifier.fillMaxWidth())
-            Surface(onClick = { queueOpen = true }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
-                modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(UiIcons.Queue, null, tint = MaterialTheme.colorScheme.primary)
-                    Text("Queue", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    Text("${playback.queue.size} audio", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Icon(UiIcons.ChevronRight, null, Modifier.size(18.dp))
-                }
-            }
-            Spacer(Modifier.height(4.dp))
+
+    val view = LocalView.current
+    DisposableEffect(view, keepScreenOn) {
+        val previous = view.keepScreenOn
+        view.keepScreenOn = keepScreenOn
+        onDispose { view.keepScreenOn = previous }
+    }
+
+    val outputRoute = rememberAudioOutputRoute()
+    val byId = remember(tracks) { tracks.associateBy { it.id.toString() } }
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(playback.currentIndex, viewMode, playback.queue.size) {
+        if (viewMode == LocalPlayerViewMode.CUE_LIST && playback.currentIndex in playback.queue.indices) {
+            listState.animateScrollToItem((playback.currentIndex - 1).coerceAtLeast(0))
         }
     }
-    if (queueOpen) QueueDialog(tracks, playback, controller, onDismiss = { queueOpen = false })
-}
 
-@Composable
-private fun QueueDialog(tracks: List<AudioTrack>, playback: SessionPlayback, controller: MediaController?, onDismiss: () -> Unit) {
-    val byId = remember(tracks) { tracks.associateBy { it.id.toString() } }
-    AlertDialog(onDismissRequest = onDismiss, icon = { Icon(UiIcons.Queue, null) }, title = { Text("Queue · ${playback.queue.size} audio") },
-        text = {
-            if (playback.queue.isEmpty()) Text("Antrean sesi pemutar belum tersedia. Pilih audio dari Pustaka.")
-            else LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                items(playback.queue, key = { it.index }) { entry ->
-                    val track = byId[entry.mediaId]
-                    val title = track?.let { UiPresentation.title(it.displayName) }
-                        ?: entry.title?.takeIf { it.isNotBlank() }?.let { UiPresentation.title(it) } ?: "Audio tidak tersedia"
-                    val active = entry.index == playback.currentIndex
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                        .background(if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-                        .clickable(enabled = playback.connected && playback.canChooseQueue, onClickLabel = "Putar $title") {
-                            connectedCommand(controller, Player.COMMAND_SEEK_TO_MEDIA_ITEM) { p ->
-                                if (entry.index in 0 until p.mediaItemCount && p.getMediaItemAt(entry.index).mediaId == entry.mediaId) {
-                                    if (p.currentMediaItemIndex == entry.index) toggleSwarariaPlayback(p)
-                                    else {
-                                        p.seekTo(entry.index, C.TIME_UNSET)
-                                        if (p.playbackState == Player.STATE_IDLE && p.isCommandAvailable(Player.COMMAND_PREPARE)) p.prepare()
-                                        if (p.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) p.play()
-                                    }
-                                }
-                            }
-                        }.semantics { selected = active }.padding(horizontal = 10.dp, vertical = 12.dp).heightIn(min = 48.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("${entry.index + 1}", style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.widthIn(min = 20.dp))
-                        Text(title, style = MaterialTheme.typography.bodyMedium,
-                            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f), maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        if (active) Icon(UiIcons.Check, "Audio saat ini", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+    val activeTitle = playbackTitle(current, playback)
+
+    PlaybackModeBar(controller, modifier.fillMaxSize()) { controlUi ->
+        val activePosMs = seekPosition?.toLong() ?: playback.positionMs
+        val countdown = LocalFohRules.countdownState(
+            positionMs = activePosMs,
+            durationMs = playback.durationMs,
+            isPlaying = playback.playing,
+        )
+
+        Column(Modifier.fillMaxSize()) {
+            LocalFohHeaderBar(
+                route = outputRoute,
+                keepScreenOn = keepScreenOn,
+                guardEnabled = guardEnabled,
+                hasCurrentTrack = current != null,
+                onMinimize = onBack,
+                onToggleKeepScreenOn = { keepScreenOn = !keepScreenOn },
+                onToggleGuard = { guardEnabled = !guardEnabled },
+                onRename = { current?.let(onRename) },
+                onSettings = onSettings,
+                onRouteClick = { routeDialogOpen = true },
+            )
+
+            LocalFohTrackSummaryCard(
+                current = current,
+                title = activeTitle,
+                playback = playback,
+                controlUi = controlUi,
+                seekPosition = seekPosition,
+                onSeekChange = { seekPosition = it },
+                onSeekCommit = {
+                    val requested = seekPosition
+                    seekPosition = null
+                    if (requested != null) connectedCommand(controller, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) { p ->
+                        if (p.currentMediaItem?.mediaId == playback.mediaId && p.currentMediaItemIndex == playback.currentIndex) p.seekTo(requested.toLong())
                     }
+                },
+            )
+
+            LocalFohViewModeHeader(
+                queueCount = playback.queue.size,
+                currentIndex = playback.currentIndex,
+                viewMode = viewMode,
+                onSelectViewMode = { viewMode = it },
+            )
+
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (viewMode == LocalPlayerViewMode.CUE_LIST) {
+                    LocalFohCueList(
+                        queue = playback.queue,
+                        tracksById = byId,
+                        currentIndex = playback.currentIndex,
+                        wantsPlay = playback.wantsPlay,
+                        enabled = playback.connected && playback.canChooseQueue,
+                        listState = listState,
+                        onSelectEntry = { entry, cueOnly ->
+                            if (entry.index == playback.currentIndex) {
+                                if (cueOnly) cueCurrentTrackToStart(controller, playback)
+                                else applyQueueEntry(controller, entry, cueOnly = false)
+                            } else if (guardEnabled && playback.wantsPlay) {
+                                pendingGuardEntry = entry
+                            } else {
+                                applyQueueEntry(controller, entry, cueOnly = cueOnly)
+                            }
+                        },
+                    )
+                } else {
+                    LocalFohCoverView(
+                        current = current,
+                        title = activeTitle,
+                        playback = playback,
+                    )
                 }
             }
-        }, confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } })
+
+            LocalFohBottomDeck(
+                nextUpLabel = LocalFohRules.nextUpLabel(playback, byId, controlUi.mode),
+                keepScreenOn = keepScreenOn,
+                countdown = countdown,
+                playback = playback,
+                controlUi = controlUi,
+                collapsed = deckCollapsed,
+                onToggleCollapsed = { deckCollapsed = !deckCollapsed },
+                onPrevious = {
+                    connectedCommand(controller, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) { p ->
+                        if (p.hasPreviousMediaItem()) p.seekToPreviousMediaItem()
+                    }
+                },
+                onPlayPause = { toggleSwarariaPlayback(controller) },
+                onStop = { connectedCommand(controller, Player.COMMAND_STOP) { it.stop() } },
+                onNext = {
+                    connectedCommand(controller, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) { p ->
+                        if (p.hasNextMediaItem()) p.seekToNextMediaItem()
+                    }
+                },
+                onCueStart = { cueCurrentTrackToStart(controller, playback) },
+            )
+        }
+    }
+
+    pendingGuardEntry?.let { entry ->
+        val targetTrack = byId[entry.mediaId]
+        val targetTitle = targetTrack?.let { UiPresentation.title(it.displayName) }
+            ?: entry.title?.takeIf { it.isNotBlank() }?.let { UiPresentation.title(it) }
+            ?: "Audio terpilih"
+        LocalTrackSwitchGuardDialog(
+            targetTitle = targetTitle,
+            activeTitle = activeTitle,
+            onCueOnly = {
+                pendingGuardEntry = null
+                applyQueueEntry(controller, entry, cueOnly = true)
+            },
+            onCutAndPlay = {
+                pendingGuardEntry = null
+                applyQueueEntry(controller, entry, cueOnly = false)
+            },
+            onDismiss = { pendingGuardEntry = null },
+        )
+    }
+
+    if (routeDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { routeDialogOpen = false },
+            title = { Text(outputRoute.label) },
+            text = { Text(outputRoute.detail) },
+            confirmButton = {
+                TextButton(onClick = { routeDialogOpen = false }) { Text("OK") }
+            },
+        )
+    }
+}
+
+private fun applyQueueEntry(controller: MediaController?, entry: SessionQueueItem, cueOnly: Boolean) {
+    connectedCommand(controller, Player.COMMAND_SEEK_TO_MEDIA_ITEM) { p ->
+        if (entry.index in 0 until p.mediaItemCount && p.getMediaItemAt(entry.index).mediaId == entry.mediaId) {
+            if (cueOnly) {
+                if (playbackRequestsPause(p) && p.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) p.pause()
+                p.seekTo(entry.index, 0L)
+                if (p.playbackState == Player.STATE_IDLE && p.isCommandAvailable(Player.COMMAND_PREPARE)) p.prepare()
+            } else if (p.currentMediaItemIndex == entry.index) {
+                toggleSwarariaPlayback(p)
+            } else {
+                p.seekTo(entry.index, C.TIME_UNSET)
+                if (p.playbackState == Player.STATE_IDLE && p.isCommandAvailable(Player.COMMAND_PREPARE)) p.prepare()
+                if (p.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) p.play()
+            }
+        }
+    }
+}
+
+private fun cueCurrentTrackToStart(controller: MediaController?, playback: SessionPlayback) {
+    val p = controller ?: return
+    if (!p.isConnected || playback.mediaId == null) return
+    if (p.currentMediaItem?.mediaId != playback.mediaId || p.currentMediaItemIndex != playback.currentIndex) return
+    if (playbackRequestsPause(p) && p.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) p.pause()
+    if (p.playbackState == Player.STATE_IDLE && p.isCommandAvailable(Player.COMMAND_PREPARE)) p.prepare()
+    when {
+        p.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) -> p.seekTo(0L)
+        p.isCommandAvailable(Player.COMMAND_SEEK_TO_DEFAULT_POSITION) -> p.seekToDefaultPosition()
+    }
 }

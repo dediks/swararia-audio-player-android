@@ -82,10 +82,28 @@ private fun MediaController?.readPlaybackControlState(): PlaybackControlState {
     )
 }
 
+data class LocalPlaybackControlUi(
+    val mode: PlaybackMode?,
+    val fadeBusy: Boolean,
+    val modeSupported: Boolean,
+    val fadeSupported: Boolean,
+    val playing: Boolean,
+    val connected: Boolean,
+    val pending: Boolean,
+    val statusText: String?,
+    val isError: Boolean,
+    val onSelectMode: (PlaybackMode) -> Unit,
+    val onFadeOut: () -> Unit,
+)
+
 /** Insert in the focused player. Does not own/release the controller or alter its queue. */
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 @Composable
-fun PlaybackModeBar(controller: MediaController?, modifier: Modifier = Modifier) {
+fun PlaybackModeBar(
+    controller: MediaController?,
+    modifier: Modifier = Modifier,
+    fohContent: (@Composable (LocalPlaybackControlUi) -> Unit)? = null,
+) {
     val owner = LocalLifecycleOwner.current
     var state by remember(controller) { mutableStateOf(PlaybackControlState()) }
     var expanded by remember(controller) { mutableStateOf(false) }
@@ -144,6 +162,35 @@ fun PlaybackModeBar(controller: MediaController?, modifier: Modifier = Modifier)
         }
     }
 
+    val status = error ?: when {
+        !state.connected -> "Playback disconnected"
+        !state.modeSupported -> "Playback modes unavailable"
+        state.busy -> "Fading out, then pausing"
+        else -> null
+    }
+    if (fohContent != null) {
+        Box(modifier = modifier) {
+            fohContent(
+                LocalPlaybackControlUi(
+                    mode = state.mode,
+                    fadeBusy = state.busy,
+                    modeSupported = state.modeSupported,
+                    fadeSupported = state.fadeSupported,
+                    playing = state.playing,
+                    connected = state.connected,
+                    pending = pending,
+                    statusText = status,
+                    isError = error != null,
+                    onSelectMode = { mode ->
+                        send(PlaybackCommands.setMode, Bundle().apply { putString(PlaybackCommands.EXTRA_MODE, mode.name) })
+                    },
+                    onFadeOut = { send(PlaybackCommands.fade, Bundle.EMPTY) },
+                )
+            )
+        }
+        return
+    }
+
     Column(modifier = modifier.fillMaxWidth()) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             Box {
@@ -181,12 +228,6 @@ fun PlaybackModeBar(controller: MediaController?, modifier: Modifier = Modifier)
                 Icon(UiIcons.Fade, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
                 Text(if (state.busy) "Fading…" else "Fade 3s")
             }
-        }
-        val status = error ?: when {
-            !state.connected -> "Playback disconnected"
-            !state.modeSupported -> "Playback modes unavailable"
-            state.busy -> "Fading out, then pausing"
-            else -> null
         }
         if (status != null) Text(
             status,

@@ -75,36 +75,38 @@ fun SwarariaUi(
         contentWindowInsets = WindowInsets.safeDrawing,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
-                if (destination == 3 && previewActive)
-                    Text("Pemutar HP • terpisah dari Desktop", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
-                // One slot: preview always replaces, never accompanies, local audio.
-                // On the Remote tab (destination == 3), local playback auto-collapses into the top banner pill so bottom decks never double-stack.
-                if (previewActive) SearchPreviewPlayer(searchActions.preview, controller,
-                    searchActions.stopPreview, searchActions.previewError,
-                    onRetry = { if (!onlineBusy) searchActions.preview.hit?.let(searchActions.previewSong) })
-                else if (playback.mediaId != null) {
-                    if (!fullPlayer && destination != 3) {
-                        MiniPlayer(
-                            current = current,
-                            playback = playback,
-                            controller = controller,
-                            collapsed = miniPlayerCollapsed,
-                            onToggleCollapse = { miniPlayerCollapsed = !miniPlayerCollapsed },
-                            onOpen = { fullPlayer = true },
-                        )
+            if (!fullPlayer || previewActive) {
+                Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
+                    if (destination == 3 && previewActive)
+                        Text("Pemutar HP • terpisah dari Desktop", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
+                    // One slot: preview always replaces, never accompanies, local audio.
+                    // On the Remote tab (destination == 3), local playback auto-collapses into the top banner pill so bottom decks never double-stack.
+                    if (previewActive) SearchPreviewPlayer(searchActions.preview, controller,
+                        searchActions.stopPreview, searchActions.previewError,
+                        onRetry = { if (!onlineBusy) searchActions.preview.hit?.let(searchActions.previewSong) })
+                    else if (playback.mediaId != null) {
+                        if (destination != 3) {
+                            MiniPlayer(
+                                current = current,
+                                playback = playback,
+                                controller = controller,
+                                collapsed = miniPlayerCollapsed,
+                                onToggleCollapse = { miniPlayerCollapsed = !miniPlayerCollapsed },
+                                onOpen = { fullPlayer = true },
+                            )
+                        }
                     }
-                }
-                NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp,
-                    windowInsets = WindowInsets.navigationBars.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)) {
-                    NavigationBarItem(selected = destination == 0, onClick = { navigate(0) },
-                        icon = { Icon(UiIcons.Library, null) }, label = { Text("Library") }, colors = navigationColors())
-                    NavigationBarItem(selected = destination == 1, onClick = { navigate(1) },
-                        icon = { Icon(UiIcons.Search, null) }, label = { Text("Search") }, colors = navigationColors())
-                    NavigationBarItem(selected = destination == 2, onClick = { navigate(2) },
-                        icon = { Icon(UiIcons.Download, null) }, label = { Text("Downloads") }, colors = navigationColors())
-                    NavigationBarItem(selected = destination == 3, onClick = { navigate(3) },
-                        icon = { Icon(UiIcons.Link, null) }, label = { Text("Remote") }, colors = navigationColors())
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp,
+                        windowInsets = WindowInsets.navigationBars.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)) {
+                        NavigationBarItem(selected = destination == 0, onClick = { navigate(0) },
+                            icon = { Icon(UiIcons.Library, null) }, label = { Text("Library") }, colors = navigationColors())
+                        NavigationBarItem(selected = destination == 1, onClick = { navigate(1) },
+                            icon = { Icon(UiIcons.Search, null) }, label = { Text("Search") }, colors = navigationColors())
+                        NavigationBarItem(selected = destination == 2, onClick = { navigate(2) },
+                            icon = { Icon(UiIcons.Download, null) }, label = { Text("Downloads") }, colors = navigationColors())
+                        NavigationBarItem(selected = destination == 3, onClick = { navigate(3) },
+                            icon = { Icon(UiIcons.Link, null) }, label = { Text("Remote") }, colors = navigationColors())
+                    }
                 }
             }
         },
