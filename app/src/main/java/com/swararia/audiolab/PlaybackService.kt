@@ -248,7 +248,11 @@ class PlaybackService : MediaSessionService() {
         setMediaNotificationProvider(androidx.media3.session.DefaultMediaNotificationProvider.Builder(this)
             .setNotificationId(2102).build())
         val began = System.nanoTime()
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15_000, 30_000, 200, 600)
+            .build()
         val player = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true).setWakeMode(C.WAKE_MODE_LOCAL).build()
         timing("playback_player_init_ms", began)
@@ -313,7 +317,7 @@ class PlaybackService : MediaSessionService() {
         // A public MediaItem prevents signed URLs appearing in controller timelines/notifications.
         // The URL and allowlisted headers live only in this ephemeral DataSource closure.
         val http = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(false)
-            .setConnectTimeoutMs(8000).setReadTimeoutMs(8000).setDefaultRequestProperties(media.headers)
+            .setConnectTimeoutMs(5000).setReadTimeoutMs(8000).setDefaultRequestProperties(media.headers)
         val source = ResolvingDataSource.Factory(http) { spec -> spec.withUri(Uri.parse(media.url)) }
         val item = MediaItem.Builder().setMediaId("preview:${media.videoId}").setUri("https://www.youtube.com/watch?v=${media.videoId}")
             .setMediaMetadata(MediaMetadata.Builder().setTitle(media.title).setArtist("Preview · maks. 120 detik").build())

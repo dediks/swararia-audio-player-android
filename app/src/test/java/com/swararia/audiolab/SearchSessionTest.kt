@@ -216,6 +216,52 @@ class SearchSessionTest {
         }
     }
 
+    @Test(timeout = 5000) fun switchSearchCachesTabsAndSupersedesInFlightSearchAfterCleanup() = runBlocking {
+        Fixture().use { f ->
+            val song = hit("aaaaaaaaaaa")
+            val playlist = hit("PLabcdefghijkl").copy(kind = SearchKind.PLAYLISTS, title = "Mix")
+            val cleanup = CompletableDeferred<Unit>()
+            var slowFirst = true
+            f.gateway.page = { req ->
+                if (slowFirst && req.kind == SearchKind.SONGS) {
+                    try { awaitCancellation() } finally { withContext(NonCancellable) { cleanup.await() } }
+                } else if (req.kind == SearchKind.PLAYLISTS) {
+                    SearchPage(listOf(playlist), 1, 0)
+                } else {
+                    SearchPage(listOf(song), 1, 0)
+                }
+            }
+            f.session.search("jazz", SearchProvider.YOUTUBE_MUSIC, SearchKind.SONGS)
+            assertTrue(f.session.search.value.busy)
+
+            // Switch immediately to Playlist while Lagu search is still pending cleanup.
+            f.session.switchSearch("jazz", SearchProvider.YOUTUBE_MUSIC, SearchKind.PLAYLISTS)
+            assertEquals(SearchKind.PLAYLISTS, f.session.search.value.kind)
+            assertTrue(f.session.search.value.busy)
+            assertEquals(1, f.gateway.calls.size) // Playlist waits for Lagu cleanup before native dispatch.
+
+            cleanup.complete(Unit); yield()
+            assertFalse(f.session.search.value.busy)
+            assertEquals(listOf(playlist), f.session.search.value.results)
+            assertEquals(2, f.gateway.calls.size)
+
+            // Load Lagu now, then switch back to Playlist -> Playlist must restore from RAM cache (0 calls).
+            slowFirst = false
+            f.session.switchSearch("jazz", SearchProvider.YOUTUBE_MUSIC, SearchKind.SONGS)
+            assertEquals(listOf(song), f.session.search.value.results)
+            assertEquals(3, f.gateway.calls.size)
+
+            f.session.switchSearch("jazz", SearchProvider.YOUTUBE_MUSIC, SearchKind.PLAYLISTS)
+            assertEquals(listOf(playlist), f.session.search.value.results)
+            assertEquals(3, f.gateway.calls.size)
+
+            // Ingest exclusion still guards switchSearch.
+            f.ingest = true
+            f.session.switchSearch("jazz", SearchProvider.YOUTUBE, SearchKind.SONGS)
+            assertEquals(3, f.gateway.calls.size)
+        }
+    }
+
     @Test(timeout = 5000) fun searchPublishesResultsAndRetainsMusicDefault() = runBlocking {
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
         try {

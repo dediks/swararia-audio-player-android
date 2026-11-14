@@ -57,4 +57,31 @@ class SearchUpgradeTest {
         assertThrows(IllegalArgumentException::class.java) { YoutubeSearchRules.arguments("test",SearchProvider.YOUTUBE,SearchKind.SONGS,50) }
         assertThrows(IllegalArgumentException::class.java) { YoutubeSearchRules.arguments("test",SearchProvider.YOUTUBE,SearchKind.SONGS,-1) }
     }
+
+    @Test fun playerResponseSelectsSafeDirectAudioAndReturnsNullOnCipherOrLive() {
+        val okJson = """{
+          "playabilityStatus": {"status": "OK"},
+          "videoDetails": {"videoId": "BaW_jenozKc", "isLiveContent": false},
+          "streamingData": {
+            "adaptiveFormats": [
+              {"itag": 137, "mimeType": "video/mp4; codecs=\"avc1\"", "bitrate": 2000000, "url": "https://rr1.googlevideo.com/videoplayback?v=1"},
+              {"itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 128000, "url": "https://rr1.googlevideo.com/videoplayback?a=140"},
+              {"itag": 251, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 132000, "url": "https://rr1.googlevideo.com/videoplayback?a=251"},
+              {"itag": 999, "mimeType": "audio/webm", "bitrate": 500000, "url": "https://evil.invalid/videoplayback"}
+            ]
+          }
+        }"""
+        val media = OnlinePreviewRules.parsePlayerResponse(okJson, "BaW_jenozKc", "Track", mapOf("User-Agent" to "UA", "Authorization" to "drop"))
+        assertNotNull(media)
+        assertEquals("https://rr1.googlevideo.com/videoplayback?a=251", media!!.url)
+        assertEquals("UA", media.headers["User-Agent"])
+        assertFalse(media.headers.containsKey("Authorization"))
+        assertEquals(media, OnlinePreviewRules.parse(OnlinePreviewRules.toJson(media), "BaW_jenozKc", "Track"))
+
+        val cipherOnly = """{"playabilityStatus":{"status":"OK"},"videoDetails":{"videoId":"BaW_jenozKc","isLiveContent":false},"streamingData":{"adaptiveFormats":[{"itag":251,"mimeType":"audio/webm","signatureCipher":"s=abc"}]}}"""
+        assertNull(OnlinePreviewRules.parsePlayerResponse(cipherOnly, "BaW_jenozKc", "Track"))
+
+        val live = """{"playabilityStatus":{"status":"OK"},"videoDetails":{"videoId":"BaW_jenozKc","isLiveContent":true},"streamingData":{"adaptiveFormats":[{"itag":251,"mimeType":"audio/webm","url":"https://rr1.googlevideo.com/videoplayback"}]}}"""
+        assertNull(OnlinePreviewRules.parsePlayerResponse(live, "BaW_jenozKc", "Track"))
+    }
 }

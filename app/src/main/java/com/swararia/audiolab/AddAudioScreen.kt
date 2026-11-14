@@ -34,6 +34,7 @@ import androidx.media3.session.MediaController
 data class SearchActions(
     val preview: PreviewState,
     val search: (String, SearchProvider, SearchKind, SearchSort) -> Unit,
+    val switchSearch: (String, SearchProvider, SearchKind, SearchSort) -> Unit = search,
     val sort: (SearchSort) -> Unit,
     val loadMore: () -> Unit,
     val retry: () -> Unit,
@@ -78,7 +79,8 @@ fun AddAudioScreen(
 
     val provider = SearchProvider.entries.firstOrNull { it.name == providerName } ?: SearchProvider.YOUTUBE_MUSIC
     val kind = SearchKind.entries.firstOrNull { it.name == kindName } ?: SearchKind.SONGS
-    val idle = !ingest.busy && !search.busy && !actions.preview.loading && !upgrade.operationBusy
+    val controlsEnabled = !ingest.busy && !upgrade.operationBusy
+    val idle = controlsEnabled && !search.busy && !actions.preview.loading
     val validQuery = remember(query) { runCatching { YoutubeSearchRules.validatedQuery(query) }.isSuccess }
     val detectedUrl = remember(query) { runCatching { DownloadQueueRules.validatedPublicSourceUrl(query) }.getOrNull() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -101,18 +103,45 @@ fun AddAudioScreen(
     }
 
     val leave = { actions.leavePlaylist() }
-    val executeSearch: (String, SearchProvider, SearchKind, SearchSort) -> Unit = { q, targetProvider, targetKind, targetSort ->
+    val executeSearch: (String, SearchProvider, SearchKind, SearchSort, Boolean) -> Unit = { q, targetProvider, targetKind, targetSort, preferSwitch ->
         val valid = runCatching { YoutubeSearchRules.validatedQuery(q) }.isSuccess
-        if (idle && valid) {
+        if (controlsEnabled && valid && (preferSwitch || idle)) {
             keyboard?.hide()
-            actions.stopPreview()
             selectionMode = false
             selectedIds = arrayListOf()
             recentQueries = ArrayList(UiPresentation.recordRecentQuery(recentQueries, q))
-            actions.search(q, targetProvider, targetKind, targetSort)
+            if (preferSwitch) {
+                actions.switchSearch(q, targetProvider, targetKind, targetSort)
+            } else {
+                actions.stopPreview()
+                actions.search(q, targetProvider, targetKind, targetSort)
+            }
         }
     }
-    val submit = { executeSearch(query, provider, kind, search.sort) }
+    val switchTabSearch: (SearchProvider, SearchKind) -> Unit = { nextProvider, nextKind ->
+        providerName = nextProvider.name
+        kindName = nextKind.name
+        val nextSort = if (nextKind == SearchKind.PLAYLISTS &&
+            (search.sort == SearchSort.DURATION_ASC || search.sort == SearchSort.DURATION_DESC)
+        ) SearchSort.RELEVANCE else search.sort
+        val activeQuery = query.takeIf { validQuery && detectedUrl == null }
+            ?: search.query.takeIf { search.hasSearched && detectedUrl == null }
+        val shouldSwitch = activeQuery != null && (
+            nextProvider != search.provider ||
+                nextKind != search.kind ||
+                !search.hasSearched ||
+                activeQuery.trim() != search.query.trim() ||
+                search.error != null ||
+                search.busy
+            )
+        if (shouldSwitch && activeQuery != null) {
+            if (query != activeQuery) query = activeQuery
+            executeSearch(activeQuery, nextProvider, nextKind, nextSort, true)
+        } else if (nextKind == SearchKind.PLAYLISTS && nextSort != search.sort) {
+            actions.sort(nextSort)
+        }
+    }
+    val submit = { executeSearch(query, provider, kind, search.sort, !idle) }
     val toggle: (SearchHit) -> Unit = { hit ->
         if (hit.kind == SearchKind.SONGS) selectedIds = ArrayList(selectedIds.toMutableList().apply {
             if (!remove(hit.videoId)) add(hit.videoId)
@@ -129,7 +158,7 @@ fun AddAudioScreen(
         selectedIds = arrayListOf()
         pending = null
     }
-    LaunchedEffect(search.playlistId, search.hasSearched) {
+    LaunchedEffect(search.playlistId, search.hasSearched, search.provider, search.kind) {
         if (search.playlistId == null && search.hasSearched) {
             providerName = search.provider.name
             kindName = search.kind.name
@@ -191,6 +220,7 @@ fun AddAudioScreen(
                         provider = provider,
                         kind = kind,
                         sort = search.sort,
+                        controlsEnabled = controlsEnabled,
                         idle = idle,
                         validQuery = validQuery,
                         detectedUrl = detectedUrl,
@@ -205,23 +235,11 @@ fun AddAudioScreen(
                         onSubmit = submit,
                         onSelectRecent = { term ->
                             query = term
-                            executeSearch(term, provider, kind, search.sort)
+                            executeSearch(term, provider, kind, search.sort, !idle)
                         },
                         onClearRecent = { recentQueries = arrayListOf() },
-                        onSelectProvider = { nextProvider ->
-                            providerName = nextProvider.name
-                            if (nextProvider != search.provider && validQuery && detectedUrl == null && idle) {
-                                executeSearch(query, nextProvider, kind, search.sort)
-                            }
-                        },
-                        onSelectKind = { nextKind ->
-                            kindName = nextKind.name
-                            val nextSort = if (nextKind == SearchKind.PLAYLISTS) SearchSort.RELEVANCE else search.sort
-                            if (nextKind == SearchKind.PLAYLISTS) actions.sort(SearchSort.RELEVANCE)
-                            if (nextKind != search.kind && validQuery && detectedUrl == null && idle) {
-                                executeSearch(query, provider, nextKind, nextSort)
-                            }
-                        },
+                        onSelectProvider = { nextProvider -> switchTabSearch(nextProvider, kind) },
+                        onSelectKind = { nextKind -> switchTabSearch(provider, nextKind) },
                         onSort = actions.sort,
                         onOpenDetectedUrl = { url -> openLinkModal(url) },
                     )
@@ -252,7 +270,11 @@ fun AddAudioScreen(
                     ) {
                         CircularProgressIndicatorCompact()
                         Text(
-                            text = if (search.loadingMore) "Memuat hasil berikutnya…" else "Mencari di ${search.provider.label}…",
+                            text = when {
+                                search.loadingMore -> "Memuat hasil berikutnya…"
+                                inPlaylist -> "Memuat isi playlist…"
+                                else -> "Mencari ${search.kind.label.lowercase()} di ${search.provider.label}…"
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f),
                         )
@@ -287,8 +309,11 @@ fun AddAudioScreen(
                         onOpenLink = { openLinkModal("") },
                         onOpenImport = onImport,
                         onSwitchProviderSearch = { alt ->
-                            providerName = alt.name
-                            if (validQuery && idle) executeSearch(query, alt, kind, search.sort)
+                            if (validQuery) {
+                                switchTabSearch(alt, kind)
+                            } else {
+                                providerName = alt.name
+                            }
                         },
                     )
                 }
@@ -299,12 +324,21 @@ fun AddAudioScreen(
                     hit.url in savedUrls -> HitLibraryStatus.SAVED
                     else -> HitLibraryStatus.NONE
                 }
+                val previewThisHit = actions.preview.hit?.videoId == hit.videoId &&
+                    actions.preview.error == null &&
+                    (actions.preview.loading || actions.preview.media != null || actions.preview.phase.isNotEmpty())
+                val previewLoading = previewThisHit && (
+                    actions.preview.loading ||
+                        actions.preview.canceling ||
+                        actions.preview.phase in setOf("resolving", "connecting", "buffering")
+                    )
                 CatalogResult(
                     hit = hit,
                     enabled = idle,
                     selectionMode = selectionMode,
                     selected = hit.videoId in selectedIds,
-                    previewActive = actions.preview.hit?.videoId == hit.videoId && (actions.preview.loading || actions.preview.media != null),
+                    previewActive = previewThisHit,
+                    previewLoading = previewLoading,
                     status = hitStatus,
                     onTap = {
                         if (selectionMode) toggle(hit)
@@ -313,7 +347,7 @@ fun AddAudioScreen(
                             playlistChannel = hit.channel
                             playlistThumbnail = hit.thumbnailUrl
                             actions.openPlaylist(hit)
-                        } else if (actions.preview.hit?.videoId == hit.videoId && (actions.preview.loading || actions.preview.media != null)) {
+                        } else if (previewThisHit) {
                             actions.stopPreview()
                         } else {
                             actions.previewSong(hit)
@@ -345,7 +379,13 @@ fun AddAudioScreen(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
                     shape = RoundedCornerShape(14.dp),
                 ) {
-                    Text("Tampilkan lebih banyak")
+                    if (search.loadingMore) {
+                        CircularProgressIndicatorCompact()
+                        Spacer(Modifier.width(8.dp))
+                        Text("Memuat…")
+                    } else {
+                        Text("Tampilkan lebih banyak")
+                    }
                 }
             }
         }
@@ -495,6 +535,7 @@ private fun SearchControlsPanel(
     provider: SearchProvider,
     kind: SearchKind,
     sort: SearchSort,
+    controlsEnabled: Boolean,
     idle: Boolean,
     validQuery: Boolean,
     detectedUrl: String?,
@@ -514,31 +555,18 @@ private fun SearchControlsPanel(
     onSort: (SearchSort) -> Unit,
     onOpenDetectedUrl: (String) -> Unit,
 ) {
-    val providerHint = if (provider == SearchProvider.YOUTUBE_MUSIC) {
-        "Cocok untuk lagu studio & audio bersih"
-    } else {
-        "Cocok untuk rekaman live, ceramah, atau video bebas"
-    }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            FohSegmentedBar(
-                options = SearchProvider.entries,
-                selected = provider,
-                label = { if (it == SearchProvider.YOUTUBE_MUSIC) "YT Music" else "YouTube" },
-                enabled = idle,
-                onSelect = onSelectProvider,
-            )
-            Text(
-                text = providerHint,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
-        }
+        FohSegmentedBar(
+            options = SearchProvider.entries,
+            selected = provider,
+            label = { if (it == SearchProvider.YOUTUBE_MUSIC) "YT Music" else "YouTube" },
+            enabled = controlsEnabled,
+            onSelect = onSelectProvider,
+        )
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
-            enabled = idle,
+            enabled = controlsEnabled,
             placeholder = {
                 Text(
                     "Cari lagu di ${if (provider == SearchProvider.YOUTUBE_MUSIC) "YT Music" else "YouTube"}…",
@@ -556,26 +584,45 @@ private fun SearchControlsPanel(
                 unfocusedBorderColor = FohTheme.colors.borderSubtle,
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
             ),
-            leadingIcon = { Icon(UiIcons.Search, null) },
+            leadingIcon = {
+                if (searchBusy) {
+                    CircularProgressIndicatorCompact()
+                } else {
+                    Icon(UiIcons.Search, null)
+                }
+            },
             trailingIcon = {
                 if (query.isNotEmpty()) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 6.dp)) {
-                        IconButton(onClick = onClearQuery, enabled = !searchBusy) {
+                        IconButton(onClick = onClearQuery, enabled = controlsEnabled && !searchBusy) {
                             Icon(UiIcons.Close, contentDescription = "Hapus kata kunci", modifier = Modifier.size(18.dp))
                         }
                         Surface(
                             onClick = onSubmit,
-                            enabled = idle && validQuery,
+                            enabled = controlsEnabled && validQuery,
                             shape = RoundedCornerShape(999.dp),
-                            color = if (idle && validQuery) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            color = if (controlsEnabled && validQuery) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
                         ) {
-                            Text(
-                                text = "Cari",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (idle && validQuery) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                            )
+                            if (searchBusy) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(15.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = "Cari",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (controlsEnabled && validQuery) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -601,7 +648,7 @@ private fun SearchControlsPanel(
                         Text("Tautan YouTube terdeteksi", style = MaterialTheme.typography.labelLarge, color = FohTheme.colors.btAccent)
                         Text("Ketuk untuk unduh langsung jadi audio", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Text("Unduh", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = FohTheme.colors.btAccent)
+                    Icon(UiIcons.Download, contentDescription = "Download link", tint = FohTheme.colors.btAccent, modifier = Modifier.size(20.dp))
                 }
             }
         } else {
@@ -615,7 +662,7 @@ private fun SearchControlsPanel(
                     recentQueries.forEach { term ->
                         Surface(
                             onClick = { onSelectRecent(term) },
-                            enabled = idle,
+                            enabled = controlsEnabled,
                             shape = RoundedCornerShape(999.dp),
                             color = FohTheme.colors.surfaceCard,
                             border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
@@ -645,7 +692,7 @@ private fun SearchControlsPanel(
                         FohFilterChip(
                             label = option.label,
                             selected = kind == option,
-                            enabled = idle,
+                            enabled = controlsEnabled,
                             onClick = { onSelectKind(option) },
                         )
                     }
@@ -797,7 +844,7 @@ private fun SearchEmptyState(
             onClick = onOpenImport,
         )
         Text(
-            "Tips: Setelah hasil muncul, ketuk satu lagu untuk dengar preview 30 detik, atau tekan Select untuk mengunduh banyak sekaligus.",
+            "Tips: Setelah hasil muncul, ketuk satu lagu untuk dengar preview, atau tekan Select untuk mengunduh banyak sekaligus.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
@@ -851,6 +898,7 @@ private fun CatalogResult(
     selectionMode: Boolean,
     selected: Boolean,
     previewActive: Boolean,
+    previewLoading: Boolean,
     status: HitLibraryStatus,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
@@ -879,18 +927,33 @@ private fun CatalogResult(
             Box(modifier = Modifier.size(48.dp)) {
                 YoutubeThumbnail(hit.thumbnailUrl, hit.title, Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)))
                 if (hit.kind == SearchKind.SONGS && !selectionMode) {
-                    Box(
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(2.dp).size(18.dp)
-                            .clip(CircleShape)
-                            .background(if (previewActive) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.65f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = if (previewActive) UiIcons.Stop else UiIcons.Play,
-                            contentDescription = if (previewActive) "Stop Preview" else "Preview ${hit.title}",
-                            tint = if (previewActive) MaterialTheme.colorScheme.onPrimary else Color.White,
-                            modifier = Modifier.size(11.dp),
-                        )
+                    if (previewLoading) {
+                        Box(
+                            modifier = Modifier.fillMaxSize()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.Black.copy(alpha = 0.52f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                strokeWidth = 2.2.dp,
+                                color = Color.White,
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(2.dp).size(18.dp)
+                                .clip(CircleShape)
+                                .background(if (previewActive) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.65f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = if (previewActive) UiIcons.Stop else UiIcons.Play,
+                                contentDescription = if (previewActive) "Stop Preview" else "Preview ${hit.title}",
+                                tint = if (previewActive) MaterialTheme.colorScheme.onPrimary else Color.White,
+                                modifier = Modifier.size(11.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -919,6 +982,7 @@ private fun CatalogResult(
                 )
                 if (previewActive || status != HitLibraryStatus.NONE) {
                     val badgeText = when {
+                        previewLoading -> "Memuat preview… · Ketuk untuk batal"
                         previewActive -> "PREVIEW · Ketuk untuk berhenti"
                         status == HitLibraryStatus.SAVED -> "Sudah di Library"
                         else -> "Sedang diantrekan"
@@ -947,12 +1011,22 @@ private fun CatalogResult(
                             color = FohTheme.colors.warnBg,
                             border = BorderStroke(1.dp, FohTheme.colors.warnBorder),
                         ) {
-                            Text(
-                                "Antrean",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = FohTheme.colors.warnAccent,
+                            Row(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            )
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(12.dp),
+                                    strokeWidth = 1.8.dp,
+                                    color = FohTheme.colors.warnAccent,
+                                )
+                                Text(
+                                    "Antrean",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = FohTheme.colors.warnAccent,
+                                )
+                            }
                         }
                     }
                     HitLibraryStatus.SAVED -> {
@@ -962,29 +1036,17 @@ private fun CatalogResult(
                         Surface(
                             onClick = onDownload,
                             enabled = enabled,
-                            shape = RoundedCornerShape(999.dp),
+                            shape = CircleShape,
                             color = FohTheme.colors.safeBg,
                             border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
-                            modifier = Modifier.heightIn(min = 38.dp),
+                            modifier = Modifier.size(40.dp),
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            ) {
+                            Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = UiIcons.Download,
                                     contentDescription = "Download ${hit.title}",
                                     tint = if (enabled) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                                    modifier = Modifier.size(15.dp),
-                                )
-                                Text(
-                                    text = "Unduh",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (enabled) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                                    maxLines = 1,
-                                    softWrap = false,
+                                    modifier = Modifier.size(19.dp),
                                 )
                             }
                         }

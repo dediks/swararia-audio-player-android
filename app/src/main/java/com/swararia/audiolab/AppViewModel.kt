@@ -33,6 +33,8 @@ class AppViewModel(
     fun canStartOnlineOperation() = session.canStartOnlineOperation()
     fun search(query: String, provider: SearchProvider, kind: SearchKind = SearchKind.SONGS,
         sort: SearchSort = SearchSort.RELEVANCE) = session.search(query, provider, kind, sort)
+    fun switchSearch(query: String, provider: SearchProvider, kind: SearchKind = SearchKind.SONGS,
+        sort: SearchSort = SearchSort.RELEVANCE) = session.switchSearch(query, provider, kind, sort)
     fun loadMore() = session.loadMore()
     fun retrySearch() = session.retrySearch()
     fun openPlaylist(hit: SearchHit) = session.openPlaylist(hit)

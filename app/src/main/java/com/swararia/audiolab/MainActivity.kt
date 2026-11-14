@@ -87,6 +87,9 @@ class MainActivity : ComponentActivity() {
                     searchActions = SearchActions(
                         preview = preview,
                         search = { query, provider, kind, sort -> whenOnlineIdle { model.search(query, provider, kind, sort) } },
+                        switchSearch = { query, provider, kind, sort ->
+                            if (!ingest.busy && !operationBusy) model.switchSearch(query, provider, kind, sort)
+                        },
                         sort = { model.sortSearch(it) }, loadMore = { whenOnlineIdle { model.loadMore() } },
                         retry = { whenOnlineIdle { model.retrySearch() } },
                         openPlaylist = { hit -> whenOnlineIdle { model.openPlaylist(hit) } },

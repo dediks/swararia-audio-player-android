@@ -16,14 +16,26 @@ import javax.net.ssl.HttpsURLConnection
 /** Metadata only. No FFmpeg initialization or library/MediaStore writes. */
 class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Boolean) : AudioSearchRepository {
     private val appContext = context.applicationContext
+    private val jsonMapper = com.fasterxml.jackson.databind.ObjectMapper()
+    private val warmupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val visitorLock = Any()
+    private var cachedVisitorNetwork: Any? = null
+    private var cachedVisitorData: String? = null
+    private var cachedVisitorExpiresAt = 0L
+    private val fastSkipUntilMs = object : LinkedHashMap<String, Long>(16, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean = size > 32
+    }
     private val previewResolver = PreviewResolver(
-        extract = { id -> executeMetadata(OnlinePreviewRules.arguments(id), "preview", 30_000L) },
-        networkKey = { appContext.getSystemService(ConnectivityManager::class.java)?.activeNetwork?.networkHandle },
+        extract = { id -> resolvePreviewJson(id) },
+        networkKey = ::activeNetworkKey,
         timing = { cached, ms -> android.util.Log.d("SwarariaTiming", "preview_resolve_ms=$ms cache_hit=$cached") },
     )
     private val channelCache = object : LinkedHashMap<String, String>(128, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 128
     }
+
+    private fun activeNetworkKey(): Any? =
+        appContext.getSystemService(ConnectivityManager::class.java)?.activeNetwork?.networkHandle
 
     suspend fun search(query: String, provider: SearchProvider): List<SearchHit> =
         searchPage(query, provider, SearchKind.SONGS).hits
@@ -35,7 +47,7 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
         val args = base.dropLast(1) + listOf("--no-plugin-dirs", "--plugin-dirs", plugin.absolutePath, base.last())
         val output = executeMetadata(args, "search", 30_000L)
         val raw = YoutubeSearchJson.parse(output, kind)
-        val permits = Semaphore(3)
+        val permits = Semaphore(6)
         val enriched = coroutineScope {
             raw.map { hit -> async {
                 if (hit.channel.isNullOrBlank() && hit.kind == SearchKind.SONGS) {
@@ -63,6 +75,7 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
               catch (_: Exception) { /* Incomplete items remain explicitly excluded, not fabricated. */ }
         }
         val complete = enriched.filter(YoutubeSearchRules::complete)
+        if (complete.any { it.kind == SearchKind.SONGS }) warmVisitorSessionAsync()
         SearchPage(complete, YoutubeSearchJson.entryCount(output), enriched.size - complete.size)
     } ?: throw IOException("Pencarian terlalu lama. Coba lagi saat koneksi lebih stabil.")
 
@@ -70,7 +83,188 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
         require(hit.kind == SearchKind.SONGS) { "Buka playlist lalu pilih satu lagu untuk preview." }
         return previewResolver.resolve(hit)
     }
-    override fun invalidatePreview(videoId: String) = previewResolver.invalidate(videoId)
+    override fun invalidatePreview(videoId: String) {
+        previewResolver.invalidate(videoId)
+        synchronized(fastSkipUntilMs) {
+            fastSkipUntilMs[videoId] = android.os.SystemClock.elapsedRealtime() + FAST_RETRY_SKIP_MS
+        }
+    }
+
+    private fun isFastSkipped(videoId: String): Boolean = synchronized(fastSkipUntilMs) {
+        val until = fastSkipUntilMs[videoId] ?: return@synchronized false
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now >= until) {
+            fastSkipUntilMs.remove(videoId)
+            false
+        } else {
+            true
+        }
+    }
+
+    private fun warmVisitorSessionAsync() {
+        val network = activeNetworkKey()
+        val now = android.os.SystemClock.elapsedRealtime()
+        val fresh = synchronized(visitorLock) {
+            cachedVisitorNetwork == network && cachedVisitorData != null && now < cachedVisitorExpiresAt
+        }
+        if (fresh || ingestBusy()) return
+        warmupScope.launch {
+            runCatching { ensureVisitorData(network) }
+        }
+    }
+
+    private suspend fun resolvePreviewJson(id: String): String {
+        check(!ingestBusy()) { "Tunggu proses audio selesai terlebih dahulu." }
+        if (!isFastSkipped(id)) {
+            val fast = try {
+                withTimeoutOrNull(7_000L) {
+                    runInterruptible(Dispatchers.IO) { resolveFastPreviewJson(id) }
+                }
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                null
+            }
+            if (fast != null) return fast
+            android.util.Log.d("SwarariaTiming", "preview_fast_fallback=1")
+        }
+        return executeMetadata(OnlinePreviewRules.arguments(id), "preview", 30_000L)
+    }
+
+    private fun resolveFastPreviewJson(id: String): String? {
+        val started = System.nanoTime()
+        if (Thread.currentThread().isInterrupted) throw InterruptedException()
+        check(!ingestBusy()) { "Tunggu proses audio selesai terlebih dahulu." }
+        val network = activeNetworkKey()
+        val visitor = ensureVisitorData(network) ?: return null
+        if (Thread.currentThread().isInterrupted) throw InterruptedException()
+        val payload = jsonMapper.createObjectNode().apply {
+            put("videoId", id)
+            put("contentCheckOk", true)
+            put("racyCheckOk", true)
+            set<com.fasterxml.jackson.databind.JsonNode>("context", jsonMapper.createObjectNode().apply {
+                set<com.fasterxml.jackson.databind.JsonNode>("client", jsonMapper.createObjectNode().apply {
+                    put("clientName", "VISIONOS")
+                    put("clientVersion", VISIONOS_CLIENT_VERSION)
+                    put("deviceMake", "Apple")
+                    put("deviceModel", "RealityDevice17,1")
+                    put("userAgent", VISIONOS_UA)
+                    put("osName", "visionOS")
+                    put("osVersion", "26.5.23O471")
+                    put("visitorData", visitor)
+                })
+            })
+        }
+        val raw = postJson(
+            url = INNERTUBE_PLAYER_URL,
+            body = jsonMapper.writeValueAsString(payload),
+            headers = mapOf(
+                "User-Agent" to VISIONOS_UA,
+                "X-YouTube-Client-Name" to "101",
+                "X-YouTube-Client-Version" to VISIONOS_CLIENT_VERSION,
+                "X-Goog-Visitor-Id" to visitor,
+                "Origin" to "https://www.youtube.com",
+            ),
+            connectMs = 4000,
+            readMs = 5000,
+        ) ?: run {
+            clearVisitorData(network)
+            return null
+        }
+        val media = OnlinePreviewRules.parsePlayerResponse(
+            output = raw,
+            expectedId = id,
+            title = id,
+            requestHeaders = mapOf("User-Agent" to VISIONOS_UA),
+        ) ?: run {
+            val status = runCatching { YoutubeSearchJson.objectNode(raw).path("playabilityStatus").path("status").asText("") }.getOrDefault("")
+            if (status == "LOGIN_REQUIRED") clearVisitorData(network)
+            return null
+        }
+        val elapsedMs = ((System.nanoTime() - started) / 1_000_000L).coerceAtLeast(0L)
+        android.util.Log.d("SwarariaTiming", "preview_fast_ms=$elapsedMs")
+        return OnlinePreviewRules.toJson(media)
+    }
+
+    private fun clearVisitorData(network: Any?) {
+        synchronized(visitorLock) {
+            if (cachedVisitorNetwork == network) {
+                cachedVisitorData = null
+                cachedVisitorExpiresAt = 0L
+            }
+        }
+    }
+
+    private fun ensureVisitorData(network: Any?): String? {
+        val now = android.os.SystemClock.elapsedRealtime()
+        synchronized(visitorLock) {
+            if (cachedVisitorNetwork == network && cachedVisitorData != null && now < cachedVisitorExpiresAt) {
+                return cachedVisitorData
+            }
+        }
+        val body = """{"context":{"client":{"clientName":"WEB","clientVersion":"2.20260708.00.00"}}}"""
+        val raw = postJson(
+            url = INNERTUBE_VISITOR_URL,
+            body = body,
+            headers = mapOf("User-Agent" to "Mozilla/5.0"),
+            connectMs = 3500,
+            readMs = 4000,
+        ) ?: return null
+        val vd = runCatching {
+            YoutubeSearchJson.objectNode(raw).path("responseContext").path("visitorData").takeIf { it.isTextual }?.asText()
+        }.getOrNull()?.takeIf { it.isNotBlank() && it.length <= 1024 } ?: return null
+        val freshAt = android.os.SystemClock.elapsedRealtime() + VISITOR_TTL_MS
+        synchronized(visitorLock) {
+            if (activeNetworkKey() == network) {
+                cachedVisitorNetwork = network
+                cachedVisitorData = vd
+                cachedVisitorExpiresAt = freshAt
+            }
+        }
+        return vd
+    }
+
+    private fun postJson(
+        url: String,
+        body: String,
+        headers: Map<String, String>,
+        connectMs: Int,
+        readMs: Int,
+    ): String? {
+        var connection: HttpsURLConnection? = null
+        return try {
+            val request = URL(url).openConnection() as HttpsURLConnection
+            connection = request
+            request.requestMethod = "POST"
+            request.instanceFollowRedirects = false
+            request.connectTimeout = connectMs
+            request.readTimeout = readMs
+            request.doOutput = true
+            request.setRequestProperty("Content-Type", "application/json")
+            headers.forEach { (k, v) -> request.setRequestProperty(k, v) }
+            val bytes = body.toByteArray(Charsets.UTF_8)
+            request.setFixedLengthStreamingMode(bytes.size)
+            request.outputStream.use { it.write(bytes) }
+            if (request.responseCode != 200 || request.contentLengthLong > MAX_INNERTUBE_BYTES.toLong()) null
+            else request.inputStream.use { ThumbnailTransfer.read(it, MAX_INNERTUBE_BYTES) }.toString(Charsets.UTF_8)
+        } catch (_: IOException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private companion object {
+        const val VISITOR_TTL_MS = 15 * 60 * 1000L
+        const val FAST_RETRY_SKIP_MS = 120 * 1000L
+        const val MAX_INNERTUBE_BYTES = 1_048_576
+        const val VISIONOS_CLIENT_VERSION = "1.02"
+        const val VISIONOS_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+        const val INNERTUBE_VISITOR_URL = "https://www.youtube.com/youtubei/v1/visitor_id?prettyPrint=false"
+        const val INNERTUBE_PLAYER_URL = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false"
+    }
 
     private suspend fun executeMetadata(args: List<String>, prefix: String, timeout: Long): String {
         check(!ingestBusy()) { "Tunggu proses audio selesai terlebih dahulu." }
