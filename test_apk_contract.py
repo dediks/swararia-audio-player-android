@@ -43,8 +43,8 @@ class AndroidPackageContract(unittest.TestCase):
     def test_update_contains_native_search_branding_and_no_design_annotations(self):
         aapt=ROOT/'.toolchain/android-sdk/build-tools/36.0.0/aapt2'
         badging=subprocess.check_output([str(aapt),'dump','badging',str(APK)],text=True)
-        self.assertIn("versionCode='6'",badging)
-        self.assertIn("versionName='0.5.0-spike'",badging)
+        self.assertIn("versionCode='8'",badging)
+        self.assertIn("versionName='0.6.0-spike'",badging)
         with zipfile.ZipFile(APK) as z:
             names=z.namelist()
             dex=b''.join(z.read(n) for n in names if n.startswith('classes') and n.endswith('.dex'))

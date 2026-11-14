@@ -14,10 +14,10 @@ class AppViewModel(
     private val downloadQueue: DownloadQueueRepository,
     previewPlayback: PreviewPlayback? = null,
     desktopRemoteApi: DesktopRemoteApi,
-    desktopRemoteStore: DesktopRemoteSessionStore? = null,
+    desktopRemoteStore: DesktopRemotePersistence? = null,
     private val remoteServer: AndroidRemoteServerController? = null,
 ) : ViewModel() {
-    val desktopRemote = DesktopRemoteSession(desktopRemoteApi, viewModelScope, store = desktopRemoteStore)
+    val desktopRemote = DesktopRemoteSession(desktopRemoteApi, viewModelScope, persistence = desktopRemoteStore)
     private val session: SearchSession = SearchSession(searchRepository, viewModelScope,
         { ingest.value.busy || busy.value || operations.busy.value }, ::message, previewPlayback)
     val search = session.search

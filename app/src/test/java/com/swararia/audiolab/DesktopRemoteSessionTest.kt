@@ -15,6 +15,9 @@ class DesktopRemoteSessionTest {
         var pairs = 0
         var posts = 0
         var reads = 0
+        var catalogFailure: DesktopRemoteFailure.Kind? = null
+        var catalogCancelled = false
+        var extended = false
         var expiry = 4e9
         var pairGate: CompletableDeferred<Unit>? = null
         override suspend fun pair(pairing: DesktopRemotePairing): DesktopRemoteGrant {
@@ -29,8 +32,13 @@ class DesktopRemoteSessionTest {
             if (revoked) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.AUTH)
             return DesktopRemoteApproval(grant.deviceId, if (role == null) "pending" else "active", role, expiry)
         }
-        override suspend fun capabilities(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) = setOf("play", "pause", "stop")
+        override suspend fun capabilities(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) = if (extended) setOf("play", "pause", "stop", "select_track", "select_group") else setOf("play", "pause", "stop")
         override suspend fun state(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) = DesktopRemotePlayback(role!!, true, false, "PAUSED", 0.0, 10.0, "Track")
+        override suspend fun tracks(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant): DesktopRemoteCatalog {
+            if (catalogCancelled) throw CancellationException("catalog cancelled")
+            catalogFailure?.let { throw DesktopRemoteFailure(it) }
+            return DesktopRemoteCatalog(true, 1, "Playlist", "trk_01", listOf(DesktopRemoteTrack("trk_01", "Track")))
+        }
         override suspend fun command(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, action: String, key: String): DesktopRemoteCommand {
             posts++; if (losePost) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.UNAVAILABLE)
             return DesktopRemoteCommand("c".repeat(24), "accepted")
@@ -256,4 +264,61 @@ class DesktopRemoteSessionTest {
             assertEquals(readsBeforeExpiredReopen, port.reads)
         } finally { scope.cancel() }
     }
+    @Test fun catalogProtocolFailurePreservesVerifiedTransportAndCanRecover() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val port = Port().apply { role = "control"; extended = true }
+            val store = MemorySessionStore()
+            val owner = DesktopRemoteSession(port, scope, 100_000, store = store, ioDispatcher = Dispatchers.Unconfined)
+            owner.visible(Any()); owner.connect(pairing); settle()
+            assertTrue(owner.state.value.canSelectTrack)
+            for (failure in listOf(DesktopRemoteFailure.Kind.PROTOCOL, DesktopRemoteFailure.Kind.UNAVAILABLE)) {
+                port.catalogFailure = failure; owner.refresh(); settle()
+                assertEquals("active", owner.state.value.phase)
+                assertTrue(owner.state.value.canControl)
+                assertFalse(owner.state.value.canSelectTrack)
+                assertFalse(owner.state.value.canSwitchGroup)
+                assertTrue(owner.state.value.tracks.isEmpty())
+                assertNotNull(owner.state.value.message)
+                assertNotNull(store.encoded)
+                owner.selectTrack("trk_01", true); settle(); assertEquals(0, port.posts)
+                owner.command("play"); settle(); assertEquals(1, port.posts)
+                port.posts = 0
+                port.catalogFailure = null; owner.refresh(); settle()
+                assertTrue(owner.state.value.canSelectTrack)
+            }
+        } finally { scope.cancel() }
+    }
+
+    @Test fun catalogAuthenticationAndTrustFailuresStillForgetPairing() = runBlocking {
+        for (failure in listOf(DesktopRemoteFailure.Kind.AUTH, DesktopRemoteFailure.Kind.TRUST)) {
+            val scope = CoroutineScope(coroutineContext + SupervisorJob())
+            try {
+                val port = Port().apply { role = "control"; extended = true }
+                val store = MemorySessionStore()
+                val session = DesktopRemoteSession(port, scope, 100_000, store = store, ioDispatcher = Dispatchers.Unconfined)
+                session.visible(Any()); session.connect(pairing); settle()
+                assertNotNull(store.encoded)
+                port.catalogFailure = failure; session.refresh(); settle()
+                assertEquals("disconnected", session.state.value.phase)
+                assertNull(store.encoded)
+                assertFalse(session.state.value.canControl)
+            } finally { scope.cancel() }
+        }
+    }
+
+    @Test fun cancelledCatalogReadDoesNotPublishFreshControlsOrForgetPairing() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val port = Port().apply { role = "control"; extended = true; catalogCancelled = true }
+            val store = MemorySessionStore()
+            val session = DesktopRemoteSession(port, scope, 100_000, store = store, ioDispatcher = Dispatchers.Unconfined)
+            session.visible(Any()); session.connect(pairing); settle()
+            assertFalse(session.state.value.fresh)
+            assertFalse(session.state.value.canControl)
+            assertNotNull(store.encoded)
+            assertFalse(session.state.value.message?.contains("Katalog") == true)
+        } finally { scope.cancel() }
+    }
+
 }

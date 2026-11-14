@@ -1,0 +1,59 @@
+{
+  "status": "verified_source_host_integration_not_apk",
+  "candidate_sha256": "316fbe9841c78d3fa8f8c0435e614e3ab65f49a0724ab9a4b9c4b7e8e6efbd4d",
+  "parents": ["51fb79f3cc7cf9a0e5341cf097771a9874a24d1b", "d19a86b7885c4e5f6761bfbf7ab6d26c7b3682a4"],
+  "branch": "integration/android-0.6-remote-fixes",
+  "source_version": "8 / 0.6.0-spike",
+  "independent_review": {
+    "delegation": "deleg_725e067a",
+    "passed": true,
+    "security_concerns": [],
+    "logic_errors": [],
+    "suggestions_closed": [
+      "Heuristic inventory additionally records verification/test_android_integration.py:16 local git show subprocess.check_output call; fixed argument list, no shell.",
+      "This current report is separate from preserved historical0.5.1 evidence; neither source contracts nor review establishes APK/device acceptance."
+    ],
+    "summary": "Reviewer independently verified24path hashes, index/worktree equality, both merge parents, no unmerged entries, factory/constructor order, application-owned persistence and retained server/migrations.24upstream feature paths and8fix paths match their respective parents exactly. Version8/0.6.0/current guards align;8source integration/wiring/version contracts and JS syntax independently passed. No blocking integration issues or source edits."
+  },
+  "parent_checks": {
+    "client_session_junit": 24,
+    "server_engine_junit": 4,
+    "server_tls_junit": 2,
+    "server_http_tls_loopback_junit": 2,
+    "data_junit": 13,
+    "sqlite_schema_source_tests": 9,
+    "integration_source_contracts": 3,
+    "wiring_source_contracts": 4,
+    "current_version_source_tests": 1,
+    "browser_js_syntax": true,
+    "actual_kotlin_desktop_https": "PASS trust, approval, opt-in, authorization, no replay, deadline and cancellation",
+    "immutable_feature_server_baseline": "8host tests passed with same cached toolchain"
+  },
+  "preservation": {
+    "feature_parent_files_exact": 24,
+    "client_fix_parent_files_exact": 8,
+    "design_files_exact": 19,
+    "room_v4_and_migrations_retained": true,
+    "application_id_and_signing_configuration_retained": true,
+    "desktop_unchanged_commit": "8ec2df7a359b7947c60199a3f5440888e910c889"
+  },
+  "static_heuristic": "Five benign subprocess boundaries: compiler/JUnit helpers plus local git show; argument arrays without shell. No literal-secret/private-key/dynamic-eval match. Contextual heuristic evidence, not a security proof.",
+  "recovery": {
+    "bundle": "/home/ubuntu/.local/share/swararia-private-backups/android-before-0.6-integration-20261114T043639095417Z.bundle",
+    "bundle_sha256": "cb6482c0d4a23294831cec97aaf830d3bffd02fe414a8072bb8557f6d6b86940",
+    "both_parents_restored_and_verified": true,
+    "preview_zip_byte_and_crc_verified": true
+  },
+  "limitations": [
+    "No full Android Gradle/KSP/lint/APK build; no dependency/SDK downloads",
+    "AppContainer/ViewModel are source-contract reviewed, not full Android compilation",
+    "No physical phone, real Keystore/MediaStore/scanner/Compose/audio/LAN acceptance",
+    "No whole-server security audit of unchanged upstream feature code",
+    "Existing URL constructor deprecation warning remains",
+    "Ordered persistence does not guarantee process-death durability or successful storage deletion under I/O failure"
+  ],
+  "installations": [],
+  "push": false,
+  "github_main_merge": false,
+  "commit_identifier": "See adjacent release manifest; this report is included in the local integration merge commit."
+}

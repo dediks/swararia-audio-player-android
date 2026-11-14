@@ -138,6 +138,9 @@ class DesktopRemoteHttpsApi : DesktopRemoteApi {
                         requestMethod = if (body == null) "GET" else "POST"
                         setRequestProperty("Authorization", secret.bearer())
                         setRequestProperty("Accept", "application/json")
+                        if (body == null && path == "/v1/capabilities") {
+                            setRequestProperty("X-Swararia-Capabilities", "extended-v1")
+                        }
                         setRequestProperty("Connection", "close")
                         if (body != null) {
                             doOutput = true

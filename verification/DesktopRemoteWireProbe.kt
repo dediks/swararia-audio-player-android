@@ -50,6 +50,10 @@ object DesktopRemoteWireProbe {
             }
             check(approval.status == "active" && approval.role == "control")
             check(api.capabilities(connection, grant) == setOf("play", "pause", "stop", "fade_out", "prev", "next", "select_track", "select_group"))
+            val headers = DesktopRemoteJson.objectValue(control("STATS").toByteArray())
+            check(headers["capability_headers"].intValue() == 1 && headers["wrong_headers"].intValue() == 0) {
+                "Capabilities opt-in missing or sent outside capabilities GET"
+            }
             val catalog = api.tracks(connection, grant)
             check(catalog.online)
             val state = api.state(connection, grant)
@@ -94,6 +98,8 @@ object DesktopRemoteWireProbe {
             check(control("REVOKE") == "OK")
             try { api.session(connection, grant); error("Revoked session accepted") }
             catch (failure: DesktopRemoteFailure) { check(failure.kind == DesktopRemoteFailure.Kind.AUTH) }
+            check(DesktopRemoteJson.objectValue(control("STATS").toByteArray())["wrong_headers"].intValue() == 0)
+            println("PASS wire opt-in: exact capabilities header on capabilities GET only")
             println("PASS wire authorization: actual view-only and revoked backend identities fail closed")
         } finally {
             runCatching { output.write("STOP\n"); output.flush() }
