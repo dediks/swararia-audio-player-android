@@ -111,7 +111,7 @@ class AppViewModel(
             }
         }
     }
-    fun refreshServerInterfaces() { remoteServer?.refreshInterfaces() }
+    fun refreshServerInterfaces() { remoteServer?.refreshInterfacesAsync() }
     fun startRemoteServer(bindIp: String, port: Int) { remoteServer?.startServer(bindIp, port) }
     fun stopRemoteServer() { remoteServer?.stopServer() }
     fun refreshServerNativeInvite() { remoteServer?.refreshNativeInvite() }

@@ -107,19 +107,42 @@ internal fun ActiveRemoteHeaderBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            BrandLogo(28.dp)
-            Text(
-                text = state.endpoint ?: "Desktop PC",
-                style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            resolveConnectionBadge(state)?.let { badge ->
-                StatusPill(badge = badge, compact = true)
+            BrandLogo(30.dp)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = state.endpoint ?: "Desktop PC",
+                    style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    resolveConnectionBadge(state)?.let { badge ->
+                        StatusPill(badge = badge, compact = true)
+                    }
+                    val metaTag = when {
+                        !state.fresh && state.role == null -> "Menunggu PC"
+                        state.fresh && state.playback?.online == true && state.tracks.isNotEmpty() -> "${state.tracks.size} lagu"
+                        state.fresh && state.playback?.online != true -> "Pemutar PC nonaktif"
+                        else -> null
+                    }
+                    if (metaTag != null) {
+                        Text(
+                            text = metaTag,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
-            Spacer(Modifier.weight(1f))
             Surface(
                 onClick = onToggleKeepScreenOn,
                 shape = CircleShape,
@@ -1201,7 +1224,7 @@ private fun ExpandedFohTransportBody(
                 if (isFading) {
                     LinearProgressIndicator(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)))
                 }
-            } else {
+            } else if (state.fresh && state.role == "control" && state.playback?.online == true) {
                 Text(
                     text = "Fade Out 3s belum aktif di server PC (restart Swararia PC).",
                     style = MaterialTheme.typography.labelSmall,
@@ -1242,7 +1265,13 @@ internal fun StatusPill(badge: RemoteBadge, modifier: Modifier = Modifier, compa
 }
 
 @Composable
-internal fun NoticeCard(text: String, isError: Boolean = false, icon: ImageVector = UiIcons.Info) {
+internal fun NoticeCard(
+    text: String,
+    isError: Boolean = false,
+    icon: ImageVector = UiIcons.Info,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
     val container = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
     val content = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
     Surface(
@@ -1257,7 +1286,21 @@ internal fun NoticeCard(text: String, isError: Boolean = false, icon: ImageVecto
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(18.dp))
-            Text(text, style = MaterialTheme.typography.bodySmall, color = if (isError) content else MaterialTheme.colorScheme.onSurface)
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isError) content else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            if (actionLabel != null && onAction != null) {
+                OutlinedButton(
+                    onClick = onAction,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.heightIn(min = 36.dp),
+                ) {
+                    Text(actionLabel, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                }
+            }
         }
     }
 }

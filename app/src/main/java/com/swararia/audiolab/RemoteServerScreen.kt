@@ -173,9 +173,18 @@ internal fun RemoteServerScreen(
     var portInput by rememberSaveable { mutableStateOf("8443") }
     var copiedNotice by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(state.interfaces) {
-        if (selectedIp.isBlank() || state.interfaces.none { it.ip == selectedIp }) {
-            selectedIp = state.interfaces.firstOrNull()?.ip.orEmpty()
+    LaunchedEffect(state.interfaces, snapshot.enabled, snapshot.bindIp) {
+        val activeBindIp = snapshot.bindIp
+        if (snapshot.enabled && !activeBindIp.isNullOrBlank()) {
+            selectedIp = activeBindIp
+        } else {
+            val preferred = state.interfaces.firstOrNull { it.ip != "127.0.0.1" } ?: state.interfaces.firstOrNull()
+            if (selectedIp.isBlank() ||
+                state.interfaces.none { it.ip == selectedIp } ||
+                (selectedIp == "127.0.0.1" && preferred != null && preferred.ip != "127.0.0.1")
+            ) {
+                selectedIp = preferred?.ip.orEmpty()
+            }
         }
     }
 
@@ -762,27 +771,32 @@ private fun WebAccessCard(
             ) {
                 OutlinedButton(
                     onClick = onCopyUrl,
+                    contentPadding = PaddingValues(horizontal = 10.dp),
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 48.dp),
                 ) {
-                    Text("Salin URL")
+                    Text("Salin URL", maxLines = 1, softWrap = false)
                 }
                 OutlinedButton(
                     onClick = onCopyPin,
                     enabled = webPin != null,
+                    contentPadding = PaddingValues(horizontal = 10.dp),
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 48.dp),
                 ) {
-                    Text("Salin PIN")
+                    Text("Salin PIN", maxLines = 1, softWrap = false)
                 }
                 if (fingerprintHex != null) {
                     OutlinedButton(
                         onClick = onCopyFingerprint,
-                        modifier = Modifier.heightIn(min = 48.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp),
                     ) {
-                        Text("FP")
+                        Text("Salin TLS", maxLines = 1, softWrap = false)
                     }
                 }
             }

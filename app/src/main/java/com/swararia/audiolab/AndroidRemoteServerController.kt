@@ -180,6 +180,10 @@ class AndroidRemoteServerController(
         return sorted
     }
 
+    fun refreshInterfacesAsync() {
+        scope.launch { refreshInterfaces() }
+    }
+
     fun startServer(bindIp: String, port: Int) {
         scope.launch {
             synchronized(lifecycleLock) {

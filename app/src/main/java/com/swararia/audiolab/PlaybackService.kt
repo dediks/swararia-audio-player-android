@@ -108,7 +108,7 @@ class PlaybackService : MediaSessionService() {
                     explicitlyStopped = false
                     requestSwitchTrackWithFade(
                         PendingFadeOutAction.ReplaceQueue(items, idx, 0L, autoPlay = request.autoPlay),
-                        immediate = !player.isPlaying,
+                        immediate = !(player.isPlaying || fadePhase == FadePhase.FADE_IN),
                     )
                 }
                 "play" -> {
@@ -141,20 +141,22 @@ class PlaybackService : MediaSessionService() {
                     if (player.mediaItemCount == 0) {
                         return RemoteCommandExecutionResult(applied = false, errorCode = "empty_queue")
                     }
+                    val autoPlay = player.playWhenReady || player.isPlaying
                     explicitlyStopped = false
                     requestSwitchTrackWithFade(
-                        PendingFadeOutAction.SeekPrevious(autoPlay = player.isPlaying),
-                        immediate = !player.isPlaying,
+                        PendingFadeOutAction.SeekPrevious(autoPlay = autoPlay),
+                        immediate = !(player.isPlaying || fadePhase == FadePhase.FADE_IN),
                     )
                 }
                 "next" -> {
                     if (player.mediaItemCount == 0 || !player.hasNextMediaItem()) {
                         return RemoteCommandExecutionResult(applied = false, errorCode = "no_next_track")
                     }
+                    val autoPlay = player.playWhenReady || player.isPlaying
                     explicitlyStopped = false
                     requestSwitchTrackWithFade(
-                        PendingFadeOutAction.SeekNext(autoPlay = player.isPlaying),
-                        immediate = !player.isPlaying,
+                        PendingFadeOutAction.SeekNext(autoPlay = autoPlay),
+                        immediate = !(player.isPlaying || fadePhase == FadePhase.FADE_IN),
                     )
                 }
                 else -> return RemoteCommandExecutionResult(applied = false, errorCode = "unsupported_action")

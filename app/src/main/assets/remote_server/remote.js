@@ -15,6 +15,11 @@
   let pendingSwitchTrack = null;
   let pendingUploadPlan = [];
   let syncInProgress = false;
+  let pollInFlight = false;
+  let networkLost = false;
+  let lastCatalogVersion = null;
+  let lastSyncTransferAllowed = null;
+  let lastServerActiveGroupId = null;
   let pollTimer = null;
 
   const el = (id) => document.getElementById(id);
@@ -68,29 +73,37 @@
   }
 
   async function apiGet(path) {
-    const res = await fetch(path, {
-      method: 'GET',
-      credentials: 'same-origin',
-      cache: 'no-store',
-    });
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, data };
+    try {
+      const res = await fetch(path, {
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data, networkError: false };
+    } catch (_) {
+      return { ok: false, status: 0, data: {}, networkError: true };
+    }
   }
 
   async function apiPostJson(path, body, includeCsrf = true) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (includeCsrf && csrfToken) {
-      headers['X-Swararia-Csrf'] = csrfToken;
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (includeCsrf && csrfToken) {
+        headers['X-Swararia-Csrf'] = csrfToken;
+      }
+      const res = await fetch(path, {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers,
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data, networkError: false };
+    } catch (_) {
+      return { ok: false, status: 0, data: {}, networkError: true };
     }
-    const res = await fetch(path, {
-      method: 'POST',
-      credentials: 'same-origin',
-      cache: 'no-store',
-      headers,
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, data };
   }
 
   async function computeSha256Hex(file) {
@@ -205,11 +218,18 @@
   function renderTrackCatalog() {
     const tracks = Array.isArray(catalogData?.tracks) ? catalogData.tracks : [];
     const groups = Array.isArray(catalogData?.groups) ? catalogData.groups : [];
+    const serverGroupId = catalogData?.active_group_id || null;
+    if (serverGroupId && serverGroupId !== lastServerActiveGroupId) {
+      selectedGroupId = serverGroupId;
+      lastServerActiveGroupId = serverGroupId;
+    }
     if (!groups.some((g) => g.id === selectedGroupId)) selectedGroupId = groups[0]?.id || 'g_all';
 
     renderChips(el('groupChips'), groups, selectedGroupId, (gid) => {
       selectedGroupId = gid;
-      sendCommand('select_group', { group_id: gid });
+      if (sessionState?.role === 'control' && stateData?.master_online === true) {
+        sendCommand('select_group', { group_id: gid });
+      }
       renderTrackCatalog();
     });
 
@@ -234,6 +254,7 @@
     }
 
     const canControl = sessionState?.role === 'control' && stateData?.master_online === true;
+    const isPlaybackActive = stateData?.state?.is_playing === true && stateData?.state?.transport_state !== 'FADING';
     const curId = catalogData?.current_track_id || null;
 
     for (const track of filtered) {
@@ -261,17 +282,18 @@
       const actions = document.createElement('div');
       actions.className = 'track-actions';
 
+      const isCurrent = track.id === curId;
       const cueBtn = document.createElement('button');
       cueBtn.type = 'button';
       cueBtn.className = 'btn btn-secondary btn-sm';
       cueBtn.textContent = 'Cue';
-      cueBtn.disabled = !canControl;
+      cueBtn.disabled = !canControl || (isCurrent && !isPlaybackActive && (stateData?.state?.current_time || 0) <= 0.1);
       cueBtn.addEventListener('click', () => handleSelectTrack(track, false));
 
       const playBtn = document.createElement('button');
       playBtn.type = 'button';
       playBtn.className = 'btn btn-primary btn-sm';
-      playBtn.textContent = track.id === curId ? 'Aktif' : 'Play';
+      playBtn.textContent = isCurrent ? (isPlaybackActive ? 'Pause' : 'Play') : 'Play';
       playBtn.disabled = !canControl;
       playBtn.addEventListener('click', () => handleSelectTrack(track, true));
 
@@ -354,7 +376,17 @@
         dlBtn.type = 'button';
         dlBtn.className = 'btn btn-secondary btn-sm';
         dlBtn.textContent = 'Unduh';
-        dlBtn.addEventListener('click', () => downloadSingleTrack(track));
+        dlBtn.addEventListener('click', async () => {
+          dlBtn.disabled = true;
+          const prevLabel = dlBtn.textContent;
+          dlBtn.textContent = 'Mengunduh…';
+          try {
+            await downloadSingleTrack(track);
+          } finally {
+            dlBtn.disabled = false;
+            dlBtn.textContent = prevLabel;
+          }
+        });
 
         row.appendChild(meta);
         row.appendChild(dlBtn);
@@ -615,57 +647,89 @@
     catalogData = null;
     manifestData = null;
     pendingUploadPlan = [];
+    lastCatalogVersion = null;
+    lastSyncTransferAllowed = null;
+    lastServerActiveGroupId = null;
     if (message) showNotice(message, true);
     switchView('pair');
     renderHeader();
   }
 
   async function pollAll() {
-    const s = await apiGet('/web/session');
-    if (!s.ok) {
-      if (sessionState) {
-        window.location.reload();
+    if (pollInFlight) return;
+    pollInFlight = true;
+    try {
+      const s = await apiGet('/web/session');
+      if (s.networkError) {
+        networkLost = true;
+        el('subStatus').textContent = 'Koneksi ke HP Server terputus — mencoba menyambung ulang…';
         return;
       }
-      handleClientReset('');
-      return;
-    }
-    sessionState = s.data;
-    if (typeof s.data.csrf_token === 'string') {
-      csrfToken = s.data.csrf_token;
-    }
+      if (!s.ok) {
+        if (networkLost) networkLost = false;
+        const hadSession = Boolean(sessionState);
+        handleClientReset(hadSession ? 'Sesi dicabut atau server dimulai ulang. Silakan masukkan PIN pairing baru.' : '');
+        return;
+      }
+      if (networkLost) {
+        networkLost = false;
+        showNotice('');
+      }
+      sessionState = s.data;
+      if (typeof s.data.csrf_token === 'string') {
+        csrfToken = s.data.csrf_token;
+      }
 
-    if (sessionState.status === 'pending') {
-      switchView('pending');
+      if (sessionState.status === 'pending') {
+        switchView('pending');
+        renderHeader();
+        return;
+      }
+      if (sessionState.status !== 'active') {
+        handleClientReset('Persetujuan perangkat dibatalkan atau kedaluwarsa.');
+        return;
+      }
+
+      switchView('active');
+      const [stRes, trRes] = await Promise.all([apiGet('/web/state'), apiGet('/web/tracks')]);
+      if (stRes.ok) stateData = stRes.data;
+      if (trRes.ok) catalogData = trRes.data;
       renderHeader();
-      return;
-    }
-    if (sessionState.status !== 'active') {
-      window.location.reload();
-      return;
-    }
-
-    switchView('active');
-    const [stRes, trRes] = await Promise.all([apiGet('/web/state'), apiGet('/web/tracks')]);
-    if (stRes.ok) stateData = stRes.data;
-    if (trRes.ok) catalogData = trRes.data;
-    renderHeader();
-    renderDeck();
-    renderTrackCatalog();
-    if (activeTab === 'sync') {
-      await loadManifestIfPermitted();
+      renderDeck();
+      renderTrackCatalog();
+      const catVersion = catalogData?.catalog_version ?? null;
+      const transferNow = Boolean(sessionState?.transfer_allowed);
+      if (activeTab === 'sync') {
+        const needsManifestReload = manifestData === null ||
+          transferNow !== lastSyncTransferAllowed ||
+          (transferNow && catVersion !== lastCatalogVersion);
+        if (needsManifestReload) {
+          lastCatalogVersion = catVersion;
+          lastSyncTransferAllowed = transferNow;
+          await loadManifestIfPermitted();
+        }
+      } else {
+        lastCatalogVersion = catVersion;
+        lastSyncTransferAllowed = transferNow;
+      }
+    } finally {
+      pollInFlight = false;
     }
   }
 
   async function submitPair(event) {
     event.preventDefault();
     const label = el('pairLabel').value.trim();
-    const pin = el('pairPin').value.trim();
+    const pin = el('pairPin').value.replace(/\s+/g, '').toUpperCase();
     if (!label || !pin) return;
     el('btnPair').disabled = true;
     showNotice('');
     try {
       const res = await apiPostJson('/web/pair', { label, pin }, false);
+      if (res.networkError) {
+        showNotice('Tidak dapat menjangkau HP Server. Periksa koneksi Wi-Fi Anda.', true);
+        return;
+      }
       if (!res.ok) {
         showNotice(`Pairing gagal (${res.data?.code || res.status}). Periksa PIN & coba lagi.`, true);
         return;
@@ -675,6 +739,7 @@
       el('pairPin').value = '';
       switchView('pending');
       renderHeader();
+      pollAll();
     } finally {
       el('btnPair').disabled = false;
     }

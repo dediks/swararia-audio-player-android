@@ -646,7 +646,7 @@ class AndroidRemoteServerEngine(
             "catalog_version" to catalogVersion,
             "playlist" to groupLabel,
             "active_group_id" to activeGroup?.id,
-            "total_tracks" to tracksById.size,
+            "total_tracks" to candidateTracks.size,
             "groups" to groupsList,
             "current_track_id" to currentSid,
             "tracks" to serializedTracks,

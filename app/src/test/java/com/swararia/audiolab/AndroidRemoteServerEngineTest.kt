@@ -163,6 +163,11 @@ class AndroidRemoteServerEngineTest {
 
         var executions = 0
         var lastQueue = emptyList<Long>()
+        val initialTracksPayload = engine.tracksPayload(device)
+        assertEquals("g_all", initialTracksPayload["active_group_id"])
+        assertEquals(2, (initialTracksPayload["tracks"] as List<*>).size)
+        assertEquals(2, initialTracksPayload["total_tracks"])
+
         val groupCmd = engine.executeCommand(
             device = device,
             action = "select_group",
@@ -178,6 +183,7 @@ class AndroidRemoteServerEngineTest {
         val tracksPayload = engine.tracksPayload(device)
         assertEquals("pl_5", tracksPayload["active_group_id"])
         assertEquals(1, (tracksPayload["tracks"] as List<*>).size)
+        assertEquals(1, tracksPayload["total_tracks"])
 
         val playCmd = engine.executeCommand(
             device = device,

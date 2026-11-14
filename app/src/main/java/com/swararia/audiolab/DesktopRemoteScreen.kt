@@ -8,6 +8,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -24,17 +26,22 @@ private data class PendingTrackChoice(val track: DesktopRemoteTrack, val preferr
 @Composable
 fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modifier) {
     val state by session.state.collectAsStateWithLifecycle()
-    var input by remember { mutableStateOf("") }
+    var input by rememberSaveable { mutableStateOf("") }
     var scanning by remember { mutableStateOf(false) }
     var scanFeedback by remember { mutableStateOf<String?>(null) }
     var pendingScanned by remember { mutableStateOf<String?>(null) }
-    var trackQuery by remember { mutableStateOf("") }
-    var selectedGroupId by remember { mutableStateOf<String?>(null) }
-    var groupBySections by remember { mutableStateOf(true) }
-    var collapsedGroupIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var replaceGuardEnabled by remember { mutableStateOf(true) }
-    var keepScreenOn by remember { mutableStateOf(false) }
-    var transportDockCollapsed by remember { mutableStateOf(false) }
+    var trackQuery by rememberSaveable { mutableStateOf("") }
+    var selectedGroupId by rememberSaveable { mutableStateOf<String?>(null) }
+    var groupBySections by rememberSaveable { mutableStateOf(true) }
+    var collapsedGroupIds by rememberSaveable(
+        stateSaver = listSaver<Set<String>, String>(
+            save = { it.toList() },
+            restore = { it.toSet() },
+        ),
+    ) { mutableStateOf<Set<String>>(emptySet()) }
+    var replaceGuardEnabled by rememberSaveable { mutableStateOf(true) }
+    var keepScreenOn by rememberSaveable { mutableStateOf(false) }
+    var transportDockCollapsed by rememberSaveable { mutableStateOf(false) }
     var showDisconnectConfirm by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
     var pendingTrackSwitch by remember { mutableStateOf<PendingTrackChoice?>(null) }
@@ -332,13 +339,30 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (!supportsSelectTrack) {
-                if (state.role == "control") {
-                    item(key = "library_upgrade_hint") {
-                        NoticeCard("Fitur pilih lagu belum aktif di server PC saat ini (restart server Swararia di PC).")
+                when {
+                    !state.fresh && state.role == null -> {
+                        item(key = "remote_offline_catalog_hint") {
+                            NoticeCard(
+                                text = "Daftar lagu akan muncul otomatis setelah koneksi ke Swararia PC tersambung.",
+                                actionLabel = if (state.busy) null else "Coba Lagi",
+                                onAction = { session.refresh() },
+                            )
+                        }
                     }
-                } else {
-                    item(key = "view_only_catalog_hint") {
-                        NoticeCard("Daftar lagu akan tampil saat terhubung dengan izin katalog aktif.")
+                    state.fresh && state.playback?.online != true -> {
+                        item(key = "remote_player_offline_catalog_hint") {
+                            NoticeCard("Pemutar musik Swararia PC belum aktif atau sedang preview. Buka pemutar di PC untuk melihat daftar lagu.")
+                        }
+                    }
+                    state.role == "control" -> {
+                        item(key = "library_upgrade_hint") {
+                            NoticeCard("Fitur pilih lagu belum aktif di server PC saat ini (restart server Swararia di PC).")
+                        }
+                    }
+                    else -> {
+                        item(key = "view_only_catalog_hint") {
+                            NoticeCard("Daftar lagu akan tampil saat terhubung dengan izin katalog aktif.")
+                        }
                     }
                 }
             } else if (state.tracks.isEmpty()) {
