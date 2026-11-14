@@ -5,6 +5,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.room.Room
+import java.io.File
+import java.util.UUID
 
 /** Manual composition root. Platform dependencies are built here, never inside a screen/ViewModel. */
 class AppContainer(context: Context) {
@@ -25,6 +27,29 @@ class AppContainer(context: Context) {
         DesktopRemotePersistence(AndroidKeystoreDesktopRemoteStore(appContext))
     }
     fun desktopRemoteStore(): DesktopRemotePersistence = rememberedDesktopSession
+    private val desktopRemoteDownloadStagingDir by lazy {
+        File(appContext.cacheDir, "desktop_remote_downloads").apply { mkdirs() }
+    }
+    fun desktopRemoteMediaImporter(): DesktopRemoteMediaImporter = object : DesktopRemoteMediaImporter {
+        override suspend fun hasTrack(sha256: String, sizeBytes: Long): Boolean =
+            library.findTrackBySha256AndSize(sha256, sizeBytes) != null
+        override fun createTempDownloadFile(): File {
+            desktopRemoteDownloadStagingDir.mkdirs()
+            return File(desktopRemoteDownloadStagingDir, "remote-${UUID.randomUUID()}.part")
+        }
+        override suspend fun importDownloadedAudio(
+            stagedFile: File,
+            requestedName: String,
+            expectedSha256: String,
+        ): DesktopRemoteMediaImportOutcome {
+            val outcome = library.importValidatedUpload(stagedFile, requestedName, expectedSha256, playlistName = null)
+            return if (outcome is UploadImportOutcome.Deduplicated) {
+                DesktopRemoteMediaImportOutcome.Deduplicated
+            } else {
+                DesktopRemoteMediaImportOutcome.Saved
+            }
+        }
+    }
     val remoteServerController: AndroidRemoteServerController by lazy {
         AndroidRemoteServerController(appContext, library)
     }
@@ -50,6 +75,7 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
             container.desktopRemoteApi(),
             container.desktopRemoteStore(),
             container.remoteServerController,
+            container.desktopRemoteMediaImporter(),
         ) as T
     }
 }

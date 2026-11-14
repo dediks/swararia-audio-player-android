@@ -3,17 +3,21 @@ package com.swararia.audiolab
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.File
 import java.util.UUID
 
 data class DesktopRemoteUiState(
     val endpoint: String? = null, val phase: String = "disconnected", val role: String? = null,
     val playback: DesktopRemotePlayback? = null, val commands: Set<String> = emptySet(),
+    val mediaSupported: Boolean = false, val mediaMaxBytes: Long = 0L,
     val playlist: String? = null, val activeGroupId: String? = null, val totalTracks: Int = 0,
     val groups: List<DesktopRemoteTrackGroup> = emptyList(),
     val currentTrackId: String? = null,
     val tracks: List<DesktopRemoteTrack> = emptyList(),
+    val downloads: Map<String, DesktopRemoteTrackDownload> = emptyMap(),
     val busy: Boolean = false, val fresh: Boolean = false, val message: String? = null,
     val outcome: String? = null,
 ) {
@@ -22,6 +26,7 @@ data class DesktopRemoteUiState(
     val canSelectTrack: Boolean get() = canControl && "select_track" in commands
     val canSwitchGroup: Boolean get() = canControl && "select_group" in commands
     val canStepTrack: Boolean get() = canControl && playback?.title != null
+    val canDownloadMedia: Boolean get() = phase == "active" && role == "control" && mediaSupported && playback?.online == true
 }
 
 /** Android-free RAM owner. Like SearchSession, invoke on the caller's single UI thread.
@@ -33,8 +38,9 @@ class DesktopRemoteSession(
     private val pollMillis: Long = 1500,
     private val now: () -> Double = { System.currentTimeMillis() / 1000.0 },
     store: DesktopRemoteSessionStore? = null,
-    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val persistence: DesktopRemotePersistence? = store?.let { DesktopRemotePersistence(it, ioDispatcher) },
+    private val mediaImporter: DesktopRemoteMediaImporter? = null,
 ) {
     private val mutable = MutableStateFlow(DesktopRemoteUiState())
     val state = mutable.asStateFlow()
@@ -49,6 +55,7 @@ class DesktopRemoteSession(
     private var poll: Job? = null
     private var mutation: Job? = null
     private var commandId: String? = null
+    private val downloadJobs = HashMap<String, Job>()
 
     init {
         restore()
@@ -94,19 +101,19 @@ class DesktopRemoteSession(
     fun visible(owner: Any) {
         visibility = owner
         poll?.cancel(); poll = null
-        mutable.value = mutable.value.copy(fresh = false)
+        mutable.update { it.copy(fresh = false) }
         startPolling()
     }
     fun hidden(owner: Any) {
         if (visibility !== owner) return
         visibility = null
         poll?.cancel(); poll = null
-        mutable.value = mutable.value.copy(fresh = false)
+        mutable.update { it.copy(fresh = false) }
     }
     fun connect(input: String) {
         if (mutable.value.busy || grant != null || visibility == null) return
         val parsed = try { DesktopRemotePairing.parse(input) } catch (_: DesktopRemoteFailure) {
-            mutable.value = mutable.value.copy(message = "Kode pairing tidak valid."); return
+            mutable.update { it.copy(message = "Kode pairing tidak valid.") }; return
         }
         val ticket = ++generation
         mutable.value = DesktopRemoteUiState(endpoint = parsed.endpoint, phase = "connecting", busy = true)
@@ -127,7 +134,7 @@ class DesktopRemoteSession(
                 parsed.forgetInvitation()
                 if (generation == ticket) {
                     mutation = null
-                    mutable.value = mutable.value.copy(busy = false)
+                    mutable.update { it.copy(busy = false) }
                     startPolling()
                 }
             }
@@ -142,10 +149,16 @@ class DesktopRemoteSession(
 
     fun disconnect() = disconnectWith(null)
 
+    private fun cancelActiveDownloads() {
+        downloadJobs.values.toList().forEach { it.cancel() }
+        downloadJobs.clear()
+    }
+
     private fun clearMemoryState(message: String?) {
         generation++
         poll?.cancel(); poll = null
         mutation?.cancel(); mutation = null
+        cancelActiveDownloads()
         pairing?.forgetInvitation(); pairing = null; grant = null; commandId = null
         expiresAt = 0.0; persistedKey = null
         mutable.value = DesktopRemoteUiState(message = message)
@@ -193,14 +206,20 @@ class DesktopRemoteSession(
             if (approval.deviceId != g.deviceId || approval.expiresAt <= now()) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.AUTH)
             expiresAt = approval.expiresAt
             if (approval.status == "pending") {
+                cancelActiveDownloads()
                 if (persistedKey != null) {
                     persistedKey = null
                     clearStore()
                 }
-                mutable.value = mutable.value.copy(phase = "pending", role = null, playback = null,
-                    commands = emptySet(), playlist = null, activeGroupId = null, totalTracks = 0,
-                    groups = emptyList(), currentTrackId = null, tracks = emptyList(),
-                    fresh = false, message = "Setujui perangkat ini di PC.")
+                mutable.update {
+                    it.copy(
+                        phase = "pending", role = null, playback = null,
+                        commands = emptySet(), mediaSupported = false, mediaMaxBytes = 0L,
+                        playlist = null, activeGroupId = null, totalTracks = 0,
+                        groups = emptyList(), currentTrackId = null, tracks = emptyList(),
+                        downloads = emptyMap(), fresh = false, message = "Setujui perangkat ini di PC.",
+                    )
+                }
                 return
             }
             if (approval.status != "active" || approval.role !in setOf("control", "view_only")) throw DesktopRemoteFailure()
@@ -218,7 +237,10 @@ class DesktopRemoteSession(
                 current(ticket, owner)
                 if (saved) persistedKey = snapshotKey
             }
-            val supported = api.capabilities(p, g)
+            val caps = api.capabilitiesInfo(p, g)
+            val supported = caps.commands
+            val mediaAllowed = caps.media && approval.role == "control"
+            if (!mediaAllowed) cancelActiveDownloads()
             current(ticket, owner)
             val playback = api.state(p, g)
             current(ticket, owner)
@@ -243,20 +265,26 @@ class DesktopRemoteSession(
             }.status else mutable.value.outcome
             current(ticket, owner)
             if (outcome !in setOf("accepted", "pending")) commandId = null
-            mutable.value = mutable.value.copy(phase = "active", role = approval.role, commands = availableCommands,
-                playback = playback, playlist = catalog?.playlist, activeGroupId = catalog?.activeGroupId,
-                totalTracks = catalog?.totalTracks ?: 0, groups = catalog?.groups ?: emptyList(),
-                currentTrackId = catalog?.currentTrackId,
-                tracks = catalog?.tracks ?: emptyList(), fresh = true,
-                message = if (catalogUnavailable) "Katalog Desktop tidak tersedia. Refresh untuk mencoba lagi."
-                    else if (!playback.online) "Pemutar Desktop belum siap." else null, outcome = outcome)
+            mutable.update {
+                it.copy(
+                    phase = "active", role = approval.role, commands = availableCommands,
+                    mediaSupported = mediaAllowed, mediaMaxBytes = caps.mediaMaxBytes,
+                    playback = playback, playlist = catalog?.playlist, activeGroupId = catalog?.activeGroupId,
+                    totalTracks = catalog?.totalTracks ?: 0, groups = catalog?.groups ?: emptyList(),
+                    currentTrackId = catalog?.currentTrackId,
+                    tracks = catalog?.tracks ?: emptyList(), fresh = true,
+                    message = if (catalogUnavailable) "Katalog Desktop tidak tersedia. Refresh untuk mencoba lagi."
+                        else if (!playback.online) "Pemutar Desktop belum siap." else null,
+                    outcome = outcome,
+                )
+            }
         } catch (cancel: CancellationException) { throw cancel }
           catch (failure: Exception) {
             current(ticket, owner)
             if (failure is DesktopRemoteFailure && failure.kind != DesktopRemoteFailure.Kind.UNAVAILABLE) {
                 disconnectWith("Sesi ditolak, kedaluwarsa, atau identitas/protokol Desktop berubah. Pair ulang di PC.")
             } else {
-                mutable.value = mutable.value.copy(fresh = false, message = "Desktop tidak dapat dijangkau. Refresh hanya membaca status.")
+                mutable.update { it.copy(fresh = false, message = "Desktop tidak dapat dijangkau. Refresh hanya membaca status.") }
             }
         }
     }
@@ -284,6 +312,119 @@ class DesktopRemoteSession(
         }
     }
 
+    fun downloadTrack(trackId: String) {
+        val importer = mediaImporter ?: return
+        val snapshot = mutable.value
+        val p = pairing ?: return
+        val g = grant ?: return
+        if (!snapshot.canDownloadMedia || snapshot.tracks.none { it.id == trackId }) return
+        if (expiresAt <= now() || downloadJobs[trackId]?.isActive == true) return
+        val ticket = generation
+        val maxBytes = snapshot.mediaMaxBytes.takeIf { it > 0L } ?: (150L * 1024L * 1024L)
+        setDownloadState(ticket, trackId, DesktopRemoteTrackDownload(DesktopRemoteTrackDownload.Status.CHECKING))
+        downloadJobs[trackId] = scope.launch {
+            var tempFile: File? = null
+            try {
+                val head = api.headTrackMedia(p, g, trackId)
+                if (generation != ticket) return@launch
+                val exists = withContext(ioDispatcher) { importer.hasTrack(head.sha256, head.sizeBytes) }
+                if (generation != ticket) return@launch
+                if (exists) {
+                    setDownloadState(ticket, trackId, DesktopRemoteTrackDownload(
+                        status = DesktopRemoteTrackDownload.Status.ALREADY_IN_LIBRARY,
+                        downloadedBytes = head.sizeBytes,
+                        totalBytes = head.sizeBytes,
+                        detail = "Sudah ada di Library HP",
+                    ))
+                    return@launch
+                }
+                setDownloadState(ticket, trackId, DesktopRemoteTrackDownload(
+                    status = DesktopRemoteTrackDownload.Status.DOWNLOADING,
+                    downloadedBytes = 0L,
+                    totalBytes = head.sizeBytes,
+                ))
+                tempFile = withContext(ioDispatcher) { importer.createTempDownloadFile() }
+                val staged = tempFile
+                val verified = api.downloadTrackMedia(p, g, trackId, staged, maxBytes) { readBytes, totalBytes ->
+                    setDownloadState(ticket, trackId, DesktopRemoteTrackDownload(
+                        status = DesktopRemoteTrackDownload.Status.DOWNLOADING,
+                        downloadedBytes = readBytes,
+                        totalBytes = totalBytes,
+                    ))
+                }
+                if (generation != ticket) return@launch
+                setDownloadState(ticket, trackId, DesktopRemoteTrackDownload(
+                    status = DesktopRemoteTrackDownload.Status.IMPORTING,
+                    downloadedBytes = verified.sizeBytes,
+                    totalBytes = verified.sizeBytes,
+                ))
+                val outcome = withContext(ioDispatcher) {
+                    importer.importDownloadedAudio(staged, verified.filename, verified.sha256)
+                }
+                if (generation != ticket) return@launch
+                val saved = outcome is DesktopRemoteMediaImportOutcome.Saved
+                setDownloadState(ticket, trackId, DesktopRemoteTrackDownload(
+                    status = if (saved) DesktopRemoteTrackDownload.Status.SAVED else DesktopRemoteTrackDownload.Status.ALREADY_IN_LIBRARY,
+                    downloadedBytes = verified.sizeBytes,
+                    totalBytes = verified.sizeBytes,
+                    detail = if (saved) "Tersimpan di Library HP" else "Sudah ada di Library HP",
+                ))
+            } catch (cancel: CancellationException) {
+                if (generation == ticket) clearDownloadState(trackId)
+                throw cancel
+            } catch (failure: Exception) {
+                if (generation == ticket) {
+                    setDownloadState(ticket, trackId, DesktopRemoteTrackDownload(
+                        status = DesktopRemoteTrackDownload.Status.FAILED,
+                        detail = downloadFailureMessage(failure),
+                    ))
+                }
+            } finally {
+                downloadJobs.remove(trackId)
+                tempFile?.let { file ->
+                    withContext(NonCancellable + ioDispatcher) {
+                        runCatching { if (file.exists()) file.delete() }
+                    }
+                }
+            }
+        }
+    }
+
+    fun cancelDownload(trackId: String) {
+        downloadJobs.remove(trackId)?.cancel()
+        clearDownloadState(trackId)
+    }
+
+    fun clearDownloadState(trackId: String) {
+        mutable.update { prev ->
+            if (trackId !in prev.downloads) prev
+            else prev.copy(downloads = prev.downloads - trackId)
+        }
+    }
+
+    private fun setDownloadState(ticket: Long, trackId: String, status: DesktopRemoteTrackDownload) {
+        if (generation != ticket) return
+        mutable.update { prev -> prev.copy(downloads = prev.downloads + (trackId to status)) }
+    }
+
+    private fun downloadFailureMessage(failure: Exception): String = when (failure) {
+        is DesktopRemoteFailure -> when (failure.reason) {
+            DesktopRemoteFailure.Reason.MEDIA_DISABLED -> "Fitur unduh dimatikan di PC."
+            DesktopRemoteFailure.Reason.MEDIA_VIEW_ONLY -> "Mode Pantau Saja tidak bisa mengunduh."
+            DesktopRemoteFailure.Reason.MEDIA_BUSY -> "Antrean unduh PC penuh. Coba sebentar lagi."
+            DesktopRemoteFailure.Reason.MEDIA_TOO_LARGE -> "Ukuran file melebihi batas 150 MB."
+            DesktopRemoteFailure.Reason.MEDIA_UNSUPPORTED -> "Format audio tidak didukung HP."
+            DesktopRemoteFailure.Reason.MEDIA_UNAVAILABLE -> "File tidak tersedia di PC."
+            DesktopRemoteFailure.Reason.NONE -> when (failure.kind) {
+                DesktopRemoteFailure.Kind.AUTH -> "Akses unduh ditolak PC."
+                DesktopRemoteFailure.Kind.TRUST -> "Identitas TLS PC tidak cocok."
+                DesktopRemoteFailure.Kind.UNAVAILABLE -> "Koneksi terputus saat mengunduh."
+                else -> "Unduhan gagal diverifikasi."
+            }
+        }
+        else -> "Gagal menyimpan ke Library HP."
+    }
+
     private fun dispatchControlAction(
         before: DesktopRemoteUiState,
         send: suspend (DesktopRemotePairing, DesktopRemoteGrant) -> DesktopRemoteCommand,
@@ -293,7 +434,7 @@ class DesktopRemoteSession(
         val g = grant ?: return
         if (expiresAt <= now()) return
         val ticket = generation
-        mutable.value = before.copy(busy = true)
+        mutable.update { before.copy(busy = true, downloads = it.downloads) }
         mutation = scope.launch {
             var dispatched = false
             try {
@@ -307,24 +448,29 @@ class DesktopRemoteSession(
                     currentCoroutineContext().ensureActive()
                     if (generation != ticket) return@withLock
                     commandId = result.id
-                    mutable.value = mutable.value.copy(outcome = result.status)
+                    mutable.update { it.copy(outcome = result.status) }
                 }
             } catch (cancel: CancellationException) {
-                if (generation == ticket && dispatched) mutable.value = mutable.value.copy(outcome = "unknown", fresh = false)
+                if (generation == ticket && dispatched) mutable.update { it.copy(outcome = "unknown", fresh = false) }
                 throw cancel
             } catch (failure: Exception) {
                 if (generation == ticket) {
                     commandId = null
-                    mutable.value = mutable.value.copy(outcome = if (dispatched) "unknown" else mutable.value.outcome,
-                        fresh = false, message = "Hasil perintah tidak diketahui atau ditolak. Tidak dikirim ulang otomatis.")
+                    mutable.update {
+                        it.copy(
+                            outcome = if (dispatched) "unknown" else it.outcome,
+                            fresh = false,
+                            message = "Hasil perintah tidak diketahui atau ditolak. Tidak dikirim ulang otomatis.",
+                        )
+                    }
                     if (failure is DesktopRemoteFailure && failure.kind in setOf(DesktopRemoteFailure.Kind.AUTH, DesktopRemoteFailure.Kind.TRUST, DesktopRemoteFailure.Kind.PROTOCOL)) {
                         val outcome = mutable.value.outcome
                         disconnectWith("Sesi/perintah ditolak. Pair ulang di PC.")
-                        mutable.value = mutable.value.copy(outcome = outcome)
+                        mutable.update { it.copy(outcome = outcome) }
                     }
                 }
             } finally {
-                if (generation == ticket) { mutation = null; mutable.value = mutable.value.copy(busy = false) }
+                if (generation == ticket) { mutation = null; mutable.update { it.copy(busy = false) } }
             }
         }
     }

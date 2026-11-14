@@ -133,6 +133,30 @@ internal object UiIcons {
         moveTo(7f, 14f); lineTo(10f, 14f); lineTo(10f, 17f); lineTo(7f, 17f); close()
         moveTo(14f, 14f); lineTo(17f, 14f); lineTo(17f, 17f)
     }
+    val Sun = outline("Sun") {
+        moveTo(16f, 12f); arcTo(4f, 4f, 0f, true, true, 8f, 12f)
+        arcTo(4f, 4f, 0f, true, true, 16f, 12f)
+        moveTo(12f, 2f); lineTo(12f, 4f)
+        moveTo(12f, 20f); lineTo(12f, 22f)
+        moveTo(4.9f, 4.9f); lineTo(6.3f, 6.3f)
+        moveTo(17.7f, 17.7f); lineTo(19.1f, 19.1f)
+        moveTo(2f, 12f); lineTo(4f, 12f)
+        moveTo(20f, 12f); lineTo(22f, 12f)
+        moveTo(4.9f, 19.1f); lineTo(6.3f, 17.7f)
+        moveTo(17.7f, 6.3f); lineTo(19.1f, 4.9f)
+    }
+    val Refresh = outline("Refresh") {
+        moveTo(20f, 11f); arcTo(8f, 8f, 0f, true, false, 18.2f, 16.8f)
+        moveTo(20f, 5f); lineTo(20f, 11f); lineTo(14f, 11f)
+    }
+    val JumpActive = outline("JumpActive") {
+        moveTo(12f, 3f); lineTo(12f, 7f)
+        moveTo(12f, 17f); lineTo(12f, 21f)
+        moveTo(3f, 12f); lineTo(7f, 12f)
+        moveTo(17f, 12f); lineTo(21f, 12f)
+        moveTo(15f, 12f); arcTo(3f, 3f, 0f, true, true, 9f, 12f)
+        arcTo(3f, 3f, 0f, true, true, 15f, 12f)
+    }
 
     private fun outline(name: String, draw: PathBuilder.() -> Unit) =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {

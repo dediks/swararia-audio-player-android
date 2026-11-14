@@ -23,7 +23,7 @@ class DesktopRemoteWiring(unittest.TestCase):
         self.assertIn('desktopRemote.release()', vm)
 
     def test_remote_feature_never_owns_phone_player_or_durable_credentials(self):
-        names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteScreen', 'DesktopRemoteQrScanner']
+        names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteScreen', 'DesktopRemoteComponents', 'DesktopRemoteQrScanner']
         source = '\n'.join((SRC / (n + '.kt')).read_text() for n in names)
         for forbidden in ['MediaController', 'ExoPlayer', 'PlaybackService', 'SharedPreferences',
                           'SavedStateHandle', 'rememberSaveable', 'setDefaultSSLSocketFactory',

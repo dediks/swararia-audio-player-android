@@ -3,11 +3,24 @@ package com.swararia.audiolab
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import java.io.File
 import java.util.Base64
 
 /** Static errors only: never expose input, server bodies or exception messages. */
-class DesktopRemoteFailure(val kind: Kind = Kind.PROTOCOL) : Exception("Desktop remote request failed") {
+class DesktopRemoteFailure(
+    val kind: Kind = Kind.PROTOCOL,
+    val reason: Reason = Reason.NONE,
+) : Exception("Desktop remote request failed") {
     enum class Kind { INPUT, PROTOCOL, TRUST, AUTH, UNAVAILABLE }
+    enum class Reason {
+        NONE,
+        MEDIA_DISABLED,
+        MEDIA_VIEW_ONLY,
+        MEDIA_BUSY,
+        MEDIA_UNAVAILABLE,
+        MEDIA_TOO_LARGE,
+        MEDIA_UNSUPPORTED,
+    }
 }
 
 class DesktopRemoteSecret(private val value: String) {
@@ -110,6 +123,44 @@ data class DesktopRemoteCatalog(
     val groups: List<DesktopRemoteTrackGroup> = emptyList(),
 )
 
+data class DesktopRemoteCapabilities(
+    val commands: Set<String>,
+    val media: Boolean = false,
+    val mediaMaxBytes: Long = 0L,
+)
+
+data class DesktopRemoteMediaHead(
+    val trackId: String,
+    val filename: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val sha256: String,
+)
+
+data class DesktopRemoteTrackDownload(
+    val status: Status,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long = 0L,
+    val detail: String? = null,
+) {
+    enum class Status { CHECKING, DOWNLOADING, IMPORTING, SAVED, ALREADY_IN_LIBRARY, FAILED }
+}
+
+sealed interface DesktopRemoteMediaImportOutcome {
+    data object Saved : DesktopRemoteMediaImportOutcome
+    data object Deduplicated : DesktopRemoteMediaImportOutcome
+}
+
+interface DesktopRemoteMediaImporter {
+    suspend fun hasTrack(sha256: String, sizeBytes: Long): Boolean
+    fun createTempDownloadFile(): File
+    suspend fun importDownloadedAudio(
+        stagedFile: File,
+        requestedName: String,
+        expectedSha256: String,
+    ): DesktopRemoteMediaImportOutcome
+}
+
 object DesktopRemoteJson {
     private val mapper = ObjectMapper().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
     private val trackIdRegex = Regex("[A-Za-z0-9_-]{3,32}")
@@ -178,11 +229,45 @@ object DesktopRemoteJson {
         if (!value.isTextual || !value.textValue().matches(pattern)) throw DesktopRemoteFailure()
         return value.textValue()
     }
-    fun capabilities(node: JsonNode): Set<String> {
+    fun isValidTrackId(trackId: String): Boolean = trackId.matches(trackIdRegex)
+
+    fun isValidSha256Hex(raw: String): Boolean =
+        raw.length == 64 && raw.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+
+    fun safeErrorCode(bytes: ByteArray?): String? {
+        if (bytes == null || bytes.size !in 2..512) return null
+        return runCatching {
+            val node = objectValue(bytes, maxBytes = 512)
+            val code = node.get("code")?.takeIf { it.isTextual }?.textValue() ?: return@runCatching null
+            if (code.matches(Regex("[a-z0-9_]{1,40}"))) code else null
+        }.getOrNull()
+    }
+
+    fun capabilities(node: JsonNode): Set<String> = capabilitiesInfo(node).commands
+
+    fun capabilitiesInfo(node: JsonNode): DesktopRemoteCapabilities {
         protocol(node)
         val commands = node.get("commands") ?: throw DesktopRemoteFailure()
-        if (!commands.isArray || commands.size() !in 0..allowedCommands.size || commands.any { !it.isTextual || it.textValue() !in allowedCommands }) throw DesktopRemoteFailure()
-        return commands.map { it.textValue() }.toSet().also { if (it.size != commands.size()) throw DesktopRemoteFailure() }
+        if (!commands.isArray || commands.size() !in 0..allowedCommands.size ||
+            commands.any { !it.isTextual || it.textValue() !in allowedCommands }
+        ) {
+            throw DesktopRemoteFailure()
+        }
+        val parsedCommands = commands.map { it.textValue() }.toSet()
+        if (parsedCommands.size != commands.size()) throw DesktopRemoteFailure()
+        val mediaNode = node.get("media")
+        val media = when {
+            mediaNode == null || mediaNode.isNull -> false
+            mediaNode.isBoolean -> mediaNode.booleanValue()
+            else -> throw DesktopRemoteFailure()
+        }
+        val maxNode = node.get("media_max_bytes")
+        val mediaMaxBytes = when {
+            maxNode == null || maxNode.isNull -> 0L
+            maxNode.isIntegralNumber && maxNode.longValue() >= 0L -> maxNode.longValue()
+            else -> throw DesktopRemoteFailure()
+        }
+        return DesktopRemoteCapabilities(parsedCommands, media, mediaMaxBytes)
     }
     fun playback(node: JsonNode): DesktopRemotePlayback {
         protocol(node)

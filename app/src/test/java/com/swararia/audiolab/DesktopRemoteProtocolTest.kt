@@ -22,5 +22,22 @@ class DesktopRemoteProtocolTest {
         assertThrows(DesktopRemoteFailure::class.java) { DesktopRemoteJson.objectValue("{} {}".toByteArray()) }
         assertThrows(DesktopRemoteFailure::class.java) { DesktopRemoteJson.capabilities(DesktopRemoteJson.objectValue("{\"protocol\":\"v2\",\"commands\":[\"play\"]}".toByteArray())) }
         assertEquals(setOf("play", "pause", "stop"), DesktopRemoteJson.capabilities(DesktopRemoteJson.objectValue("{\"protocol\":\"v1\",\"commands\":[\"play\",\"pause\",\"stop\"],\"media\":false}".toByteArray())))
+
+        val capsWithMedia = DesktopRemoteJson.capabilitiesInfo(
+            DesktopRemoteJson.objectValue("{\"protocol\":\"v1\",\"commands\":[\"play\",\"pause\",\"stop\"],\"media\":true,\"media_max_bytes\":157286400}".toByteArray()),
+        )
+        assertTrue(capsWithMedia.media)
+        assertEquals(157286400L, capsWithMedia.mediaMaxBytes)
+
+        assertThrows(DesktopRemoteFailure::class.java) {
+            DesktopRemoteJson.capabilitiesInfo(DesktopRemoteJson.objectValue("{\"protocol\":\"v1\",\"commands\":[\"play\"],\"media\":\"yes\"}".toByteArray()))
+        }
+        assertThrows(DesktopRemoteFailure::class.java) {
+            DesktopRemoteJson.capabilitiesInfo(DesktopRemoteJson.objectValue("{\"protocol\":\"v1\",\"commands\":[\"play\"],\"media_max_bytes\":-1}".toByteArray()))
+        }
+        assertEquals("media_disabled", DesktopRemoteJson.safeErrorCode("{\"code\":\"media_disabled\"}".toByteArray()))
+        assertNull(DesktopRemoteJson.safeErrorCode("{\"code\":\"bad spaces!\"}".toByteArray()))
+        assertTrue(DesktopRemoteJson.isValidSha256Hex("a".repeat(64)))
+        assertFalse(DesktopRemoteJson.isValidSha256Hex("z".repeat(64)))
     }
 }

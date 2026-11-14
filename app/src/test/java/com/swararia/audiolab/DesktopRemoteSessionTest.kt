@@ -18,8 +18,15 @@ class DesktopRemoteSessionTest {
         var catalogFailure: DesktopRemoteFailure.Kind? = null
         var catalogCancelled = false
         var extended = false
+        var mediaSupported = false
+        var mediaMaxBytes = 150L * 1024L * 1024L
         var expiry = 4e9
         var pairGate: CompletableDeferred<Unit>? = null
+        var headCalls = 0
+        var downloadCalls = 0
+        var mediaHead = DesktopRemoteMediaHead("trk_01", "Track.mp3", "audio/mpeg", 1024L, "a".repeat(64))
+        var downloadFailure: DesktopRemoteFailure? = null
+        var downloadGate: CompletableDeferred<Unit>? = null
         override suspend fun pair(pairing: DesktopRemotePairing): DesktopRemoteGrant {
             pairs++
             pairGate?.let { withContext(NonCancellable) { it.await() } }
@@ -33,11 +40,33 @@ class DesktopRemoteSessionTest {
             return DesktopRemoteApproval(grant.deviceId, if (role == null) "pending" else "active", role, expiry)
         }
         override suspend fun capabilities(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) = if (extended) setOf("play", "pause", "stop", "select_track", "select_group") else setOf("play", "pause", "stop")
+        override suspend fun capabilitiesInfo(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
+            DesktopRemoteCapabilities(capabilities(pairing, grant), mediaSupported, mediaMaxBytes)
         override suspend fun state(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) = DesktopRemotePlayback(role!!, true, false, "PAUSED", 0.0, 10.0, "Track")
         override suspend fun tracks(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant): DesktopRemoteCatalog {
             if (catalogCancelled) throw CancellationException("catalog cancelled")
             catalogFailure?.let { throw DesktopRemoteFailure(it) }
             return DesktopRemoteCatalog(true, 1, "Playlist", "trk_01", listOf(DesktopRemoteTrack("trk_01", "Track")))
+        }
+        override suspend fun headTrackMedia(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, trackId: String): DesktopRemoteMediaHead {
+            headCalls++
+            downloadFailure?.let { throw it }
+            return mediaHead
+        }
+        override suspend fun downloadTrackMedia(
+            pairing: DesktopRemotePairing,
+            grant: DesktopRemoteGrant,
+            trackId: String,
+            destinationFile: java.io.File,
+            maxBytes: Long,
+            onProgress: (Long, Long) -> Unit,
+        ): DesktopRemoteMediaHead {
+            downloadCalls++
+            downloadGate?.let { withContext(NonCancellable) { it.await() } }
+            downloadFailure?.let { throw it }
+            destinationFile.writeBytes(byteArrayOf(1, 2, 3, 4))
+            onProgress(mediaHead.sizeBytes, mediaHead.sizeBytes)
+            return mediaHead
         }
         override suspend fun command(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, action: String, key: String): DesktopRemoteCommand {
             posts++; if (losePost) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.UNAVAILABLE)
@@ -318,6 +347,82 @@ class DesktopRemoteSessionTest {
             assertFalse(session.state.value.canControl)
             assertNotNull(store.encoded)
             assertFalse(session.state.value.message?.contains("Katalog") == true)
+        } finally { scope.cancel() }
+    }
+
+    private class FakeImporter(var alreadyHas: Boolean = false) : DesktopRemoteMediaImporter {
+        var imports = 0
+        val createdTempFiles = mutableListOf<java.io.File>()
+        override suspend fun hasTrack(sha256: String, sizeBytes: Long): Boolean = alreadyHas
+        override fun createTempDownloadFile(): java.io.File =
+            java.io.File.createTempFile("remote-test-", ".part").also { createdTempFiles.add(it) }
+        override suspend fun importDownloadedAudio(
+            stagedFile: java.io.File,
+            requestedName: String,
+            expectedSha256: String,
+        ): DesktopRemoteMediaImportOutcome {
+            imports++
+            return if (alreadyHas) DesktopRemoteMediaImportOutcome.Deduplicated else DesktopRemoteMediaImportOutcome.Saved
+        }
+    }
+
+    @Test fun trackDownloadDeduplicatesPreCheckImportsAndKeepsSessionAliveOnMediaDisabled() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val port = Port().apply { role = "control"; extended = true; mediaSupported = true }
+            val importer = FakeImporter()
+            val session = DesktopRemoteSession(port, scope, 100_000, ioDispatcher = Dispatchers.Unconfined, mediaImporter = importer)
+            session.visible(Any()); session.connect(pairing); settle()
+            assertTrue(session.state.value.canDownloadMedia)
+
+            // 1. Fresh download saves and deletes temp file cleanly.
+            session.downloadTrack("trk_01"); settle()
+            assertEquals(1, port.headCalls)
+            assertEquals(1, port.downloadCalls)
+            assertEquals(1, importer.imports)
+            assertEquals(DesktopRemoteTrackDownload.Status.SAVED, session.state.value.downloads["trk_01"]?.status)
+            assertTrue(importer.createdTempFiles.all { !it.exists() })
+
+            // 2. Existing SHA-256 + size short-circuits after HEAD without downloading body.
+            importer.alreadyHas = true
+            session.downloadTrack("trk_01"); settle()
+            assertEquals(2, port.headCalls)
+            assertEquals(1, port.downloadCalls)
+            assertEquals(DesktopRemoteTrackDownload.Status.ALREADY_IN_LIBRARY, session.state.value.downloads["trk_01"]?.status)
+
+            // 3. media_disabled failure reports on track row without tearing down control session.
+            importer.alreadyHas = false
+            port.downloadFailure = DesktopRemoteFailure(DesktopRemoteFailure.Kind.PROTOCOL, DesktopRemoteFailure.Reason.MEDIA_DISABLED)
+            session.downloadTrack("trk_01"); settle()
+            assertEquals("active", session.state.value.phase)
+            assertTrue(session.state.value.canControl)
+            assertEquals(3, port.headCalls)
+            assertEquals(DesktopRemoteTrackDownload.Status.FAILED, session.state.value.downloads["trk_01"]?.status)
+
+            // 4. view_only or mediaSupported=false blocks download.
+            port.downloadFailure = null
+            port.mediaSupported = false
+            session.refresh(); settle()
+            assertFalse(session.state.value.canDownloadMedia)
+            session.downloadTrack("trk_01"); settle()
+            assertEquals(3, port.headCalls)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun disconnectCancelsInFlightDownloadAndClearsDownloadStates() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val gate = CompletableDeferred<Unit>()
+            val port = Port().apply { role = "control"; extended = true; mediaSupported = true; downloadGate = gate }
+            val importer = FakeImporter()
+            val session = DesktopRemoteSession(port, scope, 100_000, ioDispatcher = Dispatchers.Unconfined, mediaImporter = importer)
+            session.visible(Any()); session.connect(pairing); settle()
+            session.downloadTrack("trk_01"); settle()
+            assertEquals(DesktopRemoteTrackDownload.Status.DOWNLOADING, session.state.value.downloads["trk_01"]?.status)
+            session.disconnect(); gate.complete(Unit); settle()
+            assertEquals("disconnected", session.state.value.phase)
+            assertTrue(session.state.value.downloads.isEmpty())
+            assertTrue(importer.createdTempFiles.all { !it.exists() })
         } finally { scope.cancel() }
     }
 
