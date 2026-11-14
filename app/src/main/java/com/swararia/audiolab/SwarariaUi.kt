@@ -41,7 +41,6 @@ fun SwarariaUi(
 ) {
     var destination by rememberSaveable { mutableIntStateOf(0) }
     var fullPlayer by rememberSaveable { mutableStateOf(false) }
-    var miniPlayerCollapsed by rememberSaveable { mutableStateOf(false) }
     var activeModal by remember { mutableStateOf<SwarariaModal?>(null) }
     val pages = rememberSaveableStateHolder()
     val playbackClock = remember { PlaybackClockState() }
@@ -78,11 +77,15 @@ fun SwarariaUi(
     val playQueuedTrack: (AudioTrack, List<AudioTrack>?, Boolean) -> Unit = { track, queue, cueOnly ->
         if (playback.connected) {
             val sameTrack = track.id.toString() == playback.mediaId
-            if (!cueOnly && sameTrack && (queue == null || !playback.wantsPlay)) {
-                searchActions.stopPreview()
-                toggleSwarariaPlayback(controller)
-            } else {
-                dispatchGuardedSwitch(UiPresentation.title(track.displayName), track, queue, cueOnly)
+            when {
+                !cueOnly && sameTrack && !playback.wantsPlay -> {
+                    searchActions.stopPreview()
+                    toggleSwarariaPlayback(controller)
+                }
+                !cueOnly && sameTrack -> {
+                    fullPlayer = true
+                }
+                else -> dispatchGuardedSwitch(UiPresentation.title(track.displayName), track, queue, cueOnly)
             }
         }
     }
@@ -113,8 +116,6 @@ fun SwarariaUi(
                                 current = current,
                                 playback = playback,
                                 controller = controller,
-                                collapsed = miniPlayerCollapsed,
-                                onToggleCollapse = { miniPlayerCollapsed = !miniPlayerCollapsed },
                                 onOpen = { fullPlayer = true },
                                 positionMsProvider = { playbackClock.positionMs },
                             )
@@ -161,6 +162,8 @@ fun SwarariaUi(
                     onGuardPlayOrCue = { showTitle, track, queue, cueOnly ->
                         dispatchGuardedSwitch(showTitle, track, queue, cueOnly)
                     },
+                    onToggleCurrentPlayPause = { toggleSwarariaPlayback(controller) },
+                    onOpenPlayer = { fullPlayer = true },
                     playlistActions = playlistActions,
                     onRename = { activeModal = SwarariaModal.RenameTrack(it) },
                     onHistory = { activeModal = SwarariaModal.RenameHistory },

@@ -76,6 +76,8 @@ internal fun LibraryPage(
     onGuardPlayOrCue: (String, AudioTrack, List<AudioTrack>, Boolean) -> Unit = { _, track, queue, cueOnly ->
         if (cueOnly) onCueQueue(track, queue) else onPlayQueue(track, queue)
     },
+    onToggleCurrentPlayPause: () -> Unit = {},
+    onOpenPlayer: () -> Unit = {},
     playlistActions: PlaylistUiActions = PlaylistUiActions(),
     onRename: (AudioTrack) -> Unit,
     onHistory: () -> Unit,
@@ -189,6 +191,8 @@ internal fun LibraryPage(
                                     onLongPress = { state.startSelectionWith(track.id) },
                                     onPlay = { onPlayQueue(track, sortedMatching) },
                                     onCue = { onCueQueue(track, sortedMatching) },
+                                    onTogglePlayPause = onToggleCurrentPlayPause,
+                                    onOpenPlayer = onOpenPlayer,
                                     onRename = { onRename(track) },
                                     onAddToPlaylist = { state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
                                     onDelete = { onDelete(track) },
@@ -236,6 +240,8 @@ internal fun LibraryPage(
                                             onLongPress = { state.startSelectionWith(track.id) },
                                             onPlay = { onPlayQueue(track, group.items) },
                                             onCue = { onCueQueue(track, group.items) },
+                                            onTogglePlayPause = onToggleCurrentPlayPause,
+                                            onOpenPlayer = onOpenPlayer,
                                             onRename = { onRename(track) },
                                             onAddToPlaylist = { state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
                                             onDelete = { onDelete(track) },
@@ -320,6 +326,8 @@ internal fun LibraryPage(
                                     ) else null,
                                     onPlay = { onPlayQueue(track, activePlaylistTracks) },
                                     onCue = { onCueQueue(track, activePlaylistTracks) },
+                                    onTogglePlayPause = onToggleCurrentPlayPause,
+                                    onOpenPlayer = onOpenPlayer,
                                     onRename = { onRename(track) },
                                     onAddToPlaylist = { state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
                                     onRemoveFromPlaylist = {
@@ -591,6 +599,8 @@ private fun LibraryAudioRow(
     onLongPress: () -> Unit = {},
     onPlay: () -> Unit,
     onCue: () -> Unit,
+    onTogglePlayPause: () -> Unit = {},
+    onOpenPlayer: () -> Unit = {},
     onRename: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onRemoveFromPlaylist: (() -> Unit)? = null,
@@ -621,8 +631,12 @@ private fun LibraryAudioRow(
                 .semantics { this.selected = selected || selectionChecked == true }
                 .combinedClickable(
                     enabled = inSelection || (connected && reorderControls == null),
-                    onClickLabel = if (inSelection) "Pilih ${UiPresentation.title(track.displayName)}"
-                    else "Putar ${UiPresentation.title(track.displayName)}",
+                    onClickLabel = when {
+                        inSelection -> "Pilih ${UiPresentation.title(track.displayName)}"
+                        selected && wantsPlay -> "Buka pemutar penuh ${UiPresentation.title(track.displayName)}"
+                        selected -> "Lanjutkan ${UiPresentation.title(track.displayName)}"
+                        else -> "Putar ${UiPresentation.title(track.displayName)}"
+                    },
                     onClick = { if (inSelection) onToggleSelect() else onPlay() },
                     onLongClick = { if (reorderControls == null) onLongPress() },
                 )
@@ -729,25 +743,48 @@ private fun LibraryAudioRow(
             } else if (!inSelection) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Surface(
-                        onClick = onCue,
-                        enabled = connected,
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (connected) FohTheme.colors.warnBg else FohTheme.colors.surfaceDeep,
-                        border = BorderStroke(
-                            1.dp,
-                            if (connected) FohTheme.colors.warnBorder else FohTheme.colors.borderSubtle,
-                        ),
-                    ) {
-                        Text(
-                            text = "Cue",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = if (connected) FohTheme.colors.warnAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    if (selected) {
+                        CompactCircleButton(
+                            icon = if (wantsPlay) UiIcons.Pause else UiIcons.Play,
+                            description = if (wantsPlay) "Jeda audio" else "Putar audio",
+                            onClick = onTogglePlayPause,
+                            enabled = connected,
+                            size = 32.dp,
+                            iconSize = 16.dp,
+                            containerColor = FohTheme.colors.safeBg,
+                            contentColor = FohTheme.colors.safeAccent,
                         )
+                        CompactCircleButton(
+                            icon = UiIcons.ChevronUp,
+                            description = "Buka pemutar lengkap",
+                            onClick = onOpenPlayer,
+                            enabled = connected,
+                            size = 32.dp,
+                            iconSize = 18.dp,
+                            containerColor = FohTheme.colors.surfaceDeep,
+                            contentColor = FohTheme.colors.safeAccent,
+                        )
+                    } else {
+                        Surface(
+                            onClick = onCue,
+                            enabled = connected,
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (connected) FohTheme.colors.warnBg else FohTheme.colors.surfaceDeep,
+                            border = BorderStroke(
+                                1.dp,
+                                if (connected) FohTheme.colors.warnBorder else FohTheme.colors.borderSubtle,
+                            ),
+                        ) {
+                            Text(
+                                text = "Cue",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (connected) FohTheme.colors.warnAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            )
+                        }
                     }
                     Box {
                         GlyphButton(UiIcons.More, "Menu audio ${UiPresentation.title(track.displayName)}", { menu = true })

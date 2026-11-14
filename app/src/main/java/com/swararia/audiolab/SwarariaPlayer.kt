@@ -1,6 +1,5 @@
 package com.swararia.audiolab
 
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -291,11 +290,10 @@ internal fun MiniPlayer(
     current: AudioTrack?,
     playback: SessionPlayback,
     controller: MediaController?,
-    collapsed: Boolean = false,
-    onToggleCollapse: () -> Unit = {},
     onOpen: () -> Unit,
     positionMsProvider: () -> Long = { playback.positionMs },
 ) {
+    val foh = FohTheme.colors
     val togglePlay = { toggleSwarariaPlayback(controller) }
     val skipNext: () -> Unit = {
         connectedCommand(controller, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) { p -> if (p.hasNextMediaItem()) p.seekToNextMediaItem() }
@@ -305,116 +303,70 @@ internal fun MiniPlayer(
 
     Surface(
         onClick = onOpen,
-        shape = RoundedCornerShape(if (collapsed) 16.dp else 20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = RoundedCornerShape(16.dp),
+        color = foh.surfaceCard,
+        border = BorderStroke(1.dp, if (playback.wantsPlay) foh.safeBorder else foh.borderSubtle),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
-            .animateContentSize()
             .semantics { contentDescription = "Buka pemutar lengkap" },
     ) {
-        if (collapsed) {
-            Column(Modifier.fillMaxWidth()) {
-                playback.durationMs?.let { duration ->
-                    MiniPlayerProgressLine(
-                        durationMs = duration,
-                        positionMsProvider = positionMsProvider,
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    TrackArtwork(current?.artworkKey, Modifier.size(32.dp).clip(RoundedCornerShape(6.dp)))
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                        Text(
-                            text = playbackTitle(current, playback),
-                            style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        MiniPlayerCollapsedSubtitle(
-                            playback = playback,
-                            positionMsProvider = positionMsProvider,
-                        )
-                    }
-                    CompactCircleButton(
-                        icon = if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
-                        description = if (playback.wantsPlay) "Jeda audio" else "Lanjutkan audio",
-                        onClick = togglePlay,
-                        enabled = playEnabled,
-                        size = 34.dp,
-                        iconSize = 18.dp,
-                        containerColor = if (playEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    )
-                    CompactCircleButton(
-                        icon = UiIcons.Next,
-                        description = "Audio berikutnya",
-                        onClick = skipNext,
-                        enabled = nextEnabled,
-                        size = 32.dp,
-                        iconSize = 18.dp,
-                    )
-                    CompactCircleButton(
-                        icon = UiIcons.ChevronUp,
-                        description = "Perluas pemutar lokal",
-                        onClick = onToggleCollapse,
-                        size = 32.dp,
-                        iconSize = 18.dp,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+        Column(Modifier.fillMaxWidth()) {
+            playback.durationMs?.let { duration ->
+                MiniPlayerProgressLine(
+                    durationMs = duration,
+                    positionMsProvider = positionMsProvider,
+                )
             }
-        } else {
-            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 56.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    TrackArtwork(current?.artworkKey, Modifier.size(46.dp).clip(RoundedCornerShape(7.dp)))
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(
-                            playbackTitle(current, playback),
-                            style = MaterialTheme.typography.titleSmall,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            playbackStatus(playback),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    GlyphButton(
-                        if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
-                        if (playback.wantsPlay) "Jeda audio" else "Lanjutkan audio",
-                        togglePlay,
-                        enabled = playEnabled,
-                        filled = true,
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TrackArtwork(current?.artworkKey, Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = playbackTitle(current, playback),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                    GlyphButton(UiIcons.Next, "Audio berikutnya", skipNext, enabled = nextEnabled)
-                    CompactCircleButton(
-                        icon = UiIcons.ChevronDown,
-                        description = "Perkecil pemutar lokal",
-                        onClick = onToggleCollapse,
-                        size = 32.dp,
-                        iconSize = 18.dp,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                playback.durationMs?.let { duration ->
-                    MiniPlayerProgressLine(
-                        durationMs = duration,
+                    MiniPlayerTimeSubtitle(
+                        playback = playback,
                         positionMsProvider = positionMsProvider,
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(2.dp),
                     )
                 }
+                CompactCircleButton(
+                    icon = if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
+                    description = if (playback.wantsPlay) "Jeda audio" else "Lanjutkan audio",
+                    onClick = togglePlay,
+                    enabled = playEnabled,
+                    size = 36.dp,
+                    iconSize = 18.dp,
+                    containerColor = if (playEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                )
+                CompactCircleButton(
+                    icon = UiIcons.Next,
+                    description = "Audio berikutnya",
+                    onClick = skipNext,
+                    enabled = nextEnabled,
+                    size = 32.dp,
+                    iconSize = 18.dp,
+                )
+                CompactCircleButton(
+                    icon = UiIcons.ChevronUp,
+                    description = "Buka pemutar lengkap",
+                    onClick = onOpen,
+                    size = 32.dp,
+                    iconSize = 18.dp,
+                    containerColor = foh.safeBg,
+                    contentColor = foh.safeAccent,
+                )
             }
         }
     }
@@ -424,30 +376,69 @@ internal fun MiniPlayer(
 private fun MiniPlayerProgressLine(
     durationMs: Long,
     positionMsProvider: () -> Long,
-    modifier: Modifier = Modifier.fillMaxWidth().height(2.dp),
+    modifier: Modifier = Modifier.fillMaxWidth().height(2.5.dp),
 ) {
+    val foh = FohTheme.colors
     LinearProgressIndicator(
         progress = { (positionMsProvider().toFloat() / durationMs).coerceIn(0f, 1f) },
         modifier = modifier,
-        color = MaterialTheme.colorScheme.primary,
-        trackColor = MaterialTheme.colorScheme.outlineVariant,
+        color = foh.safeAccent,
+        trackColor = foh.borderSubtle,
     )
 }
 
 @Composable
-private fun MiniPlayerCollapsedSubtitle(
+private fun MiniPlayerTimeSubtitle(
     playback: SessionPlayback,
     positionMsProvider: () -> Long,
 ) {
-    val elapsed = LibraryRules.durationLabel(positionMsProvider().takeIf { playback.connected })
-    val total = playback.durationMs?.let { LibraryRules.durationLabel(it) }
-    Text(
-        text = if (total != null) "$elapsed / $total" else playbackStatus(playback),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
+    val durationMs = playback.durationMs
+    if (playback.connected && durationMs != null && durationMs > 0L) {
+        val foh = FohTheme.colors
+        val positionMs = positionMsProvider()
+        val elapsed = LibraryRules.durationLabel(positionMs)
+        val total = LibraryRules.durationLabel(durationMs)
+        val countdown = LocalFohRules.countdownState(
+            positionMs = positionMs,
+            durationMs = durationMs,
+            isPlaying = playback.playing,
+        )
+        val countdownColor = if (countdown.warningActive) foh.alertAccent else foh.safeAccent
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = "$elapsed / $total",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontFeatureSettings = "tnum",
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+            )
+            Text(
+                text = "· ${countdown.countdownText}",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontFeatureSettings = "tnum",
+                ),
+                fontWeight = FontWeight.Bold,
+                color = countdownColor,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    } else {
+        Text(
+            text = playbackStatus(playback),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 @Composable

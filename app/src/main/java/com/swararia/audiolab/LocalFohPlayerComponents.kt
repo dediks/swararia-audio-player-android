@@ -360,11 +360,15 @@ internal fun LocalFohTrackSummaryCard(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        FohMicroChip(
-                            label = LocalFohRules.modeTag(controlUi.mode),
-                            containerColor = foh.safeBg,
-                            contentColor = foh.safeAccent,
-                        )
+                        LibraryRules.sanitizedTag(current?.artist)?.let { artist ->
+                            Text(
+                                text = artist,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
 
