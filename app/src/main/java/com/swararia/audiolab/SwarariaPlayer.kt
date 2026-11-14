@@ -59,8 +59,14 @@ internal data class SessionPlayback(
     val error: String? = null,
 )
 
+@Stable
+internal class PlaybackClockState(initialPositionMs: Long = 0L) {
+    var positionMs by mutableLongStateOf(initialPositionMs)
+        internal set
+}
+
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
-private fun readSwarariaPlayback(p: MediaController): SessionPlayback {
+private fun readSwarariaPlayback(p: MediaController, includePosition: Boolean = true): SessionPlayback {
     if (!p.isConnected) return SessionPlayback()
     val queue = if (p.isCommandAvailable(Player.COMMAND_GET_TIMELINE)) List(p.mediaItemCount) { index ->
         val item = p.getMediaItemAt(index)
@@ -72,7 +78,8 @@ private fun readSwarariaPlayback(p: MediaController): SessionPlayback {
         playing = p.isPlaying, wantsPlay = playbackRequestsPause(p), idle = p.playbackState == Player.STATE_IDLE,
         ended = p.playbackState == Player.STATE_ENDED,
         buffering = p.playbackState == Player.STATE_BUFFERING,
-        positionMs = p.currentPosition.coerceAtLeast(0), durationMs = p.duration.takeIf { it > 0 && it != C.TIME_UNSET },
+        positionMs = if (includePosition) p.currentPosition.coerceAtLeast(0) else 0L,
+        durationMs = p.duration.takeIf { it > 0 && it != C.TIME_UNSET },
         canPlay = p.isCommandAvailable(Player.COMMAND_PLAY_PAUSE),
         canSeek = p.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) && p.isCurrentMediaItemSeekable,
         canStop = p.isCommandAvailable(Player.COMMAND_STOP),
@@ -85,25 +92,45 @@ private fun readSwarariaPlayback(p: MediaController): SessionPlayback {
 
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 @Composable
-internal fun rememberSwarariaPlayback(controller: MediaController?): SessionPlayback {
+internal fun rememberSwarariaPlayback(
+    controller: MediaController?,
+    clock: PlaybackClockState? = null,
+): SessionPlayback {
     var state by remember(controller) { mutableStateOf(SessionPlayback()) }
     val owner = LocalLifecycleOwner.current
-    LaunchedEffect(controller, owner) {
-        val p = controller ?: return@LaunchedEffect
+    LaunchedEffect(controller, owner, clock) {
+        val p = controller ?: run {
+            clock?.positionMs = 0L
+            return@LaunchedEffect
+        }
         owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            if (!p.isConnected) { state = SessionPlayback(); return@repeatOnLifecycle }
+            if (!p.isConnected) {
+                clock?.positionMs = 0L
+                state = SessionPlayback()
+                return@repeatOnLifecycle
+            }
+            val syncState = {
+                clock?.positionMs = p.currentPosition.coerceAtLeast(0)
+                state = readSwarariaPlayback(p, includePosition = clock == null)
+            }
             val listener = object : Player.Listener {
-                override fun onEvents(player: Player, events: Player.Events) { state = readSwarariaPlayback(p) }
+                override fun onEvents(player: Player, events: Player.Events) { syncState() }
             }
             p.addListener(listener)
             try {
-                state = readSwarariaPlayback(p)
-                // Events handle paused/idle changes. The position ticker exists only while playing and visible.
+                syncState()
+                // Events handle paused/idle changes. The position ticker updates only PlaybackClockState so parent UI stays idle.
                 snapshotFlow { state.playing }.collectLatest { playing ->
                     if (playing) while (isActive) {
                         delay(500)
-                        if (!p.isConnected) { state = SessionPlayback(); break }
-                        state = state.copy(positionMs = p.currentPosition.coerceAtLeast(0))
+                        if (!p.isConnected) {
+                            clock?.positionMs = 0L
+                            state = SessionPlayback()
+                            break
+                        }
+                        val pos = p.currentPosition.coerceAtLeast(0)
+                        if (clock != null) clock.positionMs = pos
+                        else state = state.copy(positionMs = pos)
                     }
                 }
             } finally { p.removeListener(listener) }
@@ -157,12 +184,13 @@ internal fun RemoteLocalAudioPill(
     playback: SessionPlayback,
     controller: MediaController?,
     onOpen: () -> Unit,
+    positionMsProvider: () -> Long = { playback.positionMs },
 ) {
-    val pillBackground = Color(0xFF282417)
-    val pillBorder = Color(0xFF7A6935)
-    val pillAccent = Color(0xFFF5D782)
+    val foh = FohTheme.colors
+    val pillBackground = foh.localBannerBg
+    val pillBorder = foh.localBannerBorder
+    val pillAccent = foh.localBannerAccent
     val title = playbackTitle(current, playback)
-    val elapsed = LibraryRules.durationLabel(playback.positionMs.takeIf { playback.connected && playback.mediaId != null })
 
     Surface(
         onClick = onOpen,
@@ -202,10 +230,10 @@ internal fun RemoteLocalAudioPill(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                text = elapsed,
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                color = pillAccent.copy(alpha = 0.9f),
+            RemoteLocalAudioElapsed(
+                active = playback.connected && playback.mediaId != null,
+                accent = pillAccent,
+                positionMsProvider = positionMsProvider,
             )
             CompactCircleButton(
                 icon = if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
@@ -245,6 +273,20 @@ internal fun RemoteLocalAudioPill(
 }
 
 @Composable
+private fun RemoteLocalAudioElapsed(
+    active: Boolean,
+    accent: Color,
+    positionMsProvider: () -> Long,
+) {
+    val elapsed = LibraryRules.durationLabel(positionMsProvider().takeIf { active })
+    Text(
+        text = elapsed,
+        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+        color = accent.copy(alpha = 0.9f),
+    )
+}
+
+@Composable
 internal fun MiniPlayer(
     current: AudioTrack?,
     playback: SessionPlayback,
@@ -252,6 +294,7 @@ internal fun MiniPlayer(
     collapsed: Boolean = false,
     onToggleCollapse: () -> Unit = {},
     onOpen: () -> Unit,
+    positionMsProvider: () -> Long = { playback.positionMs },
 ) {
     val togglePlay = { toggleSwarariaPlayback(controller) }
     val skipNext: () -> Unit = {
@@ -274,11 +317,9 @@ internal fun MiniPlayer(
         if (collapsed) {
             Column(Modifier.fillMaxWidth()) {
                 playback.durationMs?.let { duration ->
-                    LinearProgressIndicator(
-                        progress = { (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().height(2.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.outlineVariant,
+                    MiniPlayerProgressLine(
+                        durationMs = duration,
+                        positionMsProvider = positionMsProvider,
                     )
                 }
                 Row(
@@ -294,14 +335,9 @@ internal fun MiniPlayer(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        val elapsed = LibraryRules.durationLabel(playback.positionMs.takeIf { playback.connected })
-                        val total = playback.durationMs?.let { LibraryRules.durationLabel(it) }
-                        Text(
-                            text = if (total != null) "$elapsed / $total" else playbackStatus(playback),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                        MiniPlayerCollapsedSubtitle(
+                            playback = playback,
+                            positionMsProvider = positionMsProvider,
                         )
                     }
                     CompactCircleButton(
@@ -373,16 +409,45 @@ internal fun MiniPlayer(
                     )
                 }
                 playback.durationMs?.let { duration ->
-                    LinearProgressIndicator(
-                        progress = { (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f) },
+                    MiniPlayerProgressLine(
+                        durationMs = duration,
+                        positionMsProvider = positionMsProvider,
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(2.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.outlineVariant,
                     )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun MiniPlayerProgressLine(
+    durationMs: Long,
+    positionMsProvider: () -> Long,
+    modifier: Modifier = Modifier.fillMaxWidth().height(2.dp),
+) {
+    LinearProgressIndicator(
+        progress = { (positionMsProvider().toFloat() / durationMs).coerceIn(0f, 1f) },
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.primary,
+        trackColor = MaterialTheme.colorScheme.outlineVariant,
+    )
+}
+
+@Composable
+private fun MiniPlayerCollapsedSubtitle(
+    playback: SessionPlayback,
+    positionMsProvider: () -> Long,
+) {
+    val elapsed = LibraryRules.durationLabel(positionMsProvider().takeIf { playback.connected })
+    val total = playback.durationMs?.let { LibraryRules.durationLabel(it) }
+    Text(
+        text = if (total != null) "$elapsed / $total" else playbackStatus(playback),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -395,6 +460,7 @@ internal fun FocusedPlayer(
     onBack: () -> Unit,
     onRename: (AudioTrack) -> Unit,
     onSettings: () -> Unit,
+    positionMsProvider: () -> Long = { playback.positionMs },
 ) {
     var viewMode by rememberSaveable { mutableStateOf(LocalPlayerViewMode.CUE_LIST) }
     var deckCollapsed by rememberSaveable { mutableStateOf(false) }
@@ -424,13 +490,6 @@ internal fun FocusedPlayer(
     val activeTitle = playbackTitle(current, playback)
 
     PlaybackModeBar(controller, modifier.fillMaxSize()) { controlUi ->
-        val activePosMs = seekPosition?.toLong() ?: playback.positionMs
-        val countdown = LocalFohRules.countdownState(
-            positionMs = activePosMs,
-            durationMs = playback.durationMs,
-            isPlaying = playback.playing,
-        )
-
         Column(Modifier.fillMaxSize()) {
             LocalFohHeaderBar(
                 route = outputRoute,
@@ -459,6 +518,7 @@ internal fun FocusedPlayer(
                         if (p.currentMediaItem?.mediaId == playback.mediaId && p.currentMediaItemIndex == playback.currentIndex) p.seekTo(requested.toLong())
                     }
                 },
+                positionMsProvider = positionMsProvider,
             )
 
             LocalFohViewModeHeader(
@@ -500,7 +560,6 @@ internal fun FocusedPlayer(
             LocalFohBottomDeck(
                 nextUpLabel = LocalFohRules.nextUpLabel(playback, byId, controlUi.mode),
                 keepScreenOn = keepScreenOn,
-                countdown = countdown,
                 playback = playback,
                 controlUi = controlUi,
                 collapsed = deckCollapsed,
@@ -518,6 +577,7 @@ internal fun FocusedPlayer(
                     }
                 },
                 onCueStart = { cueCurrentTrackToStart(controller, playback) },
+                positionMsProvider = positionMsProvider,
             )
         }
     }

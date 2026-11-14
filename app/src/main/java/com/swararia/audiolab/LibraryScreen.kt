@@ -33,12 +33,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,7 +48,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import java.util.Locale
 
 internal data class ReorderRowControls(
@@ -87,144 +84,25 @@ internal fun LibraryPage(
     onDeleteBatch: (List<AudioTrack>) -> Unit = {},
     onImport: () -> Unit,
 ) {
-    var sectionName by rememberSaveable { mutableStateOf(LibrarySectionTab.ALL_TRACKS.name) }
-    var query by rememberSaveable { mutableStateOf("") }
-    var alphabetical by rememberSaveable { mutableStateOf(false) }
-    var groupModeName by rememberSaveable { mutableStateOf(LibraryGroupMode.ALL.name) }
-    var selectedPlaylistId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var reorderMode by rememberSaveable { mutableStateOf(false) }
-    var selectionMode by rememberSaveable { mutableStateOf(false) }
-    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
-    var collapsedGroups by remember { mutableStateOf(emptySet<String>()) }
+    val state = rememberLibraryBrowserState(tracks = tracks, playlists = playlists)
+    val section = state.section
+    val groupMode = state.groupMode
+    val activePlaylist = state.activePlaylist
 
-    var creatingPlaylist by remember { mutableStateOf(false) }
-    var renamingPlaylist by remember { mutableStateOf<LibraryPlaylist?>(null) }
-    var deletingPlaylist by remember { mutableStateOf<LibraryPlaylist?>(null) }
-    var pickingPlaylistTrack by remember { mutableStateOf<AudioTrack?>(null) }
-    var batchPlaylistOpen by remember { mutableStateOf(false) }
-    var addingTracksPlaylistId by remember { mutableStateOf<Long?>(null) }
-
-    val section = remember(sectionName) {
-        LibrarySectionTab.entries.firstOrNull { it.name == sectionName } ?: LibrarySectionTab.ALL_TRACKS
+    BackHandler(enabled = state.selectionMode && section == LibrarySectionTab.ALL_TRACKS) {
+        state.exitSelectionMode()
     }
-    val groupMode = remember(groupModeName) {
-        LibraryGroupMode.entries.firstOrNull { it.name == groupModeName } ?: LibraryGroupMode.ALL
-    }
-    val activePlaylist = remember(playlists, selectedPlaylistId) {
-        playlists.firstOrNull { it.id == selectedPlaylistId }
+    BackHandler(enabled = section == LibrarySectionTab.PLAYLISTS && state.selectedPlaylistId != null && !state.selectionMode) {
+        state.closePlaylist()
     }
 
-    var optimisticOrder by remember(activePlaylist?.id) { mutableStateOf<List<Long>?>(null) }
-    var lastMovedTrackId by remember(activePlaylist?.id) { mutableStateOf<Long?>(null) }
-
-    LaunchedEffect(playlists, selectedPlaylistId) {
-        if (selectedPlaylistId != null && playlists.none { it.id == selectedPlaylistId }) {
-            selectedPlaylistId = null
-            reorderMode = false
-        }
-    }
-    LaunchedEffect(tracks) {
-        val validIds = tracks.mapTo(HashSet()) { it.id }
-        val filtered = selectedIds.filterTo(HashSet()) { it in validIds }
-        if (filtered != selectedIds) {
-            selectedIds = filtered
-            if (filtered.isEmpty()) selectionMode = false
-        }
-    }
-    LaunchedEffect(activePlaylist?.id, activePlaylist?.trackIds) {
-        val persisted = activePlaylist?.trackIds
-        if (persisted != null && optimisticOrder == persisted) {
-            optimisticOrder = null
-        }
-    }
-    LaunchedEffect(optimisticOrder) {
-        if (optimisticOrder != null) {
-            delay(1500L)
-            optimisticOrder = null
-        }
-    }
-    LaunchedEffect(lastMovedTrackId, reorderMode) {
-        if (!reorderMode) {
-            lastMovedTrackId = null
-        } else if (lastMovedTrackId != null) {
-            delay(2200L)
-            lastMovedTrackId = null
-        }
-    }
-
-    BackHandler(enabled = selectionMode && section == LibrarySectionTab.ALL_TRACKS) {
-        selectionMode = false
-        selectedIds = emptySet()
-    }
-    BackHandler(enabled = section == LibrarySectionTab.PLAYLISTS && selectedPlaylistId != null && !selectionMode) {
-        reorderMode = false
-        optimisticOrder = null
-        selectedPlaylistId = null
-    }
-
-    val trackById = remember(tracks) { tracks.associateBy { it.id } }
-    val membershipByTrackId = remember(playlists) {
-        val map = HashMap<Long, MutableList<String>>()
-        for (pl in playlists) {
-            for (tid in pl.trackIds) {
-                map.getOrPut(tid) { mutableListOf() }.add(pl.name)
-            }
-        }
-        map
-    }
-    val sortedMatching = remember(tracks, playlists, query, alphabetical) {
-        val matching = filterLibraryTracks(tracks, query, membershipByTrackId)
-        sortLibraryTracks(matching, alphabetical)
-    }
-    val effectiveRundownIds = remember(activePlaylist?.trackIds, optimisticOrder) {
-        val persisted = activePlaylist?.trackIds.orEmpty()
-        val candidate = optimisticOrder
-        if (candidate != null && candidate.toSet() == persisted.toSet() && candidate.size == persisted.size) candidate
-        else persisted
-    }
-    val activePlaylistTracks = remember(effectiveRundownIds, trackById) {
-        effectiveRundownIds.mapNotNull(trackById::get)
-    }
-    val visiblePlaylists = remember(playlists, trackById, query) {
-        val q = query.trim()
-        if (q.isEmpty()) playlists else playlists.filter { playlist ->
-            playlist.name.contains(q, ignoreCase = true) ||
-                playlist.trackIds.any { id -> trackById[id]?.let { matchesTrackQuery(it, q) } == true }
-        }
-    }
-    val groupedTracks = remember(sortedMatching, groupMode) {
-        when (groupMode) {
-            LibraryGroupMode.ARTIST -> UiPresentation.groupItems(
-                sortedMatching,
-                keySelector = { LibraryRules.sanitizedTag(it.artist) ?: "Artis Tidak Diketahui" },
-                durationSelector = { it.durationMs },
-                fallbackLabel = "Artis Tidak Diketahui",
-            )
-            LibraryGroupMode.ALBUM -> UiPresentation.groupItems(
-                sortedMatching,
-                keySelector = { LibraryRules.sanitizedTag(it.album) ?: "Album Tidak Diketahui" },
-                durationSelector = { it.durationMs },
-                fallbackLabel = "Album Tidak Diketahui",
-            )
-            LibraryGroupMode.FORMAT -> UiPresentation.groupItems(
-                sortedMatching,
-                keySelector = { LibraryRules.audioFormatLabel(it.displayName) },
-                durationSelector = { it.durationMs },
-                fallbackLabel = "Audio",
-            )
-            LibraryGroupMode.ALL -> emptyList()
-        }
-    }
-
-    val toggleTrackSelection: (Long) -> Unit = { id ->
-        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
-    }
-    val startSelectionWith: (Long) -> Unit = { id ->
-        if (section == LibrarySectionTab.ALL_TRACKS) {
-            selectionMode = true
-            selectedIds = selectedIds + id
-        }
-    }
+    val trackById = state.trackById
+    val badgeByTrackId = state.badgeByTrackId
+    val sortedMatching = state.sortedMatching
+    val activePlaylistTracks = state.activePlaylistTracks
+    val visiblePlaylists = state.visiblePlaylists
+    val groupedTracks = state.groupedTracks
+    val activeTrackId = remember(currentId) { currentId?.toLongOrNull() }
 
     Column(modifier = modifier.fillMaxSize()) {
         LazyColumn(
@@ -235,46 +113,31 @@ internal fun LibraryPage(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (!(section == LibrarySectionTab.PLAYLISTS && activePlaylist != null)) {
-                item(key = "library-header") {
+                item(key = "library-header", contentType = "library-header") {
                     LibraryCompactHeader(
                         section = section,
                         trackCount = tracks.size,
                         playlistCount = playlists.size,
-                        selectionMode = selectionMode,
-                        query = query,
+                        selectionMode = state.selectionMode,
+                        query = state.query,
                         groupMode = groupMode,
-                        alphabetical = alphabetical,
+                        alphabetical = state.alphabetical,
                         importEnabled = !ingest.busy && !search.busy && !organizerBusy,
                         actionBusy = organizerBusy,
-                        onSelectSection = { target ->
-                            sectionName = target.name
-                            if (target == LibrarySectionTab.PLAYLISTS) {
-                                selectionMode = false
-                                selectedIds = emptySet()
-                            } else {
-                                reorderMode = false
-                            }
-                        },
+                        onSelectSection = state::selectSection,
                         onImport = onImport,
-                        onToggleSelectionMode = {
-                            if (selectionMode) {
-                                selectionMode = false
-                                selectedIds = emptySet()
-                            } else {
-                                selectionMode = true
-                            }
-                        },
-                        onCreatePlaylist = { creatingPlaylist = true },
-                        onQueryChange = { query = it },
-                        onSelectGroupMode = { groupModeName = it.name },
-                        onToggleSort = { alphabetical = it },
+                        onToggleSelectionMode = state::toggleSelectionMode,
+                        onCreatePlaylist = { state.dialog = LibraryDialog.CreatePlaylist },
+                        onQueryChange = { state.query = it },
+                        onSelectGroupMode = state::selectGroupMode,
+                        onToggleSort = { state.alphabetical = it },
                         onHistory = onHistory,
                         onSettings = onSettings,
                     )
                 }
             }
 
-            if (ingest.busy || search.busy) item(key = "active-operation") {
+            if (ingest.busy || search.busy) item(key = "active-operation", contentType = "banner") {
                 Surface(onClick = onAdd, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface) {
                     Row(
                         Modifier.fillMaxWidth().padding(12.dp),
@@ -291,7 +154,7 @@ internal fun LibraryPage(
                     }
                 }
             }
-            if (!connected && tracks.isNotEmpty()) item(key = "player-disconnected") {
+            if (!connected && tracks.isNotEmpty()) item(key = "player-disconnected", contentType = "banner") {
                 Text(
                     "Pemutar belum terhubung. Library & rundown tetap dapat diatur.",
                     style = MaterialTheme.typography.bodySmall,
@@ -299,87 +162,82 @@ internal fun LibraryPage(
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
             }
-            if (organizerBusy) item(key = "rename-progress") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            if (organizerBusy) item(key = "rename-progress", contentType = "progress") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
 
             when (section) {
                 LibrarySectionTab.ALL_TRACKS -> {
                     if (groupMode == LibraryGroupMode.ALL) {
                         if (sortedMatching.isEmpty()) {
-                            item(key = "library-empty") {
+                            item(key = "library-empty", contentType = "empty") {
                                 LibraryEmptyPlaceholder(
                                     hasTracks = tracks.isNotEmpty(),
                                     onAdd = onAdd,
-                                    onClearQuery = { query = "" },
+                                    onClearQuery = { state.query = "" },
                                 )
                             }
                         } else {
-                            items(sortedMatching, key = { it.id }) { track ->
-                                val badge = remember(membershipByTrackId, track.id) {
-                                    UiPresentation.playlistMembershipBadge(membershipByTrackId[track.id].orEmpty())
-                                }
+                            items(sortedMatching, key = { it.id }, contentType = { "track-row" }) { track ->
                                 LibraryAudioRow(
                                     track = track,
                                     selected = track.id.toString() == currentId,
                                     wantsPlay = wantsPlay,
                                     connected = connected,
                                     renameEnabled = !organizerBusy,
-                                    selectionChecked = if (selectionMode) (track.id in selectedIds) else null,
-                                    playlistBadge = badge,
-                                    onToggleSelect = { toggleTrackSelection(track.id) },
-                                    onLongPress = { startSelectionWith(track.id) },
+                                    selectionChecked = if (state.selectionMode) (track.id in state.selectedIds) else null,
+                                    playlistBadge = badgeByTrackId[track.id],
+                                    onToggleSelect = { state.toggleTrackSelection(track.id) },
+                                    onLongPress = { state.startSelectionWith(track.id) },
                                     onPlay = { onPlayQueue(track, sortedMatching) },
                                     onCue = { onCueQueue(track, sortedMatching) },
                                     onRename = { onRename(track) },
-                                    onAddToPlaylist = { pickingPlaylistTrack = track },
+                                    onAddToPlaylist = { state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
                                     onDelete = { onDelete(track) },
                                 )
                             }
                         }
                     } else {
                         if (groupedTracks.isEmpty()) {
-                            item(key = "grouped-empty") {
+                            item(key = "grouped-empty", contentType = "empty") {
                                 LibraryEmptyPlaceholder(
                                     hasTracks = tracks.isNotEmpty(),
                                     onAdd = onAdd,
-                                    onClearQuery = { query = "" },
+                                    onClearQuery = { state.query = "" },
                                 )
                             }
                         } else {
                             groupedTracks.forEach { group ->
-                                val collapsed = group.key in collapsedGroups
-                                item(key = "grp-header:${groupMode.name}:${group.key}") {
+                                val collapsed = group.key in state.collapsedGroups
+                                item(key = "grp-header:${groupMode.name}:${group.key}", contentType = "group-header") {
                                     LibraryGroupHeader(
                                         group = group,
                                         collapsed = collapsed,
                                         connected = connected,
-                                        onToggle = {
-                                            collapsedGroups = if (collapsed) collapsedGroups - group.key
-                                            else collapsedGroups + group.key
-                                        },
+                                        onToggle = { state.toggleGroupCollapsed(group.key) },
                                         onPlayAll = {
                                             if (group.items.isNotEmpty()) onPlayQueue(group.items.first(), group.items)
                                         },
                                     )
                                 }
                                 if (!collapsed) {
-                                    items(group.items, key = { "grp:${groupMode.name}:${group.key}:${it.id}" }) { track ->
-                                        val badge = remember(membershipByTrackId, track.id) {
-                                            UiPresentation.playlistMembershipBadge(membershipByTrackId[track.id].orEmpty())
-                                        }
+                                    items(
+                                        group.items,
+                                        key = { "grp:${groupMode.name}:${group.key}:${it.id}" },
+                                        contentType = { "track-row" },
+                                    ) { track ->
                                         LibraryAudioRow(
                                             track = track,
                                             selected = track.id.toString() == currentId,
                                             wantsPlay = wantsPlay,
                                             connected = connected,
                                             renameEnabled = !organizerBusy,
-                                            selectionChecked = if (selectionMode) (track.id in selectedIds) else null,
-                                            playlistBadge = badge,
-                                            onToggleSelect = { toggleTrackSelection(track.id) },
-                                            onLongPress = { startSelectionWith(track.id) },
+                                            selectionChecked = if (state.selectionMode) (track.id in state.selectedIds) else null,
+                                            playlistBadge = badgeByTrackId[track.id],
+                                            onToggleSelect = { state.toggleTrackSelection(track.id) },
+                                            onLongPress = { state.startSelectionWith(track.id) },
                                             onPlay = { onPlayQueue(track, group.items) },
                                             onCue = { onCueQueue(track, group.items) },
                                             onRename = { onRename(track) },
-                                            onAddToPlaylist = { pickingPlaylistTrack = track },
+                                            onAddToPlaylist = { state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
                                             onDelete = { onDelete(track) },
                                         )
                                     }
@@ -391,18 +249,14 @@ internal fun LibraryPage(
 
                 LibrarySectionTab.PLAYLISTS -> {
                     if (activePlaylist != null) {
-                        item(key = "playlist-detail-header") {
+                        item(key = "playlist-detail-header", contentType = "playlist-detail-header") {
                             PlaylistRundownHeader(
                                 playlist = activePlaylist,
                                 tracks = activePlaylistTracks,
                                 connected = connected,
                                 busy = organizerBusy,
-                                reorderMode = reorderMode,
-                                onBack = {
-                                    reorderMode = false
-                                    optimisticOrder = null
-                                    selectedPlaylistId = null
-                                },
+                                reorderMode = state.reorderMode,
+                                onBack = state::closePlaylist,
                                 onLoadCue = {
                                     if (activePlaylistTracks.isNotEmpty()) {
                                         onGuardPlayOrCue(activePlaylist.name, activePlaylistTracks.first(), activePlaylistTracks, true)
@@ -413,21 +267,21 @@ internal fun LibraryPage(
                                         onGuardPlayOrCue(activePlaylist.name, activePlaylistTracks.first(), activePlaylistTracks, false)
                                     }
                                 },
-                                onAddTracks = { addingTracksPlaylistId = activePlaylist.id },
-                                onToggleReorder = { reorderMode = !reorderMode },
-                                onRename = { renamingPlaylist = activePlaylist },
-                                onDelete = { deletingPlaylist = activePlaylist },
+                                onAddTracks = { state.dialog = LibraryDialog.AddTracksToPlaylist(activePlaylist.id) },
+                                onToggleReorder = state::toggleReorderMode,
+                                onRename = { state.dialog = LibraryDialog.RenamePlaylist(activePlaylist) },
+                                onDelete = { state.dialog = LibraryDialog.DeletePlaylist(activePlaylist) },
                             )
                         }
                         if (activePlaylistTracks.isEmpty()) {
-                            item(key = "playlist-empty") {
+                            item(key = "playlist-empty", contentType = "empty") {
                                 EmptyMessage(
                                     "Playlist masih kosong",
                                     "Tambahkan track dari library untuk menyusun rundown show ini.",
                                     UiIcons.Queue,
                                 ) {
                                     Button(
-                                        onClick = { addingTracksPlaylistId = activePlaylist.id },
+                                        onClick = { state.dialog = LibraryDialog.AddTracksToPlaylist(activePlaylist.id) },
                                         enabled = tracks.isNotEmpty() && !organizerBusy,
                                         modifier = Modifier.heightIn(min = 48.dp),
                                     ) { Text("Add Tracks") }
@@ -437,17 +291,17 @@ internal fun LibraryPage(
                             itemsIndexed(
                                 activePlaylistTracks,
                                 key = { _, track -> "pl:${activePlaylist.id}:${track.id}" },
+                                contentType = { _, _ -> "track-row" },
                             ) { index, track ->
                                 val moveTrack: (Int) -> Unit = { delta ->
                                     val baseIds = activePlaylistTracks.map { it.id }
                                     val moved = LibraryRules.movePlaylistItem(baseIds, index, delta)
                                     if (moved != baseIds) {
-                                        optimisticOrder = moved
-                                        lastMovedTrackId = track.id
+                                        state.markTrackMoved(track.id)
                                         playlistActions.onReorderPlaylistTracks(activePlaylist.id, moved)
                                     }
                                 }
-                                val justMoved = lastMovedTrackId == track.id
+                                val justMoved = state.lastMovedTrackId == track.id
                                 LibraryAudioRow(
                                     track = track,
                                     selected = track.id.toString() == currentId,
@@ -457,7 +311,7 @@ internal fun LibraryPage(
                                     leadingIndex = index + 1,
                                     highlighted = justMoved,
                                     reorderBadge = if (justMoved) String.format(Locale.ROOT, "Dipindah ke #%02d", index + 1) else null,
-                                    reorderControls = if (reorderMode) ReorderRowControls(
+                                    reorderControls = if (state.reorderMode) ReorderRowControls(
                                         canMoveUp = index > 0 && !organizerBusy,
                                         canMoveDown = index < activePlaylistTracks.lastIndex && !organizerBusy,
                                         onMoveUp = { moveTrack(-1) },
@@ -467,22 +321,22 @@ internal fun LibraryPage(
                                     onPlay = { onPlayQueue(track, activePlaylistTracks) },
                                     onCue = { onCueQueue(track, activePlaylistTracks) },
                                     onRename = { onRename(track) },
-                                    onAddToPlaylist = { pickingPlaylistTrack = track },
+                                    onAddToPlaylist = { state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
                                     onRemoveFromPlaylist = {
                                         playlistActions.onRemoveTrackFromPlaylist(activePlaylist.id, track.id)
                                     },
                                     onDelete = { onDelete(track) },
                                 )
                             }
-                            if (reorderMode || activePlaylistTracks.size > 1) {
-                                item(key = "rundown-sync-notice") {
+                            if (state.reorderMode || activePlaylistTracks.size > 1) {
+                                item(key = "rundown-sync-notice", contentType = "banner") {
                                     RundownSyncNoticeBanner()
                                 }
                             }
                         }
                     } else {
                         if (visiblePlaylists.isEmpty()) {
-                            item(key = "playlists-empty") {
+                            item(key = "playlists-empty", contentType = "empty") {
                                 if (playlists.isEmpty()) {
                                     EmptyMessage(
                                         "Belum ada playlist",
@@ -490,25 +344,28 @@ internal fun LibraryPage(
                                         UiIcons.Queue,
                                     ) {
                                         Button(
-                                            onClick = { creatingPlaylist = true },
+                                            onClick = { state.dialog = LibraryDialog.CreatePlaylist },
                                             enabled = !organizerBusy,
                                             modifier = Modifier.heightIn(min = 48.dp),
                                         ) { Text("New Playlist") }
                                     }
                                 } else {
                                     EmptyMessage("Playlist tidak ditemukan", "Coba kata lain atau hapus pencarian.", UiIcons.Search) {
-                                        TextButton(onClick = { query = "" }, modifier = Modifier.heightIn(min = 48.dp)) {
+                                        TextButton(onClick = { state.query = "" }, modifier = Modifier.heightIn(min = 48.dp)) {
                                             Text("Hapus pencarian")
                                         }
                                     }
                                 }
                             }
                         } else {
-                            items(visiblePlaylists, key = { "playlist-card:${it.id}" }) { playlist ->
+                            items(
+                                visiblePlaylists,
+                                key = { "playlist-card:${it.id}" },
+                                contentType = { "playlist-card" },
+                            ) { playlist ->
                                 val plTracks = remember(playlist, trackById) { playlist.trackIds.mapNotNull(trackById::get) }
                                 val plDuration = remember(plTracks) { plTracks.totalDurationMs() }
-                                val activeShow = remember(currentId, playlist.trackIds) {
-                                    val activeTrackId = currentId?.toLongOrNull()
+                                val activeShow = remember(activeTrackId, playlist.trackIds) {
                                     activeTrackId != null && activeTrackId in playlist.trackIds
                                 }
                                 PlaylistShowCard(
@@ -519,10 +376,7 @@ internal fun LibraryPage(
                                     isActiveShow = activeShow,
                                     connected = connected,
                                     busy = organizerBusy,
-                                    onOpen = {
-                                        reorderMode = false
-                                        selectedPlaylistId = playlist.id
-                                    },
+                                    onOpen = { state.openPlaylist(playlist.id) },
                                     onLoadCue = {
                                         if (plTracks.isNotEmpty()) {
                                             onGuardPlayOrCue(playlist.name, plTracks.first(), plTracks, true)
@@ -533,9 +387,9 @@ internal fun LibraryPage(
                                             onGuardPlayOrCue(playlist.name, plTracks.first(), plTracks, false)
                                         }
                                     },
-                                    onAddTracks = { addingTracksPlaylistId = playlist.id },
-                                    onRename = { renamingPlaylist = playlist },
-                                    onDelete = { deletingPlaylist = playlist },
+                                    onAddTracks = { state.dialog = LibraryDialog.AddTracksToPlaylist(playlist.id) },
+                                    onRename = { state.dialog = LibraryDialog.RenamePlaylist(playlist) },
+                                    onDelete = { state.dialog = LibraryDialog.DeletePlaylist(playlist) },
                                 )
                             }
                         }
@@ -544,107 +398,119 @@ internal fun LibraryPage(
             }
         }
 
-        if (selectionMode && section == LibrarySectionTab.ALL_TRACKS) {
-            val visibleIds = sortedMatching.map { it.id }
+        if (state.selectionMode && section == LibrarySectionTab.ALL_TRACKS) {
+            val visibleIds = remember(sortedMatching) { sortedMatching.map { it.id } }
             LibraryBatchActionBar(
-                selectedCount = selectedIds.size,
+                selectedCount = state.selectedIds.size,
                 totalVisibleCount = visibleIds.size,
                 busy = organizerBusy,
-                onToggleSelectAll = {
-                    val allSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedIds }
-                    selectedIds = if (allSelected) emptySet() else visibleIds.toSet()
-                },
-                onAddToPlaylist = { batchPlaylistOpen = true },
+                onToggleSelectAll = { state.toggleSelectAllVisible(visibleIds) },
+                onAddToPlaylist = { state.dialog = LibraryDialog.BatchAddToPlaylist },
                 onDeleteSelected = {
-                    val batch = tracks.filter { it.id in selectedIds }
+                    val batch = tracks.filter { it.id in state.selectedIds }
                     if (batch.isNotEmpty()) onDeleteBatch(batch)
                 },
-                onCancel = {
-                    selectionMode = false
-                    selectedIds = emptySet()
-                },
+                onCancel = state::exitSelectionMode,
             )
         }
     }
 
-    if (creatingPlaylist) {
-        CreateOrRenamePlaylistDialog(
+    LibraryDialogHost(
+        dialog = state.dialog,
+        tracks = tracks,
+        playlists = playlists,
+        selectedIds = state.selectedIds,
+        organizerBusy = organizerBusy,
+        playlistActions = playlistActions,
+        onPlaylistCreated = { state.selectSection(LibrarySectionTab.PLAYLISTS) },
+        onDismiss = { state.dialog = null },
+    )
+}
+
+@Composable
+private fun LibraryDialogHost(
+    dialog: LibraryDialog?,
+    tracks: List<AudioTrack>,
+    playlists: List<LibraryPlaylist>,
+    selectedIds: Set<Long>,
+    organizerBusy: Boolean,
+    playlistActions: PlaylistUiActions,
+    onPlaylistCreated: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    when (dialog) {
+        null -> Unit
+        LibraryDialog.CreatePlaylist -> CreateOrRenamePlaylistDialog(
             title = "Buat playlist baru",
             confirmLabel = "Buat",
             busy = organizerBusy,
-            onDismiss = { creatingPlaylist = false },
+            onDismiss = onDismiss,
             onConfirm = { name ->
                 playlistActions.onCreatePlaylist(name, null)
-                sectionName = LibrarySectionTab.PLAYLISTS.name
+                onPlaylistCreated()
             },
         )
-    }
-    renamingPlaylist?.let { playlist ->
-        key(playlist.id, playlist.name) {
+        is LibraryDialog.RenamePlaylist -> key(dialog.playlist.id, dialog.playlist.name) {
             CreateOrRenamePlaylistDialog(
                 title = "Ganti nama playlist",
                 confirmLabel = "Simpan",
-                initialName = playlist.name,
+                initialName = dialog.playlist.name,
                 busy = organizerBusy,
-                onDismiss = { renamingPlaylist = null },
-                onConfirm = { name -> playlistActions.onRenamePlaylist(playlist.id, name) },
+                onDismiss = onDismiss,
+                onConfirm = { name -> playlistActions.onRenamePlaylist(dialog.playlist.id, name) },
             )
         }
-    }
-    deletingPlaylist?.let { playlist ->
-        key(playlist.id) {
+        is LibraryDialog.DeletePlaylist -> key(dialog.playlist.id) {
             DeletePlaylistDialog(
-                playlist = playlist,
+                playlist = dialog.playlist,
                 busy = organizerBusy,
-                onDismiss = { deletingPlaylist = null },
+                onDismiss = onDismiss,
                 onDelete = { playlistId -> playlistActions.onDeletePlaylist(playlistId) },
             )
         }
-    }
-    pickingPlaylistTrack?.let { track ->
-        key(track.id) {
+        is LibraryDialog.PickPlaylistForTrack -> key(dialog.track.id) {
             PlaylistPickerDialog(
-                track = track,
+                track = dialog.track,
                 playlists = playlists,
                 busy = organizerBusy,
-                onDismiss = { pickingPlaylistTrack = null },
+                onDismiss = onDismiss,
                 onToggleMembership = { playlistId, add ->
-                    if (add) playlistActions.onAddTrackToPlaylist(playlistId, track.id)
-                    else playlistActions.onRemoveTrackFromPlaylist(playlistId, track.id)
+                    if (add) playlistActions.onAddTrackToPlaylist(playlistId, dialog.track.id)
+                    else playlistActions.onRemoveTrackFromPlaylist(playlistId, dialog.track.id)
                 },
                 onCreatePlaylistWithTrack = { name, trackId ->
                     playlistActions.onCreatePlaylist(name, trackId)
                 },
             )
         }
-    }
-    if (batchPlaylistOpen) {
-        val batchTracks = remember(tracks, selectedIds) { tracks.filter { it.id in selectedIds } }
-        BatchPlaylistPickerDialog(
-            selectedTracks = batchTracks,
-            playlists = playlists,
-            busy = organizerBusy,
-            onDismiss = { batchPlaylistOpen = false },
-            onAddTracksToPlaylist = { playlistId, ids ->
-                playlistActions.onAddTracksToPlaylist(playlistId, ids)
-            },
-            onCreatePlaylistWithTracks = { name, ids ->
-                playlistActions.onCreatePlaylistWithTracks(name, ids)
-            },
-        )
-    }
-    addingTracksPlaylistId?.let { targetPlaylistId ->
-        playlists.firstOrNull { it.id == targetPlaylistId }?.let { targetPlaylist ->
-            AddTracksToPlaylistDialog(
-                playlist = targetPlaylist,
-                tracks = tracks,
+        LibraryDialog.BatchAddToPlaylist -> {
+            val batchTracks = remember(tracks, selectedIds) { tracks.filter { it.id in selectedIds } }
+            BatchPlaylistPickerDialog(
+                selectedTracks = batchTracks,
+                playlists = playlists,
                 busy = organizerBusy,
-                onDismiss = { addingTracksPlaylistId = null },
-                onToggleTrack = { trackId, add ->
-                    if (add) playlistActions.onAddTrackToPlaylist(targetPlaylist.id, trackId)
-                    else playlistActions.onRemoveTrackFromPlaylist(targetPlaylist.id, trackId)
+                onDismiss = onDismiss,
+                onAddTracksToPlaylist = { playlistId, ids ->
+                    playlistActions.onAddTracksToPlaylist(playlistId, ids)
+                },
+                onCreatePlaylistWithTracks = { name, ids ->
+                    playlistActions.onCreatePlaylistWithTracks(name, ids)
                 },
             )
+        }
+        is LibraryDialog.AddTracksToPlaylist -> {
+            playlists.firstOrNull { it.id == dialog.playlistId }?.let { targetPlaylist ->
+                AddTracksToPlaylistDialog(
+                    playlist = targetPlaylist,
+                    tracks = tracks,
+                    busy = organizerBusy,
+                    onDismiss = onDismiss,
+                    onToggleTrack = { trackId, add ->
+                        if (add) playlistActions.onAddTrackToPlaylist(targetPlaylist.id, trackId)
+                        else playlistActions.onRemoveTrackFromPlaylist(targetPlaylist.id, trackId)
+                    },
+                )
+            }
         }
     }
 }
@@ -653,38 +519,6 @@ internal fun LibraryPage(
 private fun CircularProgressIndicatorCompact() {
     androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
 }
-
-private fun matchesTrackQuery(track: AudioTrack, query: String): Boolean {
-    val q = query.trim()
-    if (q.isEmpty()) return true
-    return track.displayName.contains(q, ignoreCase = true) ||
-        UiPresentation.title(track.displayName).contains(q, ignoreCase = true) ||
-        (track.artist?.contains(q, ignoreCase = true) == true) ||
-        (track.album?.contains(q, ignoreCase = true) == true) ||
-        (track.genre?.contains(q, ignoreCase = true) == true) ||
-        LibraryRules.audioFormatLabel(track.displayName).contains(q, ignoreCase = true)
-}
-
-private fun filterLibraryTracks(
-    tracks: List<AudioTrack>,
-    query: String,
-    membershipByTrackId: Map<Long, List<String>> = emptyMap(),
-): List<AudioTrack> {
-    val q = query.trim()
-    if (q.isEmpty()) return tracks
-    return tracks.filter { track ->
-        matchesTrackQuery(track, q) ||
-            membershipByTrackId[track.id]?.any { it.contains(q, ignoreCase = true) } == true
-    }
-}
-
-private fun sortLibraryTracks(tracks: List<AudioTrack>, alphabetical: Boolean): List<AudioTrack> =
-    if (alphabetical) tracks.sortedWith(compareBy<AudioTrack> {
-        UiPresentation.title(it.displayName).lowercase(Locale.ROOT)
-    }.thenBy { it.id })
-    else tracks.sortedWith(compareByDescending<AudioTrack> { it.addedAt }.thenByDescending { it.id })
-
-private fun List<AudioTrack>.totalDurationMs(): Long = sumOf { (it.durationMs ?: 0L).coerceAtLeast(0L) }
 
 @Composable
 private fun LibraryEmptyPlaceholder(hasTracks: Boolean, onAdd: () -> Unit, onClearQuery: () -> Unit) {
@@ -705,8 +539,8 @@ private fun LibraryGroupHeader(
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = FohPalette.SurfaceCard,
-        border = BorderStroke(1.dp, FohPalette.BorderSubtle),
+        color = FohTheme.colors.surfaceCard,
+        border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
     ) {
         Row(
             Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(horizontal = 12.dp, vertical = 10.dp),
@@ -765,14 +599,14 @@ private fun LibraryAudioRow(
     var menu by remember { mutableStateOf(false) }
     val inSelection = selectionChecked != null
     val activeContainer = when {
-        highlighted -> FohPalette.SafeBg
-        selectionChecked == true -> FohPalette.SafeBg
+        highlighted -> FohTheme.colors.safeBg
+        selectionChecked == true -> FohTheme.colors.safeBg
         selected -> MaterialTheme.colorScheme.primaryContainer
-        else -> FohPalette.SurfaceCard
+        else -> FohTheme.colors.surfaceCard
     }
     val borderStroke = when {
-        highlighted || selectionChecked == true || selected -> BorderStroke(1.dp, FohPalette.SafeBorder)
-        else -> BorderStroke(1.dp, FohPalette.BorderSubtle.copy(alpha = 0.7f))
+        highlighted || selectionChecked == true || selected -> BorderStroke(1.dp, FohTheme.colors.safeBorder)
+        else -> BorderStroke(1.dp, FohTheme.colors.borderSubtle.copy(alpha = 0.7f))
     }
 
     Surface(
@@ -806,7 +640,7 @@ private fun LibraryAudioRow(
                     text = String.format(Locale.ROOT, "%02d", leadingIndex),
                     style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace),
                     fontWeight = FontWeight.Bold,
-                    color = if (highlighted || selected) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (highlighted || selected) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
@@ -835,24 +669,24 @@ private fun LibraryAudioRow(
                         if (selected) {
                             LibraryMiniBadge(
                                 label = if (wantsPlay) "PLAYING" else "STANDBY",
-                                containerColor = FohPalette.SafeBg,
-                                borderColor = FohPalette.SafeBorder,
-                                contentColor = FohPalette.SafeAccent,
+                                containerColor = FohTheme.colors.safeBg,
+                                borderColor = FohTheme.colors.safeBorder,
+                                contentColor = FohTheme.colors.safeAccent,
                             )
                         }
                         if (reorderBadge != null) {
                             LibraryMiniBadge(
                                 label = reorderBadge,
-                                containerColor = FohPalette.SafeBg,
-                                borderColor = FohPalette.SafeBorder,
-                                contentColor = FohPalette.SafeAccent,
+                                containerColor = FohTheme.colors.safeBg,
+                                borderColor = FohTheme.colors.safeBorder,
+                                contentColor = FohTheme.colors.safeAccent,
                             )
                         } else if (playlistBadge != null) {
                             LibraryMiniBadge(
                                 label = "↳ $playlistBadge",
-                                containerColor = FohPalette.SurfaceDeep,
-                                borderColor = FohPalette.BorderSubtle,
-                                contentColor = FohPalette.SafeAccent,
+                                containerColor = FohTheme.colors.surfaceDeep,
+                                borderColor = FohTheme.colors.borderSubtle,
+                                contentColor = FohTheme.colors.safeAccent,
                             )
                         }
                     }
@@ -868,8 +702,8 @@ private fun LibraryAudioRow(
                         icon = UiIcons.ArrowUp,
                         description = "Naikkan urutan",
                         enabled = reorderControls.canMoveUp,
-                        containerColor = FohPalette.SurfaceDeep,
-                        borderColor = FohPalette.BorderSubtle,
+                        containerColor = FohTheme.colors.surfaceDeep,
+                        borderColor = FohTheme.colors.borderSubtle,
                         tint = MaterialTheme.colorScheme.onSurface,
                         onClick = reorderControls.onMoveUp,
                     )
@@ -877,8 +711,8 @@ private fun LibraryAudioRow(
                         icon = UiIcons.ArrowDown,
                         description = "Turunkan urutan",
                         enabled = reorderControls.canMoveDown,
-                        containerColor = FohPalette.SurfaceDeep,
-                        borderColor = FohPalette.BorderSubtle,
+                        containerColor = FohTheme.colors.surfaceDeep,
+                        borderColor = FohTheme.colors.borderSubtle,
                         tint = MaterialTheme.colorScheme.onSurface,
                         onClick = reorderControls.onMoveDown,
                     )
@@ -886,9 +720,9 @@ private fun LibraryAudioRow(
                         icon = UiIcons.Close,
                         description = "Keluarkan dari playlist",
                         enabled = renameEnabled,
-                        containerColor = FohPalette.AlertBg,
-                        borderColor = FohPalette.AlertBorder,
-                        tint = FohPalette.AlertAccent,
+                        containerColor = FohTheme.colors.alertBg,
+                        borderColor = FohTheme.colors.alertBorder,
+                        tint = FohTheme.colors.alertAccent,
                         onClick = reorderControls.onRemove,
                     )
                 }
@@ -901,17 +735,17 @@ private fun LibraryAudioRow(
                         onClick = onCue,
                         enabled = connected,
                         shape = RoundedCornerShape(8.dp),
-                        color = if (connected) FohPalette.WarnBg else FohPalette.SurfaceDeep,
+                        color = if (connected) FohTheme.colors.warnBg else FohTheme.colors.surfaceDeep,
                         border = BorderStroke(
                             1.dp,
-                            if (connected) FohPalette.WarnBorder else FohPalette.BorderSubtle,
+                            if (connected) FohTheme.colors.warnBorder else FohTheme.colors.borderSubtle,
                         ),
                     ) {
                         Text(
                             text = "Cue",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
-                            color = if (connected) FohPalette.WarnAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                            color = if (connected) FohTheme.colors.warnAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         )
                     }
@@ -991,10 +825,10 @@ private fun RundownReorderIconButton(
         onClick = onClick,
         enabled = enabled,
         shape = RoundedCornerShape(8.dp),
-        color = if (enabled) containerColor else FohPalette.SurfaceDeep.copy(alpha = 0.5f),
+        color = if (enabled) containerColor else FohTheme.colors.surfaceDeep.copy(alpha = 0.5f),
         border = BorderStroke(
             1.dp,
-            if (enabled) borderColor else FohPalette.BorderSubtle.copy(alpha = 0.4f),
+            if (enabled) borderColor else FohTheme.colors.borderSubtle.copy(alpha = 0.4f),
         ),
         modifier = Modifier.size(32.dp),
     ) {

@@ -369,13 +369,21 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
                         )
                     }
                     if (!collapsed) {
-                        items(sectionTracks, key = { (_, track) -> track.id }) { item ->
+                        items(
+                            sectionTracks,
+                            key = { (_, track) -> track.id },
+                            contentType = { "remote-track-row" },
+                        ) { item ->
                             renderTrackRow(item)
                         }
                     }
                 }
             } else {
-                items(filteredTracks, key = { (_, track) -> track.id }) { item ->
+                items(
+                    filteredTracks,
+                    key = { (_, track) -> track.id },
+                    contentType = { "remote-track-row" },
+                ) { item ->
                     renderTrackRow(item)
                 }
             }

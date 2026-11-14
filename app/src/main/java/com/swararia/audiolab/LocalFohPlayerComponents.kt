@@ -74,183 +74,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Locale
 
-internal enum class LocalPlayerViewMode(val label: String) {
-    CUE_LIST("Cue List"),
-    ART("Art"),
-}
-
-internal enum class AudioOutputKind {
-    LINE_OR_USB,
-    BLUETOOTH,
-    SPEAKER,
-}
-
-internal data class AudioOutputRoute(
-    val kind: AudioOutputKind,
-    val label: String,
-    val detail: String,
-)
-
-internal data class LocalCountdownState(
-    val countdownText: String,
-    val remainingMs: Long?,
-    val warningActive: Boolean,
-)
-
-internal object LocalFohRules {
-    const val ENDING_SOON_THRESHOLD_MS = 15_000L
-
-    private val WIRED_OR_USB_TYPES = setOf(
-        AudioDeviceInfo.TYPE_WIRED_HEADSET,
-        AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-        AudioDeviceInfo.TYPE_LINE_ANALOG,
-        AudioDeviceInfo.TYPE_LINE_DIGITAL,
-        AudioDeviceInfo.TYPE_USB_DEVICE,
-        AudioDeviceInfo.TYPE_USB_HEADSET,
-        AudioDeviceInfo.TYPE_USB_ACCESSORY,
-        AudioDeviceInfo.TYPE_AUX_LINE,
-        AudioDeviceInfo.TYPE_HDMI,
-    )
-
-    private val BLUETOOTH_BASE_TYPES = setOf(
-        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
-        AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-        // API 31/33 BLE constants represented numerically so host JVM tests and minSdk 29 stay safe.
-        26, // TYPE_BLE_HEADSET
-        27, // TYPE_BLE_SPEAKER
-        30, // TYPE_BLE_BROADCAST
-    )
-
-    fun formatCountdown(remainingMs: Long?): String {
-        if (remainingMs == null || remainingMs < 0L) return "--:--"
-        val totalSeconds = remainingMs / 1000L
-        return if (totalSeconds >= 3600L) {
-            String.format(
-                Locale.ROOT,
-                "-%d:%02d:%02d",
-                totalSeconds / 3600L,
-                (totalSeconds / 60L) % 60L,
-                totalSeconds % 60L,
-            )
-        } else {
-            String.format(Locale.ROOT, "-%02d:%02d", totalSeconds / 60L, totalSeconds % 60L)
-        }
-    }
-
-    fun countdownState(
-        positionMs: Long,
-        durationMs: Long?,
-        isPlaying: Boolean,
-    ): LocalCountdownState {
-        if (durationMs == null || durationMs <= 0L) {
-            return LocalCountdownState(countdownText = "--:--", remainingMs = null, warningActive = false)
-        }
-        val remaining = (durationMs - positionMs.coerceAtLeast(0L)).coerceAtLeast(0L)
-        val warning = isPlaying && remaining in 1L..ENDING_SOON_THRESHOLD_MS
-        return LocalCountdownState(
-            countdownText = formatCountdown(remaining),
-            remainingMs = remaining,
-            warningActive = warning,
-        )
-    }
-
-    fun endingAlertText(remainingMs: Long?, mode: PlaybackMode?, isPlaying: Boolean): String? {
-        if (!isPlaying || remainingMs == null || remainingMs !in 1L..ENDING_SOON_THRESHOLD_MS) return null
-        val seconds = (remainingMs / 1000L).coerceAtLeast(1L)
-        return when (mode) {
-            PlaybackMode.ONCE -> "Ending in ${seconds}s · Auto-Stop (Mode Once)"
-            PlaybackMode.CONTINUE -> "Ending in ${seconds}s · Auto-Next (Continue)"
-            PlaybackMode.LOOP_TRACK -> "Ending in ${seconds}s · Looping Track"
-            null -> "Ending in ${seconds}s"
-        }
-    }
-
-    fun formatTag(track: AudioTrack?): String {
-        val ext = track?.displayName?.substringAfterLast('.', "")?.trim().orEmpty()
-        return if (ext.isBlank() || ext == track?.displayName) "AUDIO" else ext.uppercase(Locale.ROOT)
-    }
-
-    fun cueItemSubtitle(track: AudioTrack?, fallbackTitle: String? = null): String =
-        if (track != null) UiPresentation.trackSubtitle(track.displayName, track.artist, track.durationMs)
-        else fallbackTitle?.takeIf { it.isNotBlank() }?.let(UiPresentation::title) ?: "Audio lokal"
-
-    fun modeTag(mode: PlaybackMode?): String = when (mode) {
-        PlaybackMode.ONCE -> "ONCE · AUTO STOP"
-        PlaybackMode.CONTINUE -> "CONTINUE"
-        PlaybackMode.LOOP_TRACK -> "LOOP TRACK"
-        null -> "STANDBY"
-    }
-
-    fun modeButtonLabel(mode: PlaybackMode): String = when (mode) {
-        PlaybackMode.ONCE -> "Once (Auto-Stop)"
-        PlaybackMode.CONTINUE -> "Continue"
-        PlaybackMode.LOOP_TRACK -> "Loop Track"
-    }
-
-    private fun entryTitle(entry: SessionQueueItem, byId: Map<String, AudioTrack>): String? =
-        byId[entry.mediaId]?.let { UiPresentation.title(it.displayName) }
-            ?: entry.title?.takeIf { it.isNotBlank() }?.let(UiPresentation::title)
-
-    fun nextUpLabel(playback: SessionPlayback, byId: Map<String, AudioTrack>, mode: PlaybackMode?): String {
-        if (!playback.connected || playback.mediaId == null) return "Next Up: Belum ada track"
-        if (mode == PlaybackMode.LOOP_TRACK) return "Loop Active · Track Diulang"
-        val nextTitle = playback.queue.getOrNull(playback.currentIndex + 1)?.let { entryTitle(it, byId) }
-        return when (mode) {
-            PlaybackMode.ONCE -> if (nextTitle != null) "Auto-Stop · Next Ready: $nextTitle" else "Mode Once · Auto-Stop"
-            else -> if (nextTitle != null) "Next Up: $nextTitle" else "End of Cue List"
-        }
-    }
-
-    fun classifyOutputDevices(devices: List<Pair<Int, String?>>): AudioOutputRoute {
-        val wired = devices.firstOrNull { (type, _) -> type in WIRED_OR_USB_TYPES }
-        if (wired != null) {
-            val name = wired.second?.trim()?.takeIf { it.isNotEmpty() }
-            return AudioOutputRoute(
-                kind = AudioOutputKind.LINE_OR_USB,
-                label = "USB / Line Out",
-                detail = name?.let { "Output aktif melalui $it." } ?: "Kabel Line Out / USB Audio terhubung.",
-            )
-        }
-        val bt = devices.firstOrNull { (type, _) -> type in BLUETOOTH_BASE_TYPES }
-        if (bt != null) {
-            val name = bt.second?.trim()?.takeIf { it.isNotEmpty() }
-            return AudioOutputRoute(
-                kind = AudioOutputKind.BLUETOOTH,
-                label = "Bluetooth Audio",
-                detail = name?.let { "Output aktif ke Bluetooth: $it." } ?: "Audio diarahkan ke perangkat Bluetooth.",
-            )
-        }
-        return AudioOutputRoute(
-            kind = AudioOutputKind.SPEAKER,
-            label = "Output: Phone Speaker",
-            detail = "Tidak ada kabel Line Out / USB terdeteksi. Audio keluar lewat speaker HP.",
-        )
-    }
-}
-
-internal object FohPalette {
-    val SafeBg = Color(0xFF132B21)
-    val SafeBorder = Color(0xFF285944)
-    val SafeAccent = Color(0xFF8CE3C7)
-
-    val BtBg = Color(0xFF142730)
-    val BtBorder = Color(0xFF2B5669)
-    val BtAccent = Color(0xFF7DD3FC)
-
-    val WarnBg = Color(0xFF2E2311)
-    val WarnBorder = Color(0xFF7A5B21)
-    val WarnAccent = Color(0xFFF5C451)
-
-    val AlertBg = Color(0xFF351B1B)
-    val AlertBorder = Color(0xFF843B38)
-    val AlertAccent = Color(0xFFFF8E7D)
-
-    val SurfaceDeep = Color(0xFF131C18)
-    val SurfaceCard = Color(0xFF19231F)
-    val SurfaceDeck = Color(0xFF111916)
-    val BorderSubtle = Color(0xFF2B3D33)
-}
-
 @Composable
 internal fun rememberAudioOutputRoute(): AudioOutputRoute {
     val context = LocalContext.current
@@ -302,11 +125,12 @@ internal fun LocalFohHeaderBar(
     onRouteClick: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
+    val foh = FohTheme.colors
 
     val (routeBg, routeBorder, routeAccent, routeIcon) = when (route.kind) {
-        AudioOutputKind.LINE_OR_USB -> Quad(FohPalette.SafeBg, FohPalette.SafeBorder, FohPalette.SafeAccent, UiIcons.Plug)
-        AudioOutputKind.BLUETOOTH -> Quad(FohPalette.BtBg, FohPalette.BtBorder, FohPalette.BtAccent, UiIcons.Bluetooth)
-        AudioOutputKind.SPEAKER -> Quad(FohPalette.WarnBg, FohPalette.WarnBorder, FohPalette.WarnAccent, UiIcons.Warning)
+        AudioOutputKind.LINE_OR_USB -> Quad(foh.safeBg, foh.safeBorder, foh.safeAccent, UiIcons.Plug)
+        AudioOutputKind.BLUETOOTH -> Quad(foh.btBg, foh.btBorder, foh.btAccent, UiIcons.Bluetooth)
+        AudioOutputKind.SPEAKER -> Quad(foh.warnBg, foh.warnBorder, foh.warnAccent, UiIcons.Warning)
     }
 
     val (routeText, routeBadge) = when (route.kind) {
@@ -351,8 +175,8 @@ internal fun LocalFohHeaderBar(
             Surface(
                 onClick = onToggleKeepScreenOn,
                 shape = RoundedCornerShape(50),
-                color = if (keepScreenOn) FohPalette.SafeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, if (keepScreenOn) FohPalette.SafeBorder else FohPalette.BorderSubtle),
+                color = if (keepScreenOn) foh.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, if (keepScreenOn) foh.safeBorder else foh.borderSubtle),
                 modifier = Modifier
                     .heightIn(min = 34.dp)
                     .semantics { contentDescription = if (keepScreenOn) "Screen Awake aktif" else "Aktifkan Screen Awake" },
@@ -365,14 +189,14 @@ internal fun LocalFohHeaderBar(
                     Icon(
                         UiIcons.KeepAwake,
                         contentDescription = null,
-                        tint = if (keepScreenOn) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (keepScreenOn) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(14.dp),
                     )
                     Text(
                         text = if (keepScreenOn) "Awake" else "Sleep OK",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (keepScreenOn) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (keepScreenOn) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         softWrap = false,
                     )
@@ -382,8 +206,8 @@ internal fun LocalFohHeaderBar(
             Surface(
                 onClick = onToggleGuard,
                 shape = RoundedCornerShape(50),
-                color = if (guardEnabled) FohPalette.SafeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, if (guardEnabled) FohPalette.SafeBorder else FohPalette.BorderSubtle),
+                color = if (guardEnabled) foh.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, if (guardEnabled) foh.safeBorder else foh.borderSubtle),
                 modifier = Modifier
                     .heightIn(min = 34.dp)
                     .semantics { contentDescription = if (guardEnabled) "Guard ON" else "Guard OFF" },
@@ -396,14 +220,14 @@ internal fun LocalFohHeaderBar(
                     Icon(
                         UiIcons.Shield,
                         contentDescription = null,
-                        tint = if (guardEnabled) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (guardEnabled) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(14.dp),
                     )
                     Text(
                         text = if (guardEnabled) "Guard ON" else "Guard OFF",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = if (guardEnabled) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (guardEnabled) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         softWrap = false,
                     )
@@ -487,23 +311,15 @@ internal fun LocalFohTrackSummaryCard(
     seekPosition: Float?,
     onSeekChange: (Float) -> Unit,
     onSeekCommit: () -> Unit,
+    positionMsProvider: () -> Long = { playback.positionMs },
 ) {
-    val activePosMs = seekPosition?.toLong() ?: playback.positionMs
-    val countdown = LocalFohRules.countdownState(
-        positionMs = activePosMs,
-        durationMs = playback.durationMs,
-        isPlaying = playback.playing,
-    )
-    val endingAlert = LocalFohRules.endingAlertText(countdown.remainingMs, controlUi.mode, playback.playing)
+    val foh = FohTheme.colors
     val formatTag = LocalFohRules.formatTag(current)
 
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = FohPalette.SurfaceCard,
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (countdown.warningActive) FohPalette.AlertBorder else FohPalette.BorderSubtle,
-        ),
+        color = foh.surfaceCard,
+        border = BorderStroke(1.dp, foh.borderSubtle),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 14.dp),
@@ -546,92 +362,27 @@ internal fun LocalFohTrackSummaryCard(
                         )
                         FohMicroChip(
                             label = LocalFohRules.modeTag(controlUi.mode),
-                            containerColor = FohPalette.SafeBg,
-                            contentColor = FohPalette.SafeAccent,
+                            containerColor = foh.safeBg,
+                            contentColor = foh.safeAccent,
                         )
                     }
                 }
 
-                Column(horizontalAlignment = Alignment.End) {
-                    val countdownColor = when {
-                        countdown.warningActive -> FohPalette.AlertAccent
-                        playback.playing -> FohPalette.SafeAccent
-                        else -> MaterialTheme.colorScheme.onSurface
-                    }
-                    Text(
-                        text = countdown.countdownText,
-                        style = TextStyle(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFeatureSettings = "tnum",
-                            color = countdownColor,
-                        ),
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                    Text(
-                        text = "${LibraryRules.durationLabel(activePosMs.takeIf { playback.connected && playback.mediaId != null })} / ${LibraryRules.durationLabel(playback.durationMs)}",
-                        style = TextStyle(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            fontFeatureSettings = "tnum",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
+                LocalFohCountdownReadout(
+                    playback = playback,
+                    seekPosition = seekPosition,
+                    positionMsProvider = positionMsProvider,
+                )
             }
 
-            val duration = playback.durationMs ?: 1L
-            val displayed = if (playback.durationMs == null) 0f else (seekPosition ?: playback.positionMs.toFloat()).coerceIn(0f, duration.toFloat())
-            Slider(
-                value = displayed,
-                onValueChange = onSeekChange,
-                valueRange = 0f..duration.toFloat(),
-                enabled = playback.connected && playback.canSeek && playback.durationMs != null,
-                onValueChangeFinished = onSeekCommit,
-                colors = SliderDefaults.colors(
-                    thumbColor = if (countdown.warningActive) FohPalette.AlertAccent else FohPalette.SafeAccent,
-                    activeTrackColor = if (countdown.warningActive) FohPalette.AlertAccent else FohPalette.SafeAccent,
-                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(26.dp)
-                    .semantics { contentDescription = "Posisi pemutaran audio" },
+            LocalFohSeekAndEndingSection(
+                playback = playback,
+                mode = controlUi.mode,
+                seekPosition = seekPosition,
+                onSeekChange = onSeekChange,
+                onSeekCommit = onSeekCommit,
+                positionMsProvider = positionMsProvider,
             )
-
-            AnimatedVisibility(visible = endingAlert != null) {
-                if (endingAlert != null) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = FohPalette.AlertBg,
-                        border = BorderStroke(1.dp, FohPalette.AlertBorder),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Icon(
-                                UiIcons.Warning,
-                                contentDescription = null,
-                                tint = FohPalette.AlertAccent,
-                                modifier = Modifier.size(15.dp),
-                            )
-                            Text(
-                                text = endingAlert,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = FohPalette.AlertAccent,
-                            )
-                        }
-                    }
-                }
-            }
 
             if (playback.buffering) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -666,10 +417,10 @@ internal fun LocalFohTrackSummaryCard(
                         onClick = { controlUi.onSelectMode(mode) },
                         enabled = controlUi.modeSupported && !controlUi.pending && !selectedMode,
                         shape = RoundedCornerShape(10.dp),
-                        color = if (selectedMode) FohPalette.SafeBg else FohPalette.SurfaceDeep,
+                        color = if (selectedMode) foh.safeBg else foh.surfaceDeep,
                         border = BorderStroke(
                             width = 1.dp,
-                            color = if (selectedMode) FohPalette.SafeAccent else FohPalette.BorderSubtle,
+                            color = if (selectedMode) foh.safeAccent else foh.borderSubtle,
                         ),
                         modifier = Modifier
                             .weight(1f)
@@ -681,7 +432,7 @@ internal fun LocalFohTrackSummaryCard(
                                 text = LocalFohRules.modeButtonLabel(mode),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = if (selectedMode) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selectedMode) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (selectedMode) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
@@ -705,12 +456,128 @@ internal fun LocalFohTrackSummaryCard(
 }
 
 @Composable
+private fun LocalFohCountdownReadout(
+    playback: SessionPlayback,
+    seekPosition: Float?,
+    positionMsProvider: () -> Long,
+) {
+    val foh = FohTheme.colors
+    val activePosMs = seekPosition?.toLong() ?: positionMsProvider()
+    val countdown = LocalFohRules.countdownState(
+        positionMs = activePosMs,
+        durationMs = playback.durationMs,
+        isPlaying = playback.playing,
+    )
+    val countdownColor = when {
+        countdown.warningActive -> foh.alertAccent
+        playback.playing -> foh.safeAccent
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Column(horizontalAlignment = Alignment.End) {
+        Text(
+            text = countdown.countdownText,
+            style = TextStyle(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                fontFeatureSettings = "tnum",
+                color = countdownColor,
+            ),
+            maxLines = 1,
+            softWrap = false,
+        )
+        Text(
+            text = "${LibraryRules.durationLabel(activePosMs.takeIf { playback.connected && playback.mediaId != null })} / ${LibraryRules.durationLabel(playback.durationMs)}",
+            style = TextStyle(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                fontFeatureSettings = "tnum",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+@Composable
+private fun LocalFohSeekAndEndingSection(
+    playback: SessionPlayback,
+    mode: PlaybackMode?,
+    seekPosition: Float?,
+    onSeekChange: (Float) -> Unit,
+    onSeekCommit: () -> Unit,
+    positionMsProvider: () -> Long,
+) {
+    val foh = FohTheme.colors
+    val livePosMs = positionMsProvider()
+    val activePosMs = seekPosition?.toLong() ?: livePosMs
+    val countdown = LocalFohRules.countdownState(
+        positionMs = activePosMs,
+        durationMs = playback.durationMs,
+        isPlaying = playback.playing,
+    )
+    val endingAlert = LocalFohRules.endingAlertText(countdown.remainingMs, mode, playback.playing)
+    val duration = playback.durationMs ?: 1L
+    val displayed = if (playback.durationMs == null) 0f else (seekPosition ?: livePosMs.toFloat()).coerceIn(0f, duration.toFloat())
+    val accent = if (countdown.warningActive) foh.alertAccent else foh.safeAccent
+
+    Slider(
+        value = displayed,
+        onValueChange = onSeekChange,
+        valueRange = 0f..duration.toFloat(),
+        enabled = playback.connected && playback.canSeek && playback.durationMs != null,
+        onValueChangeFinished = onSeekCommit,
+        colors = SliderDefaults.colors(
+            thumbColor = accent,
+            activeTrackColor = accent,
+            inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(26.dp)
+            .semantics { contentDescription = "Posisi pemutaran audio" },
+    )
+
+    AnimatedVisibility(visible = endingAlert != null) {
+        if (endingAlert != null) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = foh.alertBg,
+                border = BorderStroke(1.dp, foh.alertBorder),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        UiIcons.Warning,
+                        contentDescription = null,
+                        tint = foh.alertAccent,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Text(
+                        text = endingAlert,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = foh.alertAccent,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun LocalFohViewModeHeader(
     queueCount: Int,
     currentIndex: Int,
     viewMode: LocalPlayerViewMode,
     onSelectViewMode: (LocalPlayerViewMode) -> Unit,
 ) {
+    val foh = FohTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -729,15 +596,15 @@ internal fun LocalFohViewModeHeader(
                 Text(
                     text = "Active Slot #${currentIndex + 1}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = FohPalette.SafeAccent,
+                    color = foh.safeAccent,
                 )
             }
         }
 
         Surface(
             shape = RoundedCornerShape(10.dp),
-            color = FohPalette.SurfaceDeep,
-            border = BorderStroke(1.dp, FohPalette.BorderSubtle),
+            color = foh.surfaceDeep,
+            border = BorderStroke(1.dp, foh.borderSubtle),
         ) {
             Row(modifier = Modifier.padding(3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 LocalPlayerViewMode.entries.forEach { mode ->
@@ -745,14 +612,14 @@ internal fun LocalFohViewModeHeader(
                     Surface(
                         onClick = { onSelectViewMode(mode) },
                         shape = RoundedCornerShape(8.dp),
-                        color = if (isSelected) FohPalette.SafeBg else Color.Transparent,
+                        color = if (isSelected) foh.safeBg else Color.Transparent,
                         modifier = Modifier.semantics { selected = isSelected },
                     ) {
                         Text(
                             text = mode.label,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (isSelected) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         )
                     }
@@ -773,6 +640,7 @@ internal fun LocalFohCueList(
     onSelectEntry: (SessionQueueItem, cueOnly: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val foh = FohTheme.colors
     if (queue.isEmpty()) {
         Box(modifier = modifier.fillMaxSize().padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
             Text(
@@ -790,7 +658,11 @@ internal fun LocalFohCueList(
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        items(queue, key = { "${it.index}:${it.mediaId}" }) { entry ->
+        items(
+            items = queue,
+            key = { "${it.index}:${it.mediaId}" },
+            contentType = { "cue-entry" },
+        ) { entry ->
             val track = tracksById[entry.mediaId]
             val title = track?.let { UiPresentation.title(it.displayName) }
                 ?: entry.title?.takeIf { it.isNotBlank() }?.let { UiPresentation.title(it) }
@@ -800,8 +672,8 @@ internal fun LocalFohCueList(
 
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = if (active) FohPalette.SafeBg else FohPalette.SurfaceCard,
-                border = BorderStroke(1.dp, if (active) FohPalette.SafeAccent else FohPalette.BorderSubtle),
+                color = if (active) foh.safeBg else foh.surfaceCard,
+                border = BorderStroke(1.dp, if (active) foh.safeAccent else foh.borderSubtle),
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
@@ -825,7 +697,7 @@ internal fun LocalFohCueList(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFeatureSettings = "tnum",
-                            color = if (active) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (active) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                         ),
                         modifier = Modifier.widthIn(min = 24.dp),
                     )
@@ -838,7 +710,7 @@ internal fun LocalFohCueList(
                             text = title,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                            color = if (active) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurface,
+                            color = if (active) foh.safeAccent else MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -854,16 +726,16 @@ internal fun LocalFohCueList(
                     if (active) {
                         FohMicroChip(
                             label = if (wantsPlay) "PLAYING" else "STANDBY",
-                            containerColor = FohPalette.SafeAccent.copy(alpha = 0.16f),
-                            contentColor = FohPalette.SafeAccent,
+                            containerColor = foh.safeAccent.copy(alpha = 0.16f),
+                            contentColor = foh.safeAccent,
                         )
                     } else {
                         Surface(
                             onClick = { onSelectEntry(entry, true) },
                             enabled = enabled,
                             shape = RoundedCornerShape(8.dp),
-                            color = FohPalette.WarnBg,
-                            border = BorderStroke(1.dp, FohPalette.WarnBorder),
+                            color = foh.warnBg,
+                            border = BorderStroke(1.dp, foh.warnBorder),
                             modifier = Modifier.heightIn(min = 32.dp),
                         ) {
                             Box(
@@ -874,7 +746,7 @@ internal fun LocalFohCueList(
                                     text = "Cue",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = FohPalette.WarnAccent,
+                                    color = foh.warnAccent,
                                 )
                             }
                         }
@@ -935,7 +807,6 @@ internal fun LocalFohCoverView(
 internal fun LocalFohBottomDeck(
     nextUpLabel: String,
     keepScreenOn: Boolean,
-    countdown: LocalCountdownState,
     playback: SessionPlayback,
     controlUi: LocalPlaybackControlUi,
     collapsed: Boolean,
@@ -945,11 +816,13 @@ internal fun LocalFohBottomDeck(
     onStop: () -> Unit,
     onNext: () -> Unit,
     onCueStart: () -> Unit,
+    positionMsProvider: () -> Long = { playback.positionMs },
 ) {
+    val foh = FohTheme.colors
     Surface(
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-        color = FohPalette.SurfaceDeck,
-        border = BorderStroke(1.dp, FohPalette.BorderSubtle),
+        color = foh.surfaceDeck,
+        border = BorderStroke(1.dp, foh.borderSubtle),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -964,15 +837,9 @@ internal fun LocalFohBottomDeck(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        text = countdown.countdownText,
-                        style = TextStyle(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFeatureSettings = "tnum",
-                            color = if (countdown.warningActive) FohPalette.AlertAccent else FohPalette.SafeAccent,
-                        ),
+                    LocalFohCollapsedCountdown(
+                        playback = playback,
+                        positionMsProvider = positionMsProvider,
                     )
                     Text(
                         text = nextUpLabel,
@@ -1026,7 +893,7 @@ internal fun LocalFohBottomDeck(
                             modifier = Modifier
                                 .size(7.dp)
                                 .clip(CircleShape)
-                                .background(FohPalette.SafeAccent),
+                                .background(foh.safeAccent),
                         )
                     }
                     Text(
@@ -1089,7 +956,7 @@ internal fun LocalFohBottomDeck(
                     )
                 }
 
-                HorizontalDivider(color = FohPalette.BorderSubtle)
+                HorizontalDivider(color = foh.borderSubtle)
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1100,8 +967,8 @@ internal fun LocalFohBottomDeck(
                         enabled = playback.connected && playback.mediaId != null,
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = FohPalette.WarnBg,
-                            contentColor = FohPalette.WarnAccent,
+                            containerColor = foh.warnBg,
+                            contentColor = foh.warnAccent,
                         ),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                         modifier = Modifier
@@ -1119,7 +986,7 @@ internal fun LocalFohBottomDeck(
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(
                             1.dp,
-                            if (controlUi.fadeSupported && controlUi.playing) FohPalette.SafeBorder else FohPalette.BorderSubtle,
+                            if (controlUi.fadeSupported && controlUi.playing) foh.safeBorder else foh.borderSubtle,
                         ),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                         modifier = Modifier
@@ -1139,13 +1006,36 @@ internal fun LocalFohBottomDeck(
 
                 if (controlUi.fadeBusy) {
                     LinearProgressIndicator(
-                        color = FohPalette.SafeAccent,
+                        color = foh.safeAccent,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun LocalFohCollapsedCountdown(
+    playback: SessionPlayback,
+    positionMsProvider: () -> Long,
+) {
+    val foh = FohTheme.colors
+    val countdown = LocalFohRules.countdownState(
+        positionMs = positionMsProvider(),
+        durationMs = playback.durationMs,
+        isPlaying = playback.playing,
+    )
+    Text(
+        text = countdown.countdownText,
+        style = TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            fontFeatureSettings = "tnum",
+            color = if (countdown.warningActive) foh.alertAccent else foh.safeAccent,
+        ),
+    )
 }
 
 @Composable
@@ -1158,9 +1048,10 @@ internal fun LocalTrackSwitchGuardDialog(
     onCutAndPlay: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val foh = FohTheme.colors
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(UiIcons.Shield, contentDescription = null, tint = FohPalette.WarnAccent) },
+        icon = { Icon(UiIcons.Shield, contentDescription = null, tint = foh.warnAccent) },
         title = { Text("Track Sedang Playing") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1173,8 +1064,8 @@ internal fun LocalTrackSwitchGuardDialog(
                     onClick = onCueOnly,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = FohPalette.WarnBg,
-                        contentColor = FohPalette.WarnAccent,
+                        containerColor = foh.warnBg,
+                        contentColor = foh.warnAccent,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -1184,8 +1075,8 @@ internal fun LocalTrackSwitchGuardDialog(
                     onClick = onCutAndPlay,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = FohPalette.AlertBg,
-                        contentColor = FohPalette.AlertAccent,
+                        containerColor = foh.alertBg,
+                        contentColor = foh.alertAccent,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) {

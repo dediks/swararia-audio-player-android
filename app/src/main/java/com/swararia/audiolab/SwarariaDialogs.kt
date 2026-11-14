@@ -2,6 +2,8 @@ package com.swararia.audiolab
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.font.FontWeight
@@ -607,12 +609,11 @@ internal fun AddTracksToPlaylistDialog(
     onToggleTrack: (Long, Boolean) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    val includedIds = remember(playlist.trackIds) { playlist.trackIds.toHashSet() }
     val filtered = remember(tracks, query) {
         val q = query.trim()
         if (q.isEmpty()) tracks else tracks.filter {
-            it.displayName.contains(q, ignoreCase = true) ||
-                UiPresentation.title(it.displayName).contains(q, ignoreCase = true) ||
-                (it.artist?.contains(q, ignoreCase = true) == true)
+            matchesTrackQuery(it, q)
         }
     }
     AlertDialog(
@@ -635,34 +636,49 @@ internal fun AddTracksToPlaylistDialog(
                     leadingIcon = { Icon(UiIcons.Search, null) },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     if (filtered.isEmpty()) {
-                        Text("Tidak ada lagu yang cocok.", style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    filtered.forEach { track ->
-                        val included = track.id in playlist.trackIds
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .clickable(enabled = !busy) { onToggleTrack(track.id, !included) }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Checkbox(
-                                checked = included,
-                                onCheckedChange = { checked -> if (!busy) onToggleTrack(track.id, checked) },
-                                enabled = !busy,
+                        item(key = "empty-track-filter", contentType = "empty") {
+                            Text(
+                                "Tidak ada lagu yang cocok.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            Column(Modifier.weight(1f)) {
-                                Text(UiPresentation.title(track.displayName),
-                                    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(UiPresentation.trackSubtitle(track.displayName, track.artist, track.durationMs),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    } else {
+                        items(filtered, key = { it.id }, contentType = { "dialog-track-row" }) { track ->
+                            val included = track.id in includedIds
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clickable(enabled = !busy) { onToggleTrack(track.id, !included) }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Checkbox(
+                                    checked = included,
+                                    onCheckedChange = { checked -> if (!busy) onToggleTrack(track.id, checked) },
+                                    enabled = !busy,
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        UiPresentation.title(track.displayName),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        UiPresentation.trackSubtitle(track.displayName, track.artist, track.durationMs),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
                         }
                     }

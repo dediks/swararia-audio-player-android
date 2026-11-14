@@ -40,22 +40,56 @@ private val SwarariaTypography = Typography(
     labelSmall = TextStyle(fontFamily = SwarariaFont, fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
 )
 
+@Immutable
+internal data class FohColors(
+    val safeBg: Color = Color(0xFF132B21),
+    val safeBorder: Color = Color(0xFF285944),
+    val safeAccent: Color = Color(0xFF8CE3C7),
+    val btBg: Color = Color(0xFF142730),
+    val btBorder: Color = Color(0xFF2B5669),
+    val btAccent: Color = Color(0xFF7DD3FC),
+    val warnBg: Color = Color(0xFF2E2311),
+    val warnBorder: Color = Color(0xFF7A5B21),
+    val warnAccent: Color = Color(0xFFF5C451),
+    val alertBg: Color = Color(0xFF351B1B),
+    val alertBorder: Color = Color(0xFF843B38),
+    val alertAccent: Color = Color(0xFFFF8E7D),
+    val surfaceDeep: Color = Color(0xFF131C18),
+    val surfaceCard: Color = Color(0xFF19231F),
+    val surfaceDeck: Color = Color(0xFF111916),
+    val borderSubtle: Color = Color(0xFF2B3D33),
+    val localBannerBg: Color = Color(0xFF282417),
+    val localBannerBorder: Color = Color(0xFF7A6935),
+    val localBannerAccent: Color = Color(0xFFF5D782),
+)
+
+internal val LocalFohColors = staticCompositionLocalOf { FohColors() }
+
+internal object FohTheme {
+    val colors: FohColors
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFohColors.current
+}
+
 @Composable
 fun AudioTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = darkColorScheme(
-        primary = Color(0xFF8CE3C7), onPrimary = Color(0xFF12392C),
-        primaryContainer = Color(0xFF173B2E), onPrimaryContainer = Color(0xFF8CE3C7),
-        secondary = Color(0xFFB5D7C6), onSecondary = Color(0xFF15372A),
-        secondaryContainer = Color(0xFF2B4538), onSecondaryContainer = Color(0xFFD6EDE0),
-        background = Color(0xFF101715), onBackground = Color(0xFFF1F5EF),
-        surface = Color(0xFF19231F), onSurface = Color(0xFFF1F5EF),
-        surfaceVariant = Color(0xFF22322A), onSurfaceVariant = Color(0xFFA9B6AD),
-        surfaceContainerLowest = Color(0xFF0B120F), surfaceContainerLow = Color(0xFF141E19),
-        surfaceContainer = Color(0xFF19231F), surfaceContainerHigh = Color(0xFF202D26),
-        surfaceContainerHighest = Color(0xFF28372F), surfaceBright = Color(0xFF304138),
-        surfaceDim = Color(0xFF101715), outline = Color(0xFF6A8071), outlineVariant = Color(0xFF354C3F),
-        error = Color(0xFFFFB4AB), onError = Color(0xFF690005),
-        errorContainer = Color(0xFF4B2526), onErrorContainer = Color(0xFFFFDAD6),
-        inverseSurface = Color(0xFFF1F5EF), inverseOnSurface = Color(0xFF19231F), inversePrimary = Color(0xFF236B53),
-    ), typography = SwarariaTypography, content = content)
+    CompositionLocalProvider(LocalFohColors provides FohColors()) {
+        MaterialTheme(colorScheme = darkColorScheme(
+            primary = Color(0xFF8CE3C7), onPrimary = Color(0xFF12392C),
+            primaryContainer = Color(0xFF173B2E), onPrimaryContainer = Color(0xFF8CE3C7),
+            secondary = Color(0xFFB5D7C6), onSecondary = Color(0xFF15372A),
+            secondaryContainer = Color(0xFF2B4538), onSecondaryContainer = Color(0xFFD6EDE0),
+            background = Color(0xFF101715), onBackground = Color(0xFFF1F5EF),
+            surface = Color(0xFF19231F), onSurface = Color(0xFFF1F5EF),
+            surfaceVariant = Color(0xFF22322A), onSurfaceVariant = Color(0xFFA9B6AD),
+            surfaceContainerLowest = Color(0xFF0B120F), surfaceContainerLow = Color(0xFF141E19),
+            surfaceContainer = Color(0xFF19231F), surfaceContainerHigh = Color(0xFF202D26),
+            surfaceContainerHighest = Color(0xFF28372F), surfaceBright = Color(0xFF304138),
+            surfaceDim = Color(0xFF101715), outline = Color(0xFF6A8071), outlineVariant = Color(0xFF354C3F),
+            error = Color(0xFFFFB4AB), onError = Color(0xFF690005),
+            errorContainer = Color(0xFF4B2526), onErrorContainer = Color(0xFFFFDAD6),
+            inverseSurface = Color(0xFFF1F5EF), inverseOnSurface = Color(0xFF19231F), inversePrimary = Color(0xFF236B53),
+        ), typography = SwarariaTypography, content = content)
+    }
 }

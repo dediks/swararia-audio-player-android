@@ -9,8 +9,42 @@ import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.UUID
 
+enum class RemotePhase(val wire: String) {
+    DISCONNECTED("disconnected"),
+    CONNECTING("connecting"),
+    PENDING("pending"),
+    ACTIVE("active");
+
+    companion object {
+        fun fromWire(value: String?): RemotePhase = entries.firstOrNull { it.wire == value } ?: DISCONNECTED
+    }
+}
+
+enum class RemoteRole(val wire: String) {
+    CONTROL("control"),
+    VIEW_ONLY("view_only");
+
+    companion object {
+        fun fromWire(value: String?): RemoteRole? = entries.firstOrNull { it.wire == value }
+    }
+}
+
+enum class RemoteCommandOutcome(val wire: String, val inFlight: Boolean = false) {
+    ACCEPTED("accepted", inFlight = true),
+    PENDING("pending", inFlight = true),
+    APPLIED("applied"),
+    UNKNOWN("unknown"),
+    EXPIRED("expired"),
+    REJECTED("rejected");
+
+    companion object {
+        fun fromWire(value: String?): RemoteCommandOutcome? =
+            if (value == null) null else entries.firstOrNull { it.wire == value } ?: REJECTED
+    }
+}
+
 data class DesktopRemoteUiState(
-    val endpoint: String? = null, val phase: String = "disconnected", val role: String? = null,
+    val endpoint: String? = null, val phase: String = RemotePhase.DISCONNECTED.wire, val role: String? = null,
     val playback: DesktopRemotePlayback? = null, val commands: Set<String> = emptySet(),
     val mediaSupported: Boolean = false, val mediaMaxBytes: Long = 0L,
     val playlist: String? = null, val activeGroupId: String? = null, val totalTracks: Int = 0,
@@ -21,12 +55,25 @@ data class DesktopRemoteUiState(
     val busy: Boolean = false, val fresh: Boolean = false, val message: String? = null,
     val outcome: String? = null,
 ) {
-    val canControl: Boolean get() = phase == "active" && role == "control" && playback?.online == true && fresh && !busy && outcome !in setOf("accepted", "pending")
+    val remotePhase: RemotePhase get() = RemotePhase.fromWire(phase)
+    val remoteRole: RemoteRole? get() = RemoteRole.fromWire(role)
+    val remoteOutcome: RemoteCommandOutcome? get() = RemoteCommandOutcome.fromWire(outcome)
+    val waitingCommand: Boolean get() = busy || remoteOutcome?.inFlight == true
+    val canControl: Boolean
+        get() = remotePhase == RemotePhase.ACTIVE &&
+            remoteRole == RemoteRole.CONTROL &&
+            playback?.online == true &&
+            fresh &&
+            !waitingCommand
     val canFadeOut: Boolean get() = canControl && "fade_out" in commands && playback?.playing == true && playback?.transport != "FADING"
     val canSelectTrack: Boolean get() = canControl && "select_track" in commands
     val canSwitchGroup: Boolean get() = canControl && "select_group" in commands
     val canStepTrack: Boolean get() = canControl && playback?.title != null
-    val canDownloadMedia: Boolean get() = phase == "active" && role == "control" && mediaSupported && playback?.online == true
+    val canDownloadMedia: Boolean
+        get() = remotePhase == RemotePhase.ACTIVE &&
+            remoteRole == RemoteRole.CONTROL &&
+            mediaSupported &&
+            playback?.online == true
 }
 
 /** Android-free RAM owner. Like SearchSession, invoke on the caller's single UI thread.

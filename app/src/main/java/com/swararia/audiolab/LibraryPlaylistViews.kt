@@ -160,7 +160,7 @@ internal fun LibraryCompactHeader(
                 unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 focusedContainerColor = MaterialTheme.colorScheme.surface,
                 disabledContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedBorderColor = FohPalette.BorderSubtle,
+                unfocusedBorderColor = FohTheme.colors.borderSubtle,
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
             ),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -183,17 +183,17 @@ internal fun LibraryCompactHeader(
                         Surface(
                             onClick = { onSelectGroupMode(mode) },
                             shape = RoundedCornerShape(999.dp),
-                            color = if (active) FohPalette.SafeBg else FohPalette.SurfaceCard,
+                            color = if (active) FohTheme.colors.safeBg else FohTheme.colors.surfaceCard,
                             border = BorderStroke(
                                 1.dp,
-                                if (active) FohPalette.SafeBorder else FohPalette.BorderSubtle,
+                                if (active) FohTheme.colors.safeBorder else FohTheme.colors.borderSubtle,
                             ),
                         ) {
                             Text(
                                 text = mode.label,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                                color = if (active) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (active) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                 maxLines = 1,
                             )
@@ -258,10 +258,10 @@ private fun LibraryHeaderChipButton(
         onClick = onClick,
         enabled = enabled,
         shape = RoundedCornerShape(999.dp),
-        color = if (active) FohPalette.SafeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = if (active) FohTheme.colors.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
         border = BorderStroke(
             1.dp,
-            if (active) FohPalette.SafeBorder else FohPalette.BorderSubtle,
+            if (active) FohTheme.colors.safeBorder else FohTheme.colors.borderSubtle,
         ),
     ) {
         Row(
@@ -275,7 +275,7 @@ private fun LibraryHeaderChipButton(
                 imageVector = icon,
                 contentDescription = null,
                 tint = if (!enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                else if (active) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurface,
+                else if (active) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(15.dp),
             )
             Text(
@@ -283,7 +283,7 @@ private fun LibraryHeaderChipButton(
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = if (!enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                else if (active) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurface,
+                else if (active) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 softWrap = false,
             )
@@ -300,8 +300,8 @@ private fun LibrarySectionSegmentedBar(
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = FohPalette.SurfaceDeep,
-        border = BorderStroke(1.dp, FohPalette.BorderSubtle),
+        color = FohTheme.colors.surfaceDeep,
+        border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
@@ -316,15 +316,15 @@ private fun LibrarySectionSegmentedBar(
                 Surface(
                     onClick = { onSelectSection(tab) },
                     shape = RoundedCornerShape(10.dp),
-                    color = if (active) FohPalette.SafeBg else Color.Transparent,
-                    border = if (active) BorderStroke(1.dp, FohPalette.SafeBorder) else null,
+                    color = if (active) FohTheme.colors.safeBg else Color.Transparent,
+                    border = if (active) BorderStroke(1.dp, FohTheme.colors.safeBorder) else null,
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(
                         text = "${tab.label} ($count)",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                        color = if (active) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (active) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -350,8 +350,8 @@ internal fun LibraryBatchActionBar(
 ) {
     Surface(
         shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
-        color = FohPalette.SurfaceDeep,
-        border = BorderStroke(1.dp, FohPalette.BorderSubtle),
+        color = FohTheme.colors.surfaceDeep,
+        border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -369,7 +369,7 @@ internal fun LibraryBatchActionBar(
                     text = "$selectedCount dipilih",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
-                    color = FohPalette.SafeAccent,
+                    color = FohTheme.colors.safeAccent,
                     modifier = Modifier.weight(1f),
                 )
                 if (totalVisibleCount > 0) {
@@ -401,8 +401,8 @@ internal fun LibraryBatchActionBar(
                     enabled = !busy && selectedCount > 0,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = FohPalette.SafeBg,
-                        contentColor = FohPalette.SafeAccent,
+                        containerColor = FohTheme.colors.safeBg,
+                        contentColor = FohTheme.colors.safeAccent,
                     ),
                     modifier = Modifier
                         .weight(1.35f)
@@ -417,8 +417,8 @@ internal fun LibraryBatchActionBar(
                     enabled = !busy && selectedCount > 0,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = FohPalette.AlertBg,
-                        contentColor = FohPalette.AlertAccent,
+                        containerColor = FohTheme.colors.alertBg,
+                        contentColor = FohTheme.colors.alertAccent,
                     ),
                     modifier = Modifier
                         .weight(1f)
@@ -455,8 +455,8 @@ internal fun PlaylistShowCard(
     }
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = FohPalette.SurfaceCard,
-        border = BorderStroke(1.dp, if (isActiveShow) FohPalette.SafeBorder else FohPalette.BorderSubtle),
+        color = FohTheme.colors.surfaceCard,
+        border = BorderStroke(1.dp, if (isActiveShow) FohTheme.colors.safeBorder else FohTheme.colors.borderSubtle),
     ) {
         Column(
             modifier = Modifier
@@ -473,12 +473,12 @@ internal fun PlaylistShowCard(
             ) {
                 Surface(
                     shape = RoundedCornerShape(11.dp),
-                    color = FohPalette.SafeBg,
-                    border = BorderStroke(1.dp, FohPalette.SafeBorder),
+                    color = FohTheme.colors.safeBg,
+                    border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
                     modifier = Modifier.size(44.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(UiIcons.Queue, null, tint = FohPalette.SafeAccent, modifier = Modifier.size(20.dp))
+                        Icon(UiIcons.Queue, null, tint = FohTheme.colors.safeAccent, modifier = Modifier.size(20.dp))
                     }
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -497,14 +497,14 @@ internal fun PlaylistShowCard(
                         if (isActiveShow) {
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
-                                color = FohPalette.SafeBg,
-                                border = BorderStroke(1.dp, FohPalette.SafeBorder),
+                                color = FohTheme.colors.safeBg,
+                                border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
                             ) {
                                 Text(
                                     text = "Active",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = FohPalette.SafeAccent,
+                                    color = FohTheme.colors.safeAccent,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                                 )
                             }
@@ -513,7 +513,7 @@ internal fun PlaylistShowCard(
                     Text(
                         text = UiPresentation.playlistStatsSummary(tracks.size, totalDurationMs),
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = if (isActiveShow) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (isActiveShow) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -525,7 +525,7 @@ internal fun PlaylistShowCard(
                         onClick = { menu = true },
                         size = 34.dp,
                         iconSize = 18.dp,
-                        containerColor = FohPalette.SurfaceDeep,
+                        containerColor = FohTheme.colors.surfaceDeep,
                     )
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(
@@ -553,8 +553,8 @@ internal fun PlaylistShowCard(
             Surface(
                 onClick = onOpen,
                 shape = RoundedCornerShape(10.dp),
-                color = FohPalette.SurfaceDeep,
-                border = BorderStroke(1.dp, FohPalette.BorderSubtle),
+                color = FohTheme.colors.surfaceDeep,
+                border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
@@ -577,8 +577,8 @@ internal fun PlaylistShowCard(
                     enabled = connected && tracks.isNotEmpty() && !busy,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = FohPalette.WarnBg,
-                        contentColor = FohPalette.WarnAccent,
+                        containerColor = FohTheme.colors.warnBg,
+                        contentColor = FohTheme.colors.warnAccent,
                     ),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                     modifier = Modifier
@@ -605,8 +605,8 @@ internal fun PlaylistShowCard(
                 Surface(
                     onClick = onOpen,
                     shape = RoundedCornerShape(10.dp),
-                    color = FohPalette.SurfaceDeep,
-                    border = BorderStroke(1.dp, FohPalette.BorderSubtle),
+                    color = FohTheme.colors.surfaceDeep,
+                    border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
                     modifier = Modifier.size(40.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -643,8 +643,8 @@ internal fun PlaylistRundownHeader(
 
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = FohPalette.SurfaceCard,
-        border = BorderStroke(1.dp, FohPalette.BorderSubtle),
+        color = FohTheme.colors.surfaceCard,
+        border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -664,7 +664,7 @@ internal fun PlaylistRundownHeader(
                     onClick = onBack,
                     size = 38.dp,
                     iconSize = 20.dp,
-                    containerColor = FohPalette.SurfaceDeep,
+                    containerColor = FohTheme.colors.surfaceDeep,
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
@@ -677,7 +677,7 @@ internal fun PlaylistRundownHeader(
                     Text(
                         text = "${UiPresentation.playlistStatsSummary(tracks.size, totalMs)} · Rundown Order",
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = FohPalette.SafeAccent,
+                        color = FohTheme.colors.safeAccent,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -689,7 +689,7 @@ internal fun PlaylistRundownHeader(
                         onClick = { menu = true },
                         size = 36.dp,
                         iconSize = 18.dp,
-                        containerColor = FohPalette.SurfaceDeep,
+                        containerColor = FohTheme.colors.surfaceDeep,
                     )
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(
@@ -717,8 +717,8 @@ internal fun PlaylistRundownHeader(
                     enabled = connected && tracks.isNotEmpty() && !busy,
                     shape = RoundedCornerShape(11.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = FohPalette.WarnBg,
-                        contentColor = FohPalette.WarnAccent,
+                        containerColor = FohTheme.colors.warnBg,
+                        contentColor = FohTheme.colors.warnAccent,
                     ),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 9.dp),
                     modifier = Modifier
@@ -765,10 +765,10 @@ internal fun PlaylistRundownHeader(
                     onClick = onToggleReorder,
                     enabled = !busy && tracks.size > 1,
                     shape = RoundedCornerShape(10.dp),
-                    color = if (reorderMode) FohPalette.SafeBg else FohPalette.SurfaceDeep,
+                    color = if (reorderMode) FohTheme.colors.safeBg else FohTheme.colors.surfaceDeep,
                     border = BorderStroke(
                         1.dp,
-                        if (reorderMode) FohPalette.SafeBorder else FohPalette.BorderSubtle,
+                        if (reorderMode) FohTheme.colors.safeBorder else FohTheme.colors.borderSubtle,
                     ),
                     modifier = Modifier
                         .weight(1f)
@@ -783,7 +783,7 @@ internal fun PlaylistRundownHeader(
                             UiIcons.Reorder,
                             contentDescription = null,
                             tint = if (tracks.size <= 1 || busy) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                            else if (reorderMode) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurface,
+                            else if (reorderMode) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(16.dp),
                         )
                         Spacer(Modifier.width(6.dp))
@@ -792,7 +792,7 @@ internal fun PlaylistRundownHeader(
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold,
                             color = if (tracks.size <= 1 || busy) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                            else if (reorderMode) FohPalette.SafeAccent else MaterialTheme.colorScheme.onSurface,
+                            else if (reorderMode) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             softWrap = false,
                         )
@@ -807,8 +807,8 @@ internal fun PlaylistRundownHeader(
 internal fun RundownSyncNoticeBanner() {
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = FohPalette.SafeBg.copy(alpha = 0.72f),
-        border = BorderStroke(1.dp, FohPalette.SafeBorder),
+        color = FohTheme.colors.safeBg.copy(alpha = 0.72f),
+        border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 4.dp),
@@ -820,7 +820,7 @@ internal fun RundownSyncNoticeBanner() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(UiIcons.Check, null, tint = FohPalette.SafeAccent, modifier = Modifier.size(16.dp))
+            Icon(UiIcons.Check, null, tint = FohTheme.colors.safeAccent, modifier = Modifier.size(16.dp))
             Text(
                 text = "Urutan rundown tersimpan otomatis ke database & sinkron dengan Cue List saat Load Cue.",
                 style = MaterialTheme.typography.bodySmall,

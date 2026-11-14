@@ -47,7 +47,18 @@ class AppViewModel(
     }
     override fun onCleared() { desktopRemote.release(); session.close(); super.onCleared() }
     val tracks = library.tracks.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val playlists = library.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val pendingPlaylistOrders = MutableStateFlow<Map<Long, List<Long>>>(emptyMap())
+    val playlists = combine(library.playlists, pendingPlaylistOrders) { list, overrides ->
+        if (overrides.isEmpty()) list
+        else list.map { playlist ->
+            val candidate = overrides[playlist.id]
+            if (candidate != null && candidate.size == playlist.trackIds.size && candidate.toSet() == playlist.trackIds.toSet()) {
+                playlist.copy(trackIds = candidate)
+            } else {
+                playlist
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val lastRename = library.lastRename.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     private val busy = MutableStateFlow(false)
     val organizerBusy = busy.asStateFlow()
@@ -80,7 +91,14 @@ class AppViewModel(
     init {
         operations.initialize()
         remoteServer?.attachDeletedTrackChecker { id -> !playbackDeletion.canPlay(id) }
-        viewModelScope.launch { runCatching { library.scanMissingMetadata() } }
+        viewModelScope.launch {
+            try {
+                library.scanMissingMetadata()
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+            }
+        }
     }
     fun refreshServerInterfaces() { remoteServer?.refreshInterfaces() }
     fun startRemoteServer(bindIp: String, port: Int) { remoteServer?.startServer(bindIp, port) }
@@ -177,15 +195,21 @@ class AppViewModel(
 
     fun reorderPlaylistTracks(playlistId: Long, orderedTrackIds: List<Long>) {
         if (operations.busy.value) return
+        val snapshot = orderedTrackIds.toList()
+        pendingPlaylistOrders.update { it + (playlistId to snapshot) }
         viewModelScope.launch {
             try {
                 reorderMutex.withLock {
-                    library.reorderPlaylistTracks(playlistId, orderedTrackIds)
+                    library.reorderPlaylistTracks(playlistId, snapshot)
                 }
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (failure: Exception) {
                 messageChannel.send(failure.message ?: "Gagal menyimpan urutan rundown.")
+            } finally {
+                pendingPlaylistOrders.update { current ->
+                    if (current[playlistId] == snapshot) current - playlistId else current
+                }
             }
         }
     }

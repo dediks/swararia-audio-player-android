@@ -35,15 +35,15 @@ import kotlin.math.roundToInt
 
 internal data class RemoteBadge(val label: String, val highlighted: Boolean, val error: Boolean = false)
 
-internal fun resolveConnectionBadge(state: DesktopRemoteUiState): RemoteBadge? {
-    if (state.phase == "disconnected") return null
-    if (state.phase == "connecting") return RemoteBadge("Menghubungkan…", highlighted = false)
-    if (state.phase == "pending") return RemoteBadge("Menunggu PC", highlighted = false)
-    return when {
-        !state.fresh && state.role == null -> RemoteBadge("Menyambung…", highlighted = false)
+internal fun resolveConnectionBadge(state: DesktopRemoteUiState): RemoteBadge? = when (state.remotePhase) {
+    RemotePhase.DISCONNECTED -> null
+    RemotePhase.CONNECTING -> RemoteBadge("Menghubungkan…", highlighted = false)
+    RemotePhase.PENDING -> RemoteBadge("Menunggu PC", highlighted = false)
+    RemotePhase.ACTIVE -> when {
+        !state.fresh && state.remoteRole == null -> RemoteBadge("Menyambung…", highlighted = false)
         !state.fresh -> RemoteBadge("Syncing", highlighted = false)
         state.playback?.online != true -> RemoteBadge("PC Offline", highlighted = false, error = true)
-        state.role == "view_only" -> RemoteBadge("Pantau Saja", highlighted = false)
+        state.remoteRole == RemoteRole.VIEW_ONLY -> RemoteBadge("Pantau Saja", highlighted = false)
         else -> RemoteBadge("FOH Ready", highlighted = true)
     }
 }
@@ -69,14 +69,15 @@ internal fun formatRemainingLabel(timeSec: Number?, durationSec: Number?): Strin
     return "-${LibraryRules.durationLabel(remMs)}"
 }
 
-internal fun formatOutcomeFeedback(outcome: String): Pair<String, Boolean> = when (outcome) {
-    "accepted" -> "Mengirim perintah ke PC…" to false
-    "pending" -> "Menunggu konfirmasi pemutar PC…" to false
-    "applied" -> "Perintah diterapkan di PC" to false
-    "unknown" -> "Hasil belum pasti — tidak dikirim ulang" to true
-    "expired" -> "Batas waktu habis — cek PC" to true
-    else -> "Perintah ditolak oleh pemutar PC" to true
-}
+internal fun formatOutcomeFeedback(outcome: String): Pair<String, Boolean> =
+    when (RemoteCommandOutcome.fromWire(outcome) ?: RemoteCommandOutcome.REJECTED) {
+        RemoteCommandOutcome.ACCEPTED -> "Mengirim perintah ke PC…" to false
+        RemoteCommandOutcome.PENDING -> "Menunggu konfirmasi pemutar PC…" to false
+        RemoteCommandOutcome.APPLIED -> "Perintah diterapkan di PC" to false
+        RemoteCommandOutcome.UNKNOWN -> "Hasil belum pasti — tidak dikirim ulang" to true
+        RemoteCommandOutcome.EXPIRED -> "Batas waktu habis — cek PC" to true
+        RemoteCommandOutcome.REJECTED -> "Perintah ditolak oleh pemutar PC" to true
+    }
 
 @Composable
 internal fun ActiveRemoteHeaderBar(
@@ -329,7 +330,7 @@ internal fun RemoteSearchFilterStrip(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                items(groups, key = { it.id }) { group ->
+                items(groups, key = { it.id }, contentType = { "remote-group-chip" }) { group ->
                     val selected = group.id == selectedGroupId
                     FilterChip(
                         selected = selected,
@@ -728,7 +729,7 @@ internal fun FohTransportDock(
         append(playback?.title?.takeIf { it.isNotBlank() } ?: "Belum ada track dipilih di PC")
     }
     val supportsPrevNext = "prev" in state.commands || "next" in state.commands
-    val waitingCommand = state.busy || state.outcome in setOf("accepted", "pending")
+    val waitingCommand = state.waitingCommand
     val showPause = isPlaying && !isFading
     val playEnabled = state.canControl && ((if (showPause) "pause" else "play") in state.commands)
     val stopEnabled = state.canControl && "stop" in state.commands
@@ -1386,12 +1387,12 @@ internal fun PendingApprovalCard(state: DesktopRemoteUiState, onRefresh: () -> U
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
-                if (state.phase == "connecting") "Menghubungkan ke PC…" else "Menunggu Persetujuan di PC",
+                if (state.remotePhase == RemotePhase.CONNECTING) "Menghubungkan ke PC…" else "Menunggu Persetujuan di PC",
                 style = MaterialTheme.typography.titleLarge,
             )
             LinearProgressIndicator(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)))
             Text(
-                if (state.phase == "connecting") {
+                if (state.remotePhase == RemotePhase.CONNECTING) {
                     "Memverifikasi identitas TLS dan mendaftarkan sesi pairing."
                 } else {
                     "Di jendela Swararia pada PC Anda, klik Izinkan kontrol / Pantau saja untuk menyetujui HP ini."
