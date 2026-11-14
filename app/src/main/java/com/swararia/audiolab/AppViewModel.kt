@@ -21,6 +21,7 @@ class AppViewModel(
     desktopRemoteMediaImporter: DesktopRemoteMediaImporter? = null,
     private val ytMusicAccount: YoutubeMusicAccountManager? = null,
     private val downloadPreferences: DownloadPreferences? = null,
+    private val playbackPreferences: PlaybackPreferences? = null,
 ) : ViewModel() {
     val desktopRemote = DesktopRemoteSession(
         desktopRemoteApi,
@@ -79,6 +80,8 @@ class AppViewModel(
     val operationBusy = operations.busy
     val downloadSettings: StateFlow<DownloadSettingsState> =
         downloadPreferences?.state ?: MutableStateFlow(DownloadSettingsState())
+    val playbackSettings: StateFlow<PlaybackSettingsState> =
+        playbackPreferences?.state ?: MutableStateFlow(PlaybackSettingsState())
     val remoteServerState: StateFlow<RemoteServerUiState> =
         remoteServer?.state ?: MutableStateFlow(RemoteServerUiState())
     val ytMusicState: StateFlow<YoutubeMusicAccountState> =
@@ -181,6 +184,12 @@ class AppViewModel(
     fun setDownloadRateLimit(rateLimit: DownloadRateLimit) {
         downloadPreferences?.setRateLimit(rateLimit)
         message("Batas kecepatan unduh: ${rateLimit.label}.")
+    }
+    fun setPlaybackFadeInMs(durationMs: Long) {
+        playbackPreferences?.setFadeInMs(durationMs)
+    }
+    fun setPlaybackFadeOutMs(durationMs: Long) {
+        playbackPreferences?.setFadeOutMs(durationMs)
     }
     fun enqueueDownloads(requests: List<DownloadRequest>, authorized: Boolean, start: (String) -> Unit) {
         if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }

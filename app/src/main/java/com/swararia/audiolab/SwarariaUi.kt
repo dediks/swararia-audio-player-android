@@ -39,6 +39,9 @@ fun SwarariaUi(
     remoteServerState: RemoteServerUiState = RemoteServerUiState(),
     remoteServerActions: RemoteServerUiActions = RemoteServerUiActions(),
     ytMusicState: YoutubeMusicAccountState = YoutubeMusicAccountState(),
+    playbackSettings: PlaybackSettingsState = PlaybackSettingsState(),
+    onSetPlaybackFadeInMs: (Long) -> Unit = {},
+    onSetPlaybackFadeOutMs: (Long) -> Unit = {},
     ytMusicActions: YoutubeMusicAccountActions = YoutubeMusicAccountActions(),
 ) {
     var destination by rememberSaveable { mutableIntStateOf(0) }
@@ -298,6 +301,9 @@ fun SwarariaUi(
             ingest = ingest,
             searchBusy = search.busy || searchActions.preview.loading || upgrade.operationBusy,
             ytMusic = ytMusicState,
+            playbackSettings = playbackSettings,
+            onSetPlaybackFadeInMs = onSetPlaybackFadeInMs,
+            onSetPlaybackFadeOutMs = onSetPlaybackFadeOutMs,
             ytMusicActions = ytMusicActions.copy(
                 onOpenSignIn = { activeModal = SwarariaModal.YoutubeMusicSignIn },
                 onOpenImportCookies = { activeModal = SwarariaModal.YoutubeMusicImportCookies },

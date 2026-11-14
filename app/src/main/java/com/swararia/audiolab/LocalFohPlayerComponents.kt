@@ -1000,7 +1000,7 @@ internal fun LocalFohBottomDeck(
                         Icon(UiIcons.Fade, contentDescription = null, modifier = Modifier.size(17.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            if (controlUi.fadeBusy) "Fading…" else "Fade Out 3s",
+                            if (controlUi.fadeBusy) "Fading…" else "Fade Out ${FadeRules.shortLabel(controlUi.manualFadeOutMs)}",
                             style = MaterialTheme.typography.labelLarge,
                             maxLines = 1,
                             softWrap = false,

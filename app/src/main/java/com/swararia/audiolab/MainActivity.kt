@@ -74,6 +74,7 @@ class MainActivity : ComponentActivity() {
                 val remoteServerState by model.remoteServerState.collectAsStateWithLifecycle()
                 val ytMusicState by model.ytMusicState.collectAsStateWithLifecycle()
                 val downloadSettings by model.downloadSettings.collectAsStateWithLifecycle()
+                val playbackSettings by model.playbackSettings.collectAsStateWithLifecycle()
                 val snackbars = remember { SnackbarHostState() }
                 LaunchedEffect(model) { model.messages.collect { snackbars.showSnackbar(it) } }
                 LaunchedEffect(tracks, controller) {
@@ -151,6 +152,15 @@ class MainActivity : ComponentActivity() {
                     remoteServerState = remoteServerState,
                     remoteServerActions = model.remoteServerActions,
                     ytMusicState = ytMusicState,
+                    playbackSettings = playbackSettings,
+                    onSetPlaybackFadeInMs = { fadeInMs ->
+                        model.setPlaybackFadeInMs(fadeInMs)
+                        syncFadeSettingsToService(playbackSettings.copy(fadeInMs = fadeInMs))
+                    },
+                    onSetPlaybackFadeOutMs = { fadeOutMs ->
+                        model.setPlaybackFadeOutMs(fadeOutMs)
+                        syncFadeSettingsToService(playbackSettings.copy(fadeOutMs = fadeOutMs))
+                    },
                     ytMusicActions = YoutubeMusicAccountActions(
                         onCompleteWebViewSignIn = { www, music -> model.connectYtMusicWebView(www, music) },
                         onImportCookiesText = { raw -> model.importYtMusicCookies(raw) },
@@ -284,12 +294,29 @@ class MainActivity : ComponentActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    private fun pausePlaybackImmediately(player: MediaController) {
+        if (player.isSessionCommandAvailable(PlaybackCommands.immediatePause)) {
+            player.sendCustomCommand(PlaybackCommands.immediatePause, Bundle.EMPTY)
+        } else {
+            player.pause()
+        }
+    }
+
+    private fun syncFadeSettingsToService(settings: PlaybackSettingsState) {
+        val player = controller ?: return
+        if (!player.isConnected || !player.isSessionCommandAvailable(PlaybackCommands.setFadeSettings)) return
+        player.sendCustomCommand(PlaybackCommands.setFadeSettings, Bundle().apply {
+            putLong(PlaybackCommands.EXTRA_FADE_IN_MS, settings.fadeInMs)
+            putLong(PlaybackCommands.EXTRA_FADE_OUT_MS, settings.fadeOutMs)
+        })
+    }
+
     private fun pauseForPreview(): Boolean {
         val player = controller
         if (player == null || !player.isConnected || !player.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) {
             model.message("Player belum terhubung. Coba lagi sebentar."); return false
         }
-        player.pause()
+        pausePlaybackImmediately(player)
         return true
     }
 
@@ -305,7 +332,7 @@ class MainActivity : ComponentActivity() {
             if (!player.isCommandAvailable(Player.COMMAND_STOP) || !player.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) {
                 model.message("Hentikan audio sebelum Delete."); return
             }
-            player.pause(); player.stop()
+            pausePlaybackImmediately(player); player.stop()
         }
         // Hidden saved local context lives in the service during Preview. Remove the explicit ID
         // there BEFORE durable deletion, so restoring after end/error cannot resurrect it.
@@ -367,7 +394,7 @@ class MainActivity : ComponentActivity() {
             if (!player.isCommandAvailable(Player.COMMAND_STOP) || !player.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) {
                 model.message("Hentikan audio sebelum Delete."); return
             }
-            player.pause(); player.stop()
+            pausePlaybackImmediately(player); player.stop()
         }
         forgetDeletedSequence(player, distinct.map { it.id.toString() }, 0) {
             model.deleteBatch(distinct.map { it.id }, done)

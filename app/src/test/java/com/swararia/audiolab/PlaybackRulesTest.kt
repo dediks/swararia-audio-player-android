@@ -33,4 +33,21 @@ class PlaybackRulesTest {
         assertEquals(PlaybackMode.CONTINUE, PlaybackMode.fromStored("bad-mode"))
         assertEquals(PlaybackMode.CONTINUE, PlaybackMode.fromStored("CONTINUE"))
     }
+
+    @Test fun globalFadeRulesComputeLinearRampsAndProportionalInterruptions() {
+        assertEquals(0f, FadeRules.rampVolumeAt(0f, 1f, 0, 1000), 0.0001f)
+        assertEquals(0.5f, FadeRules.rampVolumeAt(0f, 1f, 500, 1000), 0.0001f)
+        assertEquals(1f, FadeRules.rampVolumeAt(0f, 1f, 1000, 1000), 0.0001f)
+        assertEquals(0.7f, FadeRules.rampVolumeAt(0.4f, 1f, 500, 1000), 0.0001f)
+        assertEquals(0.4f, FadeRules.volumeAt(0.8f, 1000, 2000), 0.0001f)
+        assertEquals(3000L, FadeRules.manualDurationMs(0L))
+        assertEquals(5000L, FadeRules.manualDurationMs(5000L))
+        assertEquals(1000L, FadeRules.proportionalDurationMs(2000L, fromVolume = 0.5f, toVolume = 0f, nominalVolume = 1f))
+        assertTrue(FadeRules.shouldBypassFade(previewActive = true, immediate = false))
+        assertTrue(FadeRules.shouldBypassFade(previewActive = false, immediate = true))
+        assertFalse(FadeRules.shouldBypassFade(previewActive = false, immediate = false))
+        assertEquals("Off", FadeRules.shortLabel(0L))
+        assertEquals("0.3s", FadeRules.shortLabel(300L))
+        assertEquals("2s", FadeRules.shortLabel(2000L))
+    }
 }

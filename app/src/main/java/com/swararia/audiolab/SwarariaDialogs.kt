@@ -339,6 +339,9 @@ internal fun EngineSettingsDialog(
     ingest: IngestState,
     searchBusy: Boolean,
     ytMusic: YoutubeMusicAccountState = YoutubeMusicAccountState(),
+    playbackSettings: PlaybackSettingsState = PlaybackSettingsState(),
+    onSetPlaybackFadeInMs: (Long) -> Unit = {},
+    onSetPlaybackFadeOutMs: (Long) -> Unit = {},
     ytMusicActions: YoutubeMusicAccountActions = YoutubeMusicAccountActions(),
     onDismiss: () -> Unit,
     onUpdate: () -> Unit,
@@ -348,6 +351,28 @@ internal fun EngineSettingsDialog(
     AlertDialog(onDismissRequest = onDismiss, icon = { BrandLogo(36.dp) }, title = { Text("Pengaturan & tentang") },
         text = {
             Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Pemutaran & Transisi (Global)", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Fade otomatis saat Play, Pause, Stop, Next/Prev, ganti lagu, dan Cue. Preview pencarian tetap instan.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FadePresetSelectorRow(
+                    title = "Fade In (Play / Resume)",
+                    selectedMs = playbackSettings.fadeInMs,
+                    onSelect = onSetPlaybackFadeInMs,
+                )
+                FadePresetSelectorRow(
+                    title = "Fade Out (Pause / Stop / Skip)",
+                    selectedMs = playbackSettings.fadeOutMs,
+                    onSelect = onSetPlaybackFadeOutMs,
+                )
+                Text(
+                    "Tekan Pause/Stop/Next kedua kali saat fading untuk potong instan. Tombol Fade Out memakai ${FadeRules.shortLabel(playbackSettings.effectiveManualFadeOutMs)}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HorizontalDivider()
                 Text("Akun YouTube Music (Opsional)", style = MaterialTheme.typography.titleMedium)
                 Text(
                     "Opsional untuk akun YT Music Premium (peluang audio hingga 256k AAC M4A). Disarankan pakai akun sekunder / slot Family, bukan akun Google utama.",
@@ -875,4 +900,28 @@ internal fun AddTracksToPlaylistDialog(
             TextButton(onClick = onDismiss, enabled = !busy) { Text("Selesai") }
         },
     )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FadePresetSelectorRow(
+    title: String,
+    selectedMs: Long,
+    onSelect: (Long) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, style = MaterialTheme.typography.labelLarge)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            PlaybackFadePreset.entries.forEach { preset ->
+                FilterChip(
+                    selected = selectedMs == preset.durationMs,
+                    onClick = { onSelect(preset.durationMs) },
+                    label = { Text(preset.shortLabel, maxLines = 1) },
+                )
+            }
+        }
+    }
 }

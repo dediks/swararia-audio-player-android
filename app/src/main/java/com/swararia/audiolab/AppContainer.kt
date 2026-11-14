@@ -19,6 +19,7 @@ class AppContainer(context: Context) {
     val library: MediaLibrary by lazy { MediaLibrary(appContext, database) }
     val downloadQueue: DownloadQueueRepository by lazy { RoomDownloadQueueRepository(database) }
     val downloadPreferences: DownloadPreferences by lazy { DownloadPreferences(appContext) }
+    val playbackPreferences: PlaybackPreferences by lazy { PlaybackPreferences(appContext) }
     val searchRepository: AudioSearchRepository by lazy {
         YoutubeSearchRepository(appContext, { ingestState.value.busy })
     }
@@ -86,6 +87,7 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
             container.desktopRemoteMediaImporter(),
             container.ytMusicAccount,
             container.downloadPreferences,
+            container.playbackPreferences,
         ) as T
     }
 }

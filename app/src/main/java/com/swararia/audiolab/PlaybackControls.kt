@@ -49,16 +49,24 @@ import kotlinx.coroutines.withTimeout
 object PlaybackCommands {
     const val ACTION_SET_MODE = "com.swararia.audiolab.SET_PLAYBACK_MODE"
     const val ACTION_FADE = "com.swararia.audiolab.FADE_PAUSE"
+    const val ACTION_IMMEDIATE_PAUSE = "com.swararia.audiolab.IMMEDIATE_PAUSE"
+    const val ACTION_SET_FADE_SETTINGS = "com.swararia.audiolab.SET_FADE_SETTINGS"
     const val EXTRA_MODE = "com.swararia.audiolab.playback.MODE"
     const val EXTRA_FADE_BUSY = "com.swararia.audiolab.playback.FADE_BUSY"
+    const val EXTRA_FADE_IN_MS = "com.swararia.audiolab.playback.FADE_IN_MS"
+    const val EXTRA_FADE_OUT_MS = "com.swararia.audiolab.playback.FADE_OUT_MS"
     const val EXTRA_PROTOCOL = "com.swararia.audiolab.playback.PROTOCOL"
     val setMode = SessionCommand(ACTION_SET_MODE, Bundle.EMPTY)
     val fade = SessionCommand(ACTION_FADE, Bundle.EMPTY)
+    val immediatePause = SessionCommand(ACTION_IMMEDIATE_PAUSE, Bundle.EMPTY)
+    val setFadeSettings = SessionCommand(ACTION_SET_FADE_SETTINGS, Bundle.EMPTY)
 }
 
 private data class PlaybackControlState(
     val mode: PlaybackMode? = null,
     val busy: Boolean = false,
+    val fadeInMs: Long = 0L,
+    val fadeOutMs: Long = 0L,
     val modeSupported: Boolean = false,
     val fadeSupported: Boolean = false,
     val playing: Boolean = false,
@@ -72,9 +80,13 @@ private fun MediaController?.readPlaybackControlState(): PlaybackControlState {
     val mode = if (knownProtocol) PlaybackMode.entries.firstOrNull {
         it.name == extras.getString(PlaybackCommands.EXTRA_MODE)
     } else null
+    val fadeInMs = if (knownProtocol) FadeRules.clampDurationMs(extras.getLong(PlaybackCommands.EXTRA_FADE_IN_MS, 0L)) else 0L
+    val fadeOutMs = if (knownProtocol) FadeRules.clampDurationMs(extras.getLong(PlaybackCommands.EXTRA_FADE_OUT_MS, 0L)) else 0L
     return PlaybackControlState(
         mode = mode,
         busy = knownProtocol && extras.getBoolean(PlaybackCommands.EXTRA_FADE_BUSY, false),
+        fadeInMs = fadeInMs,
+        fadeOutMs = fadeOutMs,
         modeSupported = knownProtocol && mode != null && isSessionCommandAvailable(PlaybackCommands.setMode),
         fadeSupported = knownProtocol && isSessionCommandAvailable(PlaybackCommands.fade),
         playing = isPlaying,
@@ -85,6 +97,8 @@ private fun MediaController?.readPlaybackControlState(): PlaybackControlState {
 data class LocalPlaybackControlUi(
     val mode: PlaybackMode?,
     val fadeBusy: Boolean,
+    val fadeInMs: Long = 0L,
+    val fadeOutMs: Long = 0L,
     val modeSupported: Boolean,
     val fadeSupported: Boolean,
     val playing: Boolean,
@@ -94,7 +108,9 @@ data class LocalPlaybackControlUi(
     val isError: Boolean,
     val onSelectMode: (PlaybackMode) -> Unit,
     val onFadeOut: () -> Unit,
-)
+) {
+    val manualFadeOutMs: Long get() = FadeRules.manualDurationMs(fadeOutMs)
+}
 
 /** Insert in the focused player. Does not own/release the controller or alter its queue. */
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
@@ -174,6 +190,8 @@ fun PlaybackModeBar(
                 LocalPlaybackControlUi(
                     mode = state.mode,
                     fadeBusy = state.busy,
+                    fadeInMs = state.fadeInMs,
+                    fadeOutMs = state.fadeOutMs,
                     modeSupported = state.modeSupported,
                     fadeSupported = state.fadeSupported,
                     playing = state.playing,
@@ -222,11 +240,13 @@ fun PlaybackModeBar(
                 onClick = { send(PlaybackCommands.fade, Bundle.EMPTY) },
                 enabled = state.fadeSupported && state.playing && !state.busy && !pending,
                 modifier = Modifier.heightIn(min = 48.dp).semantics {
-                    stateDescription = if (state.busy) "Fading to pause" else "Fade out and pause over 3 seconds"
+                    val labelSec = FadeRules.shortLabel(FadeRules.manualDurationMs(state.fadeOutMs))
+                    stateDescription = if (state.busy) "Fading to pause" else "Fade out and pause over $labelSec"
                 },
             ) {
                 Icon(UiIcons.Fade, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
-                Text(if (state.busy) "Fading…" else "Fade 3s")
+                val labelSec = FadeRules.shortLabel(FadeRules.manualDurationMs(state.fadeOutMs))
+                Text(if (state.busy) "Fading…" else "Fade $labelSec")
             }
         }
         if (status != null) Text(
