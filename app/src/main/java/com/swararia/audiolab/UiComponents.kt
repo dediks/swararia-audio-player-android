@@ -3,6 +3,7 @@ package com.swararia.audiolab
 import androidx.compose.foundation.layout.heightIn
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -13,7 +14,15 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.runtime.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
@@ -182,6 +191,29 @@ internal fun FohDeckButton(
     }
 }
 
+@Composable
+internal fun FohPlayToggleCircleButton(
+    playing: Boolean,
+    description: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    size: Dp = 36.dp,
+    iconSize: Dp = 18.dp,
+    containerColor: Color = FohTheme.colors.safeBg,
+    contentColor: Color = FohTheme.colors.safeAccent,
+) {
+    CompactCircleButton(
+        icon = if (playing) UiIcons.Pause else UiIcons.Play,
+        description = description,
+        onClick = onClick,
+        enabled = enabled,
+        size = size,
+        iconSize = iconSize,
+        containerColor = containerColor,
+        contentColor = contentColor,
+    )
+}
+
 /** Shared header pill action shared across Library and Search screens. */
 @Composable
 internal fun FohHeaderChipButton(
@@ -319,8 +351,124 @@ internal fun FohFilterChip(
     }
 }
 
-/** Compact 18 dp spinner shared by status banners in Library and Search. */
+/**
+ * Smooth frame-driven rotating loading indicator with a fading comet arc and leading spark.
+ * Uses frame timing while active on screen so rotation stays fluid even if OS animator scale is 0.
+ */
+@Composable
+internal fun FohSpinningIndicator(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    strokeWidth: Dp = 2.4.dp,
+    color: Color = FohTheme.colors.safeAccent,
+    trackColor: Color = FohTheme.colors.borderSubtle.copy(alpha = 0.65f),
+    periodMs: Long = 850L,
+) {
+    var angle by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(periodMs) {
+        val startNanos = withFrameNanos { it }
+        val safePeriodMs = periodMs.coerceAtLeast(300L)
+        while (true) {
+            withFrameNanos { nowNanos ->
+                val elapsedMs = (nowNanos - startNanos) / 1_000_000L
+                angle = ((elapsedMs % safePeriodMs).toFloat() / safePeriodMs.toFloat()) * 360f
+            }
+        }
+    }
+    val sweepBrush = remember(color) {
+        Brush.sweepGradient(
+            0.00f to Color.Transparent,
+            0.08f to color.copy(alpha = 0.08f),
+            0.45f to color.copy(alpha = 0.45f),
+            0.72f to color,
+            0.79f to color,
+            0.84f to Color.Transparent,
+            1.00f to Color.Transparent,
+        )
+    }
+    Canvas(modifier = modifier.size(size)) {
+        val strokePx = strokeWidth.toPx()
+        val inset = strokePx / 2f
+        val arcSize = Size(this.size.width - strokePx, this.size.height - strokePx)
+        val topLeft = Offset(inset, inset)
+        val radius = arcSize.width / 2f
+        drawArc(
+            color = trackColor,
+            startAngle = 0f,
+            sweepAngle = 360f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokePx),
+        )
+        rotate(degrees = angle) {
+            drawArc(
+                brush = sweepBrush,
+                startAngle = 12f,
+                sweepAngle = 258f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round),
+            )
+            val tipCenter = Offset(x = center.x, y = center.y - radius)
+            drawCircle(
+                color = Color.White.copy(alpha = 0.85f),
+                radius = strokePx * 0.45f,
+                center = tipCenter,
+            )
+        }
+    }
+}
+
+/** Smooth animated indeterminate horizontal progress bar that glides continuously while busy. */
+@Composable
+internal fun FohIndeterminateBar(
+    modifier: Modifier = Modifier,
+    color: Color = FohTheme.colors.safeAccent,
+    trackColor: Color = FohTheme.colors.surfaceDeep,
+    height: Dp = 5.dp,
+    periodMs: Long = 1350L,
+) {
+    var phase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(periodMs) {
+        val startNanos = withFrameNanos { it }
+        val safePeriodMs = periodMs.coerceAtLeast(400L)
+        while (true) {
+            withFrameNanos { nowNanos ->
+                val elapsedMs = (nowNanos - startNanos) / 1_000_000L
+                phase = ((elapsedMs % safePeriodMs).toFloat() / safePeriodMs.toFloat())
+            }
+        }
+    }
+    val pillBrush = remember(color) {
+        Brush.horizontalGradient(
+            0.0f to color.copy(alpha = 0.25f),
+            0.5f to color,
+            1.0f to color.copy(alpha = 0.85f),
+        )
+    }
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(999.dp)),
+    ) {
+        drawRect(color = trackColor)
+        val segmentW = size.width * 0.36f
+        val travel = size.width + segmentW
+        val left = -segmentW + phase * travel
+        drawRoundRect(
+            brush = pillBrush,
+            topLeft = Offset(left, 0f),
+            size = Size(segmentW, size.height),
+            cornerRadius = CornerRadius(size.height / 2f, size.height / 2f),
+        )
+    }
+}
+
+/** Compact 18 dp spinner shared by status banners in Library, Search, and Downloads. */
 @Composable
 internal fun CircularProgressIndicatorCompact() {
-    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+    FohSpinningIndicator(size = 18.dp, strokeWidth = 2.2.dp, color = MaterialTheme.colorScheme.primary)
 }

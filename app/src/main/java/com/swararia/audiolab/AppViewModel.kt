@@ -20,6 +20,7 @@ class AppViewModel(
     private val remoteServer: AndroidRemoteServerController? = null,
     desktopRemoteMediaImporter: DesktopRemoteMediaImporter? = null,
     private val ytMusicAccount: YoutubeMusicAccountManager? = null,
+    private val downloadPreferences: DownloadPreferences? = null,
 ) : ViewModel() {
     val desktopRemote = DesktopRemoteSession(
         desktopRemoteApi,
@@ -76,6 +77,8 @@ class AppViewModel(
             remoteServer?.notifyLibraryDeletionsChanged()
         }, ::message)
     val operationBusy = operations.busy
+    val downloadSettings: StateFlow<DownloadSettingsState> =
+        downloadPreferences?.state ?: MutableStateFlow(DownloadSettingsState())
     val remoteServerState: StateFlow<RemoteServerUiState> =
         remoteServer?.state ?: MutableStateFlow(RemoteServerUiState())
     val ytMusicState: StateFlow<YoutubeMusicAccountState> =
@@ -168,15 +171,78 @@ class AppViewModel(
                 .onFailure { failure -> message(failure.message ?: "Gagal memutus akun.") }
         }
     }
+    fun canDispatchOrAppendDownload(): Boolean =
+        !search.value.busy && !preview.value.loading && !preview.value.canceling && !organizerBusy.value && !operations.busy.value
+    fun canDownloadOnNetworkNow(): Boolean = downloadPreferences?.canDownloadOnCurrentNetwork() ?: true
+    fun setDownloadWifiOnly(enabled: Boolean) {
+        downloadPreferences?.setWifiOnly(enabled)
+        message(if (enabled) "Mode Hanya Wi-Fi diaktifkan." else "Unduhan diizinkan di Wi-Fi maupun seluler.")
+    }
+    fun setDownloadRateLimit(rateLimit: DownloadRateLimit) {
+        downloadPreferences?.setRateLimit(rateLimit)
+        message("Batas kecepatan unduh: ${rateLimit.label}.")
+    }
     fun enqueueDownloads(requests: List<DownloadRequest>, authorized: Boolean, start: (String) -> Unit) {
-        if (!canStartOnlineOperation()) { message("Tunggu proses yang sedang berjalan."); return }
-        cancelPreview(); operations.enqueue(requests, authorized, start)
+        if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
+        cancelPreview()
+        operations.enqueueOrAppend(requests, authorized) { batch ->
+            if (canDownloadOnNetworkNow()) start(batch)
+            else message("Mode Hanya Wi-Fi aktif. Disimpan di antrean hingga Wi-Fi terhubung.")
+        }
     }
     fun retryDownloads(batchId: String, start: (String) -> Unit) {
-        if (!canStartOnlineOperation()) return
-        cancelPreview(); operations.retry(batchId, start)
+        if (!canDispatchOrAppendDownload()) return
+        cancelPreview()
+        if (ingest.value.busy && ingest.value.batchId != null) {
+            operations.retry(batchId) { start(it) }
+        } else {
+            operations.retry(batchId) { batch ->
+                if (canDownloadOnNetworkNow()) start(batch)
+                else message("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.")
+            }
+        }
     }
+    fun retryDownloadJob(jobId: Long, start: (String) -> Unit) {
+        if (!canDispatchOrAppendDownload()) return
+        cancelPreview()
+        operations.requeueJob(jobId, allowAppend = true) { batch ->
+            if (canDownloadOnNetworkNow()) start(batch)
+            else message("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.")
+        }
+    }
+    fun requeueDownloadJobs(jobIds: List<Long>, start: (String) -> Unit) {
+        if (!canDispatchOrAppendDownload()) return
+        cancelPreview()
+        operations.requeueJobs(jobIds) { batch ->
+            if (canDownloadOnNetworkNow()) start(batch)
+            else message("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.")
+        }
+    }
+    fun retryAllFailedDownloads(start: (String) -> Unit) {
+        if (!canDispatchOrAppendDownload()) return
+        cancelPreview()
+        operations.retryAllFailed { batch ->
+            if (canDownloadOnNetworkNow()) start(batch)
+            else message("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.")
+        }
+    }
+    fun continueDownloadQueue(start: (String) -> Unit) {
+        if (!canStartOnlineOperation()) { message("Tunggu proses yang sedang berjalan."); return }
+        if (!canDownloadOnNetworkNow()) {
+            message("Hubungkan ke Wi-Fi terlebih dahulu (Mode Hanya Wi-Fi aktif).")
+            return
+        }
+        cancelPreview()
+        operations.continueQueue(start)
+    }
+    fun moveDownloadJobUp(jobId: Long) = operations.moveJobUp(jobId)
+    fun moveDownloadJobToFront(jobId: Long) = operations.moveJobToFront(jobId)
     fun cancelQueuedBatch(batchId: String) = operations.cancelQueued(batchId)
+    fun cancelDownloadJob(jobId: Long) = operations.cancelJob(jobId)
+    fun cancelDownloadJobs(jobIds: List<Long>) = operations.cancelQueuedJobs(jobIds)
+    fun removeDownloadJob(jobId: Long) = operations.removeJob(jobId)
+    fun removeDownloadJobs(jobIds: List<Long>) = operations.removeJobs(jobIds)
+    fun clearFinishedDownloads() = operations.clearFinished()
     fun delete(trackId: Long, onSuccess: () -> Unit) = operations.delete(trackId, onSuccess)
     fun deleteBatch(trackIds: List<Long>, onSuccess: () -> Unit) = operations.deleteBatch(trackIds, onSuccess)
     fun message(text: String) { viewModelScope.launch { messageChannel.send(text) } }

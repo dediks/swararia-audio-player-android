@@ -14,6 +14,22 @@ interface DownloadQueueRepository {
     suspend fun cancel(id: Long)
     suspend fun cancelBatch(batchId: String)
     suspend fun retryFailed(batchId: String)
+    suspend fun retryJob(id: Long): String? = null
+    suspend fun retryAllFailed(): String? = null
+    suspend fun cancelQueuedJob(id: Long) = cancel(id)
+    suspend fun removeJob(id: Long) = Unit
+    suspend fun clearFinished(): Int = 0
+    suspend fun nextAnyQueued(): DownloadJob? = null
+    suspend fun nextQueuedBatchId(): String? = null
+    suspend fun cancelAllQueued(): Int = 0
+    suspend fun pauseRunningJob(id: Long): Boolean = false
+    suspend fun skipRunningJob(id: Long): Boolean = false
+    suspend fun moveQueuedUp(id: Long): Boolean = false
+    suspend fun moveQueuedToFront(id: Long): Boolean = false
+    suspend fun requeueJob(id: Long): String? = retryJob(id)
+    suspend fun requeueJobs(ids: List<Long>): String? = null
+    suspend fun cancelQueuedJobs(ids: List<Long>): Int = 0
+    suspend fun removeJobs(ids: List<Long>): Int = 0
     /** Invoke once at service/process startup, never during a live worker. */
     suspend fun recoverInterrupted()
 }

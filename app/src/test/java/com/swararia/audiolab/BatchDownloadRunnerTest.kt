@@ -20,6 +20,16 @@ class BatchDownloadRunnerTest {
         override suspend fun fail(id: Long, message: String) { events += "fail:$id"; change(id) { it.copy(status = "FAILED", error = message) } }
         override suspend fun cancel(id: Long) { events += "cancel:$id"; change(id) { it.copy(status = "CANCELED") } }
         override suspend fun cancelBatch(batchId: String) { events += "cancelBatch"; jobs.value = jobs.value.map { if (it.status == "QUEUED" && it.batchId == batchId) it.copy(status = "CANCELED") else it } }
+        override suspend fun pauseRunningJob(id: Long): Boolean {
+            events += "pause:$id"
+            change(id) { it.copy(status = "QUEUED", progress = null, stage = "Dijeda · menunggu") }
+            return true
+        }
+        override suspend fun skipRunningJob(id: Long): Boolean {
+            events += "skip:$id"
+            change(id) { it.copy(status = "CANCELED", progress = null, stage = "Dilewati") }
+            return true
+        }
         override suspend fun retryFailed(batchId: String) = Unit
         override suspend fun recoverInterrupted() { events += "recover" }
     }
@@ -122,5 +132,49 @@ class BatchDownloadRunnerTest {
         }
         assertEquals(listOf("claim:1", "progress:1", "publish:1", "complete:1", "claim:2", "progress:2", "publish:2", "complete:2", "claim:3", "progress:3", "publish:3", "complete:3"), queue.events)
         assertEquals(listOf(101L, 102L, 103L), queue.jobs.value.map { it.trackId })
+    }
+
+    @Test fun skipCurrentJobCancelsOnlyRunningItemAndContinuesRemainingQueue() = runBlocking {
+        val queue = Queue()
+        BatchDownloadRunner(queue).run("batch") { job, control ->
+            if (job.id == 2L) throw SkipCurrentJobException()
+            control.commit { job.id + 100 }
+        }
+        assertEquals(listOf("COMPLETED", "CANCELED", "COMPLETED"), queue.jobs.value.map { it.status })
+        assertEquals("Dilewati", queue.jobs.value[1].stage)
+        assertTrue(queue.events.contains("skip:2"))
+        assertTrue(queue.events.contains("complete:3"))
+    }
+
+    @Test fun pauseRequeuesInterruptedJobAndResumesRemainingItems() = runBlocking {
+        val queue = Queue()
+        var paused = false
+        BatchDownloadRunner(queue, isPaused = { paused }).run("batch") { job, control ->
+            if (job.id == 2L) {
+                paused = true
+                throw PauseQueueException()
+            }
+            control.commit { job.id + 10 }
+        }
+        assertEquals(listOf("COMPLETED", "QUEUED", "QUEUED"), queue.jobs.value.map { it.status })
+        assertTrue(queue.events.contains("pause:2"))
+        assertFalse(queue.events.contains("cancelBatch"))
+
+        paused = false
+        BatchDownloadRunner(queue, isPaused = { paused }).run("batch") { job, control ->
+            control.commit { job.id + 20 }
+        }
+        assertEquals(listOf("COMPLETED", "COMPLETED", "COMPLETED"), queue.jobs.value.map { it.status })
+        assertEquals(listOf(11L, 22L, 23L), queue.jobs.value.map { it.trackId })
+    }
+
+    @Test fun pauseAfterCommitFinishesCurrentItemThenStopsQueueCleanly() = runBlocking {
+        val queue = Queue()
+        var paused = false
+        BatchDownloadRunner(queue, isPaused = { paused }).run("batch") { job, control ->
+            control.commit { job.id + 50 }
+            paused = true
+        }
+        assertEquals(listOf("COMPLETED", "QUEUED", "QUEUED"), queue.jobs.value.map { it.status })
     }
 }

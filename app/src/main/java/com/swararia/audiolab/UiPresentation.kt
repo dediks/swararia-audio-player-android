@@ -14,6 +14,25 @@ enum class LibraryGroupMode(val label: String) {
     FORMAT("Format"),
 }
 
+enum class DownloadFilterTab(val label: String) {
+    ALL("Semua"),
+    ACTIVE("Aktif"),
+    COMPLETED("Selesai"),
+    FAILED("Gagal"),
+}
+
+data class DownloadQueueSummary(
+    val total: Int,
+    val running: Int,
+    val queued: Int,
+    val completed: Int,
+    val failed: Int,
+    val canceled: Int,
+) {
+    val active: Int get() = running + queued
+    val finished: Int get() = completed + canceled
+}
+
 data class LibraryTrackGroup<T>(
     val key: String,
     val label: String,
@@ -153,6 +172,40 @@ object UiPresentation {
         }
     }
 
+    fun summarizeDownloadStatuses(statuses: Iterable<String>): DownloadQueueSummary {
+        var running = 0
+        var queued = 0
+        var completed = 0
+        var failed = 0
+        var canceled = 0
+        var total = 0
+        for (status in statuses) {
+            total++
+            when (status) {
+                "RUNNING" -> running++
+                "QUEUED" -> queued++
+                "COMPLETED" -> completed++
+                "FAILED" -> failed++
+                "CANCELED" -> canceled++
+            }
+        }
+        return DownloadQueueSummary(total, running, queued, completed, failed, canceled)
+    }
+
+    fun <T> filterDownloads(
+        items: List<T>,
+        filter: DownloadFilterTab,
+        statusSelector: (T) -> String,
+    ): List<T> = when (filter) {
+        DownloadFilterTab.ALL -> items
+        DownloadFilterTab.ACTIVE -> items.filter {
+            val status = statusSelector(it)
+            status == "RUNNING" || status == "QUEUED"
+        }
+        DownloadFilterTab.COMPLETED -> items.filter { statusSelector(it) == "COMPLETED" }
+        DownloadFilterTab.FAILED -> items.filter { statusSelector(it) == "FAILED" }
+    }
+
     /** Records a valid non-URL query to the front of recent history without case-insensitive duplicates. */
     fun recordRecentQuery(existing: List<String>, rawQuery: String, limit: Int = 5): List<String> {
         val clean = rawQuery.trim()
@@ -166,6 +219,30 @@ object UiPresentation {
                 val trimmed = item.trim()
                 if (trimmed.isNotEmpty() && !trimmed.equals(clean, ignoreCase = true)) add(trimmed)
                 if (size >= cap) break
+            }
+        }
+    }
+
+    /** Formats a batch section header cleanly without depending on DB entities. */
+    fun formatBatchGroupLabel(createdAtMs: Long, nowMs: Long = System.currentTimeMillis()): String {
+        if (createdAtMs <= 0L) return "Riwayat Unduhan"
+        val tz = java.util.TimeZone.getDefault()
+        val calNow = java.util.Calendar.getInstance(tz).apply { timeInMillis = nowMs }
+        val calItem = java.util.Calendar.getInstance(tz).apply { timeInMillis = createdAtMs }
+        val timeFmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.forLanguageTag("id-ID")).apply {
+            timeZone = tz
+        }
+        val timePart = timeFmt.format(java.util.Date(createdAtMs))
+        val dayDiff = calNow.get(java.util.Calendar.DAY_OF_YEAR) - calItem.get(java.util.Calendar.DAY_OF_YEAR)
+        val sameYear = calNow.get(java.util.Calendar.YEAR) == calItem.get(java.util.Calendar.YEAR)
+        return when {
+            sameYear && dayDiff == 0 -> "Batch Hari Ini · $timePart"
+            sameYear && dayDiff == 1 -> "Batch Kemarin · $timePart"
+            else -> {
+                val dateFmt = java.text.SimpleDateFormat("d MMM", java.util.Locale.forLanguageTag("id-ID")).apply {
+                    timeZone = tz
+                }
+                "Batch ${dateFmt.format(java.util.Date(createdAtMs))} · $timePart"
             }
         }
     }

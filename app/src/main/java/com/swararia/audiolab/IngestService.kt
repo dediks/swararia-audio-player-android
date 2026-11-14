@@ -22,6 +22,7 @@ import kotlinx.coroutines.sync.Mutex
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 data class IngestState(
     val busy: Boolean = false,
@@ -48,11 +49,16 @@ class IngestService : Service() {
     private var processId: String? = null
     private var interruptible = true
     private val canceled = AtomicBoolean(false)
+    private val paused = AtomicBoolean(false)
+    private val pausedWifi = AtomicBoolean(false)
+    private val skipJobId = AtomicLong(-1L)
+    private val rescanQueued = AtomicBoolean(false)
     @Volatile private var runner: BatchDownloadRunner? = null
     @Volatile private var activeBatch: String? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastNotification = 0L
     private val queue get() = (application as SwarariaApp).container.downloadQueue
+    private val downloadPrefs get() = (application as SwarariaApp).container.downloadPreferences
     private val library get() = (application as SwarariaApp).library
     private val ytMusicAccount get() = (application as SwarariaApp).container.ytMusicAccount
 
@@ -64,19 +70,46 @@ class IngestService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_CANCEL) {
-            requestCancel()
-            if (task == null) stopSelf(startId)
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_CANCEL -> {
+                requestCancel()
+                if (task == null) stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            ACTION_PAUSE_QUEUE -> {
+                requestPauseQueue()
+                if (task == null) stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            ACTION_SKIP_CURRENT -> {
+                requestSkipCurrent(intent.getLongExtra(EXTRA_JOB_ID, -1L))
+                if (task == null) stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            ACTION_ENSURE_BATCH -> {
+                if (task?.isActive == true) {
+                    rescanQueued.set(true)
+                    return START_NOT_STICKY
+                }
+            }
         }
         if (task?.isActive == true) return START_NOT_STICKY
-        if (intent?.action !in setOf(ACTION_BATCH, ACTION_DOWNLOAD, ACTION_IMPORT, ACTION_UPDATE)) {
+        if (intent?.action !in setOf(ACTION_BATCH, ACTION_ENSURE_BATCH, ACTION_DOWNLOAD, ACTION_IMPORT, ACTION_UPDATE)) {
             stopSelf(startId)
             return START_NOT_STICKY
         }
         canceled.set(false)
+        paused.set(false)
+        pausedWifi.set(false)
+        skipJobId.set(-1L)
+        rescanQueued.set(false)
         activeBatch = intent?.getStringExtra(EXTRA_BATCH)
         try {
+            if (intent?.action == ACTION_ENSURE_BATCH) {
+                IngestStatus.mutable.update {
+                    it.copy(busy = true, stage = "Menyiapkan...", progress = null, detail = "", cancelable = true, error = false, batchId = activeBatch)
+                }
+            }
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification("Menyiapkan...", null), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
             wakeLock = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:ingest").also {
                 it.acquire(30 * 60 * 1000L)
@@ -112,21 +145,39 @@ class IngestService : Service() {
                         updateVersion()
                         finished("Mesin siap", "yt-dlp: ${IngestStatus.state.value.engineVersion}")
                     }
-                    ACTION_DOWNLOAD, ACTION_BATCH -> {
-                        val batch = if (intent.action == ACTION_DOWNLOAD) {
+                    ACTION_DOWNLOAD, ACTION_BATCH, ACTION_ENSURE_BATCH -> {
+                        var batch: String? = if (intent.action == ACTION_DOWNLOAD) {
                             require(intent.getBooleanExtra(EXTRA_AUTHORIZED, false))
                             val url = LibraryRules.validatedHttpsUrl(intent.getStringExtra(EXTRA_URL).orEmpty())
                             queue.enqueue(listOf(DownloadRequest(url, "Audio")), authorized = true)
-                        } else requireNotNull(activeBatch).also { require(it.isNotBlank()) }
-                        activeBatch = batch
-                        IngestStatus.mutable.update { it.copy(batchId = batch) }
-                        val worker = BatchDownloadRunner(queue)
-                        runner = worker
-                        if (canceled.get()) worker.cancel(batch)
-                        // Engine preparation belongs to each claimed job: setup failure must not strand QUEUED rows.
-                        worker.run(batch) { job, control -> downloadOne(job, control) }
-                        if (canceled.get()) finished("Dibatalkan", "File yang sudah selesai tetap di library.")
-                        else finished("Antrean selesai", "Lihat status setiap audio di Unduhan.")
+                        } else activeBatch ?: queue.nextQueuedBatchId()
+                        if (batch.isNullOrBlank()) {
+                            finished("Antrean kosong", "Tidak ada item yang menunggu.")
+                        } else {
+                            do {
+                                rescanQueued.set(false)
+                                val runningBatch = batch ?: break
+                                activeBatch = runningBatch
+                                IngestStatus.mutable.update { it.copy(batchId = runningBatch) }
+                                val worker = BatchDownloadRunner(
+                                    queue = queue,
+                                    isPaused = { paused.get() },
+                                    nextQueuedOverride = { _ -> queue.nextAnyQueued() },
+                                )
+                                runner = worker
+                                if (canceled.get()) worker.cancel(runningBatch)
+                                // Engine preparation belongs to each claimed job: setup failure must not strand QUEUED rows.
+                                worker.run(runningBatch) { job, control -> downloadOne(job, control) }
+                                if (canceled.get() || paused.get()) break
+                                batch = queue.nextQueuedBatchId() ?: if (rescanQueued.getAndSet(false)) queue.nextQueuedBatchId() else null
+                            } while (batch != null)
+                            when {
+                                canceled.get() -> finished("Dibatalkan", "File yang sudah selesai tetap di library.")
+                                pausedWifi.get() -> finished("Menunggu Wi-Fi", "Mode Hanya Wi-Fi aktif. Sambungkan Wi-Fi lalu lanjutkan.")
+                                paused.get() -> finished("Antrean dijeda", "Antrean menunggu dilanjutkan kembali.")
+                                else -> finished("Antrean selesai", "Lihat status setiap audio di Unduhan.")
+                            }
+                        }
                     }
                 }
             } catch (_: CancellationException) {
@@ -157,7 +208,7 @@ class IngestService : Service() {
             require(job.authorized)
             val url = DownloadQueueRules.validatedPublicSourceUrl(job.sourceUrl)
             val videoId = url.substringAfter("v=")
-            synchronized(phaseLock) { interruptible = true; checkNotCanceled() }
+            synchronized(phaseLock) { interruptible = true; checkJobControls(job.id) }
             control.progress(null, "Menyiapkan mesin")
             report("Menyiapkan Python dan FFmpeg di HP...", null)
             val engineStarted = System.nanoTime()
@@ -167,7 +218,7 @@ class IngestService : Service() {
             FFmpeg.init(applicationContext)
             android.util.Log.d("SwarariaTiming", "download_engine_init_ms=${((System.nanoTime() - engineStarted) / 1_000_000L).coerceAtLeast(0)}")
             currentCoroutineContext().ensureActive()
-            checkNotCanceled()
+            checkJobControls(job.id)
             updateVersion()
             val root = File(cacheDir, "ingest").apply { check(mkdirs() || isDirectory) }
             val directory = File(root, UUID.randomUUID().toString()).apply { check(mkdir()) }
@@ -187,12 +238,15 @@ class IngestService : Service() {
             var budgetExceeded = false
             try {
                 budgetExceeded = runYtDlpAttempt(
+                    jobId = job.id,
                     request = buildDownloadRequest(targetUrl, outputTemplate, cookieFile),
                     directory = directory,
                     control = control,
                 )
             } catch (failure: Exception) {
                 if (canceled.get()) throw CancellationException("Dibatalkan")
+                if (paused.get() || failure is PauseQueueException) throw PauseQueueException()
+                if (skipJobId.get() == job.id || failure is SkipCurrentJobException) throw SkipCurrentJobException()
                 val activeCookieFile = cookieFile
                 if (activeCookieFile == null || budgetExceeded) throw failure
                 val updatedText = runCatching { activeCookieFile.takeIf { it.isFile }?.readText() }.getOrNull()
@@ -206,6 +260,7 @@ class IngestService : Service() {
                 usedCookies = false
                 control.progress(null, "Mengulang tanpa akun")
                 budgetExceeded = runYtDlpAttempt(
+                    jobId = job.id,
                     request = buildDownloadRequest(url, outputTemplate, cookieFile = null),
                     directory = directory,
                     control = control,
@@ -239,7 +294,7 @@ class IngestService : Service() {
             }
             // A cancellation during postprocess may finish this current item, never the pending items.
             synchronized(phaseLock) {
-                if (interruptible) checkNotCanceled()
+                if (interruptible) checkJobControls(job.id)
                 interruptible = false
             }
             control.progress(null, "Menyimpan audio")
@@ -251,6 +306,7 @@ class IngestService : Service() {
             // Optional artwork is strictly AFTER the durable audio + job transaction.
             runCatching { library.attachArtwork(requireNotNull(trackId), job.thumbnailUrl) }
         } finally {
+            skipJobId.compareAndSet(job.id, -1L)
             wipeCookieFile(cookieFile)
             runCatching { work?.deleteRecursively() }
             synchronized(phaseLock) { interruptible = true }
@@ -277,6 +333,9 @@ class IngestService : Service() {
         .addOption("--audio-format", "best")
         .addOption("-o", outputTemplate)
         .apply {
+            downloadPrefs.state.value.rateLimit.ytDlpArg?.let { limit ->
+                addOption("--limit-rate", limit)
+            }
             if (cookieFile != null) {
                 addOption("--cookies", cookieFile.absolutePath)
                 if (ytMusicAccount.state.value.tier == YoutubeMusicPremiumTier.PREMIUM) {
@@ -289,12 +348,13 @@ class IngestService : Service() {
         }
 
     private fun runYtDlpAttempt(
+        jobId: Long,
         request: YoutubeDLRequest,
         directory: File,
         control: BatchDownloadRunner.Control,
     ): Boolean {
         val id = UUID.randomUUID().toString()
-        synchronized(phaseLock) { checkNotCanceled(); processId = id }
+        synchronized(phaseLock) { checkJobControls(jobId); processId = id }
         var lastPersist = 0L
         var lastStage = ""
         var budgetExceeded = false
@@ -313,10 +373,18 @@ class IngestService : Service() {
                 val stage = if (postprocess) "Menyelesaikan audio" else "Mengunduh audio"
                 synchronized(phaseLock) {
                     if (postprocess) interruptible = false // sticky until this job exits
-                    if (canceled.get() && interruptible) runCatching { YoutubeDL.destroyProcessById(id) }
+                    val stopRequested = canceled.get() || paused.get() || skipJobId.get() == jobId
+                    if (stopRequested && interruptible) runCatching { YoutubeDL.destroyProcessById(id) }
                 }
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastPersist >= 700 || stage != lastStage) {
+                    if (!downloadPrefs.canDownloadOnCurrentNetwork()) {
+                        pausedWifi.set(true)
+                        paused.set(true)
+                        synchronized(phaseLock) {
+                            if (interruptible) runCatching { YoutubeDL.destroyProcessById(id) }
+                        }
+                    }
                     // Bounded per-job workspace; postprocessing may temporarily hold input plus output.
                     budgetExceeded = directory.walkTopDown().filter { it.isFile }.sumOf { it.length() } > MAX_WORK_BYTES
                     if (budgetExceeded) runCatching { YoutubeDL.destroyProcessById(id) }
@@ -331,6 +399,8 @@ class IngestService : Service() {
         } catch (failure: Exception) {
             failure.message?.let { logSanitizedYtDlpDiagnostics(it) }
             if (canceled.get()) throw CancellationException("Dibatalkan")
+            if (paused.get()) throw PauseQueueException()
+            if (skipJobId.get() == jobId) throw SkipCurrentJobException()
             throw failure
         } finally {
             // execute returned/unwound before the runner resolves the RUNNING row.
@@ -413,6 +483,16 @@ class IngestService : Service() {
     }
 
     private fun checkNotCanceled() { if (canceled.get()) throw CancellationException("Dibatalkan") }
+    private fun checkJobControls(jobId: Long) {
+        checkNotCanceled()
+        if (paused.get()) throw PauseQueueException()
+        if (skipJobId.get() == jobId) throw SkipCurrentJobException()
+        if (!downloadPrefs.canDownloadOnCurrentNetwork()) {
+            pausedWifi.set(true)
+            paused.set(true)
+            throw PauseQueueException()
+        }
+    }
     private fun enterProtectedPhase(stage: String) {
         synchronized(phaseLock) { checkNotCanceled(); interruptible = false }
         report(stage, null, cancelable = false)
@@ -426,13 +506,34 @@ class IngestService : Service() {
         val batch = activeBatch
         val worker = runner
         // Dispatch persistence independently: don't wait for blocking native execute/postprocessing.
-        if (batch != null) scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            withContext(NonCancellable) { if (worker != null) worker.cancel(batch) else queue.cancelBatch(batch) }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            withContext(NonCancellable) {
+                if (batch != null) {
+                    if (worker != null) worker.cancel(batch) else queue.cancelBatch(batch)
+                }
+                queue.cancelAllQueued()
+            }
         }
         synchronized(phaseLock) {
             if (interruptible) {
                 processId?.let { runCatching { YoutubeDL.destroyProcessById(it) } }
                 task?.cancel()
+            }
+        }
+    }
+    private fun requestPauseQueue() {
+        paused.set(true)
+        synchronized(phaseLock) {
+            if (interruptible) {
+                processId?.let { runCatching { YoutubeDL.destroyProcessById(it) } }
+            }
+        }
+    }
+    private fun requestSkipCurrent(targetJobId: Long) {
+        if (targetJobId > 0L) skipJobId.set(targetJobId)
+        synchronized(phaseLock) {
+            if (interruptible) {
+                processId?.let { runCatching { YoutubeDL.destroyProcessById(it) } }
             }
         }
     }
@@ -498,8 +599,12 @@ class IngestService : Service() {
         const val ACTION_IMPORT = "com.swararia.audiolab.INGEST_IMPORT"
         const val ACTION_UPDATE = "com.swararia.audiolab.INGEST_ENGINE_UPDATE"
         private const val ACTION_BATCH = "com.swararia.audiolab.INGEST_BATCH"
+        private const val ACTION_ENSURE_BATCH = "com.swararia.audiolab.INGEST_ENSURE_BATCH"
         private const val ACTION_CANCEL = "com.swararia.audiolab.INGEST_CANCEL"
+        private const val ACTION_PAUSE_QUEUE = "com.swararia.audiolab.INGEST_PAUSE_QUEUE"
+        private const val ACTION_SKIP_CURRENT = "com.swararia.audiolab.INGEST_SKIP_CURRENT"
         private const val EXTRA_BATCH = "batchId"
+        private const val EXTRA_JOB_ID = "jobId"
         private const val EXTRA_URL = "url"
         private const val EXTRA_AUTHORIZED = "authorized"
         /** Reserve before Android launch, not asynchronously inside the service. */
@@ -516,6 +621,22 @@ class IngestService : Service() {
             require(batchId.isNotBlank())
             start(context, Intent(context, IngestService::class.java).setAction(ACTION_BATCH).putExtra(EXTRA_BATCH, batchId), batchId)
         }
+        fun ensureBatch(context: Context, batchId: String) {
+            require(batchId.isNotBlank())
+            val previous = IngestStatus.mutable.value
+            when {
+                !previous.busy -> startBatch(context, batchId)
+                previous.batchId != null -> {
+                    runCatching {
+                        context.startService(
+                            Intent(context, IngestService::class.java)
+                                .setAction(ACTION_ENSURE_BATCH)
+                                .putExtra(EXTRA_BATCH, batchId),
+                        )
+                    }
+                }
+            }
+        }
         fun download(context: Context, url: String, authorized: Boolean) {
             LibraryRules.validatedHttpsUrl(url)
             require(authorized) { "Konfirmasi hak penggunaan audio terlebih dahulu." }
@@ -529,6 +650,18 @@ class IngestService : Service() {
         fun update(context: Context) { start(context, Intent(context, IngestService::class.java).setAction(ACTION_UPDATE)) }
         fun cancel(context: Context) {
             if (IngestStatus.state.value.busy) context.startService(Intent(context, IngestService::class.java).setAction(ACTION_CANCEL))
+        }
+        fun pauseQueue(context: Context) {
+            if (IngestStatus.state.value.busy) context.startService(Intent(context, IngestService::class.java).setAction(ACTION_PAUSE_QUEUE))
+        }
+        fun skipCurrent(context: Context, jobId: Long) {
+            if (IngestStatus.state.value.busy && jobId > 0L) {
+                context.startService(
+                    Intent(context, IngestService::class.java)
+                        .setAction(ACTION_SKIP_CURRENT)
+                        .putExtra(EXTRA_JOB_ID, jobId),
+                )
+            }
         }
     }
 }

@@ -93,11 +93,27 @@ fun SwarariaUi(
         }
     }
     val playTrack: (AudioTrack) -> Unit = { track -> playQueuedTrack(track, null, false) }
+    val playDownloadPreview: (AudioTrack) -> Unit = { track ->
+        if (playback.connected) {
+            val sameTrack = track.id.toString() == playback.mediaId
+            if (sameTrack) {
+                searchActions.stopPreview()
+                toggleSwarariaPlayback(controller)
+            } else {
+                dispatchGuardedSwitch(UiPresentation.title(track.displayName), track, listOf(track), false)
+            }
+        }
+    }
     LaunchedEffect(previewActive) { if (previewActive) fullPlayer = false }
     BackHandler(enabled = fullPlayer || destination != 0 || previewActive) {
         if (destination != 3) searchActions.stopPreview()
         if (fullPlayer) fullPlayer = false else destination = 0
     }
+    val activeDownloadCount = remember(upgrade.jobs, ingest.busy) {
+        val jobActive = upgrade.jobs.count { it.status == "QUEUED" || it.status == "RUNNING" }
+        if (jobActive > 0) jobActive else if (ingest.busy && ingest.batchId == null) 1 else 0
+    }
+    val failedDownloadCount = remember(upgrade.jobs) { upgrade.jobs.count { it.status == "FAILED" } }
     Scaffold(
         modifier = Modifier.fillMaxSize().imePadding(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -131,7 +147,25 @@ fun SwarariaUi(
                         NavigationBarItem(selected = destination == 1, onClick = { navigate(1) },
                             icon = { Icon(UiIcons.Search, null) }, label = { Text("Search") }, colors = navigationColors())
                         NavigationBarItem(selected = destination == 2, onClick = { navigate(2) },
-                            icon = { Icon(UiIcons.Download, null) }, label = { Text("Downloads") }, colors = navigationColors())
+                            icon = {
+                                if (activeDownloadCount > 0 || failedDownloadCount > 0) {
+                                    BadgedBox(
+                                        badge = {
+                                            Badge(
+                                                containerColor = if (activeDownloadCount > 0) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.error,
+                                                contentColor = if (activeDownloadCount > 0) FohTheme.colors.surfaceDeep else MaterialTheme.colorScheme.onError,
+                                            ) {
+                                                Text("${if (activeDownloadCount > 0) activeDownloadCount else failedDownloadCount}")
+                                            }
+                                        },
+                                    ) {
+                                        Icon(UiIcons.Download, null)
+                                    }
+                                } else {
+                                    Icon(UiIcons.Download, null)
+                                }
+                            },
+                            label = { Text("Downloads") }, colors = navigationColors())
                         NavigationBarItem(selected = destination == 3, onClick = { navigate(3) },
                             icon = { Icon(UiIcons.Link, null) }, label = { Text("Remote") }, colors = navigationColors())
                     }
@@ -207,8 +241,22 @@ fun SwarariaUi(
                         }
                     },
                 )
-                else -> DownloadsScreen(upgrade, ingest, contentModifier, onSettings = { activeModal = SwarariaModal.EngineSettings },
-                    onCancelIngest = { if (ingest.busy && ingest.cancelable) onCancel() })
+                else -> DownloadsScreen(
+                    upgrade = upgrade,
+                    ingest = ingest,
+                    tracks = tracks,
+                    playlists = playlists,
+                    playlistActions = playlistActions,
+                    ytMusic = ytMusicState,
+                    connected = playback.connected,
+                    currentPlayingTrackId = playback.mediaId,
+                    isPlayingActive = playback.wantsPlay,
+                    modifier = contentModifier,
+                    onSettings = { activeModal = SwarariaModal.EngineSettings },
+                    onCancelIngest = { if (ingest.busy && ingest.cancelable) onCancel() },
+                    onAddAudio = { navigate(1) },
+                    onPlayTrack = playDownloadPreview,
+                )
             }
         }
     }

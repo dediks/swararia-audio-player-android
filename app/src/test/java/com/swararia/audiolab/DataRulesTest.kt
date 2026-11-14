@@ -55,4 +55,14 @@ class DataRulesTest {
         assertEquals(true, method.invoke(instance, "content://media/external_primary/audio/media/12"))
         for (bad in listOf("content://media/external/audio/media/12", "content://media/external_primary/audio/media/012", "content://media/external_primary/audio/media/12?x=1", "file:///a", "content://evil/external_primary/audio/media/12")) assertEquals(false, method.invoke(instance, bad))
     }
+
+    @Test fun downloadPolicyRespectsWifiOnlyAndRateLimits() {
+        assertTrue(DownloadPolicyRules.canDownloadOnNetwork(wifiOnly = false, hasInternet = false, isWifiOrEthernet = false))
+        assertFalse(DownloadPolicyRules.canDownloadOnNetwork(wifiOnly = true, hasInternet = true, isWifiOrEthernet = false))
+        assertFalse(DownloadPolicyRules.canDownloadOnNetwork(wifiOnly = true, hasInternet = false, isWifiOrEthernet = true))
+        assertTrue(DownloadPolicyRules.canDownloadOnNetwork(wifiOnly = true, hasInternet = true, isWifiOrEthernet = true))
+        assertNull(DownloadPolicyRules.ytDlpRateLimitArg(DownloadRateLimit.UNLIMITED))
+        assertEquals("1M", DownloadPolicyRules.ytDlpRateLimitArg(DownloadRateLimit.LIMIT_1M))
+        assertEquals("500K", DownloadPolicyRules.ytDlpRateLimitArg(DownloadRateLimit.LIMIT_500K))
+    }
 }

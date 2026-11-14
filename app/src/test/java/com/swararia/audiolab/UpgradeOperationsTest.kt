@@ -19,6 +19,18 @@ class UpgradeOperationsTest {
         override suspend fun cancel(id:Long) {}
         override suspend fun cancelBatch(batchId:String) { calls.add("cancel:$batchId") }
         override suspend fun retryFailed(batchId:String) { calls.add("retry:$batchId") }
+        override suspend fun retryJob(id:Long):String? { calls.add("retryJob:$id"); return ID }
+        override suspend fun retryAllFailed():String? { calls.add("retryAll"); return ID }
+        override suspend fun cancelQueuedJob(id:Long) { calls.add("cancelJob:$id") }
+        override suspend fun removeJob(id:Long) { calls.add("removeJob:$id") }
+        override suspend fun clearFinished():Int { calls.add("clearFinished"); return 2 }
+        override suspend fun moveQueuedUp(id:Long):Boolean { calls.add("moveUp:$id"); return true }
+        override suspend fun moveQueuedToFront(id:Long):Boolean { calls.add("moveFront:$id"); return true }
+        override suspend fun requeueJob(id:Long):String? { calls.add("requeue:$id"); return ID }
+        override suspend fun requeueJobs(ids:List<Long>):String? { calls.add("requeueAll:${ids.joinToString(",")}"); return ID }
+        override suspend fun cancelQueuedJobs(ids:List<Long>):Int { calls.add("cancelAll:${ids.joinToString(",")}"); return ids.size }
+        override suspend fun removeJobs(ids:List<Long>):Int { calls.add("removeAll:${ids.joinToString(",")}"); return ids.size }
+        override suspend fun nextQueuedBatchId():String? = ID
         override suspend fun recoverInterrupted() { calls.add("recover") }
     }
     private class Fixture:AutoCloseable {
@@ -82,6 +94,52 @@ class UpgradeOperationsTest {
             assertTrue(messages.last().contains("2 audio dihapus"))
             assertTrue(messages.last().contains("sebagian gagal"))
         } finally { scope.cancel() }
+    }
+    @Test(timeout=5000) fun granularDownloadManagementDispatchesAndCleansFinished()=runBlocking {
+        Fixture().use { f ->
+            var started=""
+            f.ops.retryJob(42L) { started=it }
+            assertEquals(ID, started)
+            assertTrue(f.queue.calls.contains("retryJob:42"))
+
+            started=""
+            f.ops.retryAllFailed { started=it }
+            assertEquals(ID, started)
+            assertTrue(f.queue.calls.contains("retryAll"))
+
+            f.ops.cancelJob(7L)
+            assertTrue(f.queue.calls.contains("cancelJob:7"))
+
+            f.ops.removeJob(8L)
+            assertTrue(f.queue.calls.contains("removeJob:8"))
+
+            f.ops.clearFinished()
+            assertTrue(f.queue.calls.contains("clearFinished"))
+            assertTrue(f.messages.last().contains("2 riwayat"))
+        }
+    }
+    @Test(timeout=5000) fun appendWhileIngestActiveAndQueueReorderingDispatchCleanly()=runBlocking {
+        Fixture().use { f ->
+            f.ingest = true
+            var startedBatch = ""
+            val req = listOf(DownloadRequest("https://example.invalid/new", "Added"))
+            f.ops.enqueueOrAppend(req, true) { startedBatch = it }
+            assertEquals(ID, startedBatch)
+            assertTrue(f.queue.calls.contains("enqueue"))
+            assertTrue(f.messages.last().contains("antrean aktif"))
+
+            f.ops.moveJobUp(11L)
+            f.ops.moveJobToFront(12L)
+            f.ops.requeueJobs(listOf(21L, 22L)) { startedBatch = it }
+            f.ops.cancelQueuedJobs(listOf(31L, 32L))
+            f.ops.removeJobs(listOf(41L, 42L))
+
+            assertTrue(f.queue.calls.contains("moveUp:11"))
+            assertTrue(f.queue.calls.contains("moveFront:12"))
+            assertTrue(f.queue.calls.contains("requeueAll:21,22"))
+            assertTrue(f.queue.calls.contains("cancelAll:31,32"))
+            assertTrue(f.queue.calls.contains("removeAll:41,42"))
+        }
     }
     companion object { const val ID="11111111-1111-4111-8111-111111111111" }
 }

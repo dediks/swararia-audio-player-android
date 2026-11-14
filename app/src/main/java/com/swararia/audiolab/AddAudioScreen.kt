@@ -187,6 +187,7 @@ fun AddAudioScreen(
                     selectedCount = selectedSongs.size,
                     hasSongs = loadedSongs.isNotEmpty(),
                     idle = idle,
+                    queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading,
                     onLeavePlaylist = leave,
                     onOpenLink = { openLinkModal(detectedUrl.orEmpty()) },
                     onOpenImport = onImport,
@@ -332,9 +333,11 @@ fun AddAudioScreen(
                         actions.preview.canceling ||
                         actions.preview.phase in setOf("resolving", "connecting", "buffering")
                     )
+                val queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading
                 CatalogResult(
                     hit = hit,
                     enabled = idle,
+                    queueEnabled = queueIdle,
                     selectionMode = selectionMode,
                     selected = hit.videoId in selectedIds,
                     previewActive = previewThisHit,
@@ -390,9 +393,10 @@ fun AddAudioScreen(
             }
         }
         if (selectionMode) {
+            val queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading
             Button(
                 onClick = { pending = selectedSongs.toList() },
-                enabled = idle && selectedSongs.isNotEmpty(),
+                enabled = queueIdle && selectedSongs.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).heightIn(min = 48.dp),
             ) {
                 Icon(UiIcons.Download, null)
@@ -402,13 +406,14 @@ fun AddAudioScreen(
         }
     }
 
+    val queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading
     pending?.let { hits ->
         DownloadConsentDialog(
             hits = hits,
-            busy = !idle,
+            busy = !queueIdle,
             onDismiss = { pending = null },
             onConfirm = {
-                if (idle) {
+                if (queueIdle) {
                     pending = null
                     selectionMode = false
                     selectedIds = arrayListOf()
@@ -424,11 +429,11 @@ fun AddAudioScreen(
     }
     if (linkDialog) {
         DownloadLinkDialog(
-            busy = !idle,
+            busy = !queueIdle,
             initialUrl = initialLinkUrl,
             onDismiss = { linkDialog = false },
             onDownload = { url ->
-                if (idle) {
+                if (queueIdle) {
                     linkDialog = false
                     onDownload(url, true)
                 }
@@ -444,6 +449,7 @@ private fun SearchTopHeader(
     selectedCount: Int,
     hasSongs: Boolean,
     idle: Boolean,
+    queueIdle: Boolean = idle,
     onLeavePlaylist: () -> Unit,
     onOpenLink: () -> Unit,
     onOpenImport: () -> Unit,
@@ -487,13 +493,16 @@ private fun SearchTopHeader(
             text = if (inPlaylist) "Playlist" else "Search",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
         if (!inPlaylist) {
-            FohHeaderChipButton(label = "Link", icon = UiIcons.Link, enabled = idle, onClick = onOpenLink)
+            FohHeaderChipButton(label = "Link", icon = UiIcons.Link, enabled = queueIdle, onClick = onOpenLink)
         }
         if (hasSongs) {
-            FohHeaderChipButton(label = "Select", icon = UiIcons.Check, enabled = idle, onClick = onEnterSelection)
+            FohHeaderChipButton(label = "Select", icon = UiIcons.Check, enabled = queueIdle, onClick = onEnterSelection)
         } else if (!inPlaylist) {
             FohHeaderChipButton(label = "Import", icon = UiIcons.Import, enabled = idle, onClick = onOpenImport)
         }
@@ -608,10 +617,11 @@ private fun SearchControlsPanel(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                                 ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(15.dp),
+                                    FohSpinningIndicator(
+                                        size = 15.dp,
                                         strokeWidth = 2.dp,
                                         color = MaterialTheme.colorScheme.onPrimary,
+                                        trackColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.24f),
                                     )
                                 }
                             } else {
@@ -633,7 +643,7 @@ private fun SearchControlsPanel(
         if (detectedUrl != null) {
             Surface(
                 onClick = { onOpenDetectedUrl(detectedUrl) },
-                enabled = idle,
+                enabled = !searchBusy,
                 shape = RoundedCornerShape(14.dp),
                 color = FohTheme.colors.btBg,
                 border = BorderStroke(1.dp, FohTheme.colors.btBorder),
@@ -831,7 +841,7 @@ private fun SearchEmptyState(
             subtitle = "Sudah menyalin tautan video? Unduh langsung jadi audio",
             accent = FohTheme.colors.safeAccent,
             iconBg = FohTheme.colors.safeBg,
-            enabled = idle,
+            enabled = true,
             onClick = onOpenLink,
         )
         QuickEntrySurface(
@@ -895,6 +905,7 @@ private fun QuickEntrySurface(
 private fun CatalogResult(
     hit: SearchHit,
     enabled: Boolean,
+    queueEnabled: Boolean = enabled,
     selectionMode: Boolean,
     selected: Boolean,
     previewActive: Boolean,
@@ -914,9 +925,9 @@ private fun CatalogResult(
         Row(
             Modifier.fillMaxWidth().heightIn(min = 74.dp)
                 .combinedClickable(
-                    enabled = enabled || previewActive,
+                    enabled = if (selectionMode) queueEnabled else (enabled || previewActive),
                     onClick = onTap,
-                    onLongClick = onLongPress,
+                    onLongClick = if (queueEnabled) onLongPress else null,
                     onLongClickLabel = "Pilih lagu",
                 )
                 .semantics { this.selected = selected }
@@ -934,10 +945,11 @@ private fun CatalogResult(
                                 .background(Color.Black.copy(alpha = 0.52f)),
                             contentAlignment = Alignment.Center,
                         ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
+                            FohSpinningIndicator(
+                                size = 22.dp,
                                 strokeWidth = 2.2.dp,
                                 color = Color.White,
+                                trackColor = Color.White.copy(alpha = 0.28f),
                             )
                         }
                     } else {
@@ -1002,7 +1014,7 @@ private fun CatalogResult(
                 }
             }
             if (selectionMode && hit.kind == SearchKind.SONGS) {
-                Checkbox(checked = selected, onCheckedChange = { onToggle() }, enabled = enabled)
+                Checkbox(checked = selected, onCheckedChange = { onToggle() }, enabled = queueEnabled)
             } else if (hit.kind == SearchKind.SONGS) {
                 when (status) {
                     HitLibraryStatus.QUEUED -> {
@@ -1016,10 +1028,11 @@ private fun CatalogResult(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                             ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(12.dp),
+                                FohSpinningIndicator(
+                                    size = 12.dp,
                                     strokeWidth = 1.8.dp,
                                     color = FohTheme.colors.warnAccent,
+                                    trackColor = FohTheme.colors.warnAccent.copy(alpha = 0.25f),
                                 )
                                 Text(
                                     "Antrean",
@@ -1030,12 +1043,12 @@ private fun CatalogResult(
                         }
                     }
                     HitLibraryStatus.SAVED -> {
-                        GlyphButton(UiIcons.Download, "Unduh ulang ${hit.title}", onDownload, enabled = enabled)
+                        GlyphButton(UiIcons.Download, "Unduh ulang ${hit.title}", onDownload, enabled = queueEnabled)
                     }
                     HitLibraryStatus.NONE -> {
                         Surface(
                             onClick = onDownload,
-                            enabled = enabled,
+                            enabled = queueEnabled,
                             shape = CircleShape,
                             color = FohTheme.colors.safeBg,
                             border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
@@ -1045,7 +1058,7 @@ private fun CatalogResult(
                                 Icon(
                                     imageVector = UiIcons.Download,
                                     contentDescription = "Download ${hit.title}",
-                                    tint = if (enabled) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                                    tint = if (queueEnabled) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                                     modifier = Modifier.size(19.dp),
                                 )
                             }

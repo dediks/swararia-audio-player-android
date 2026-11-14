@@ -47,6 +47,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun whenQueueReady(action: () -> Unit) {
+        if (!model.canDispatchOrAppendDownload()) {
+            model.message("Tunggu proses pencarian atau pengelola selesai."); return
+        }
+        model.cancelPreview()
+        action()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -65,6 +73,7 @@ class MainActivity : ComponentActivity() {
                 val jobs by model.jobs.collectAsStateWithLifecycle()
                 val remoteServerState by model.remoteServerState.collectAsStateWithLifecycle()
                 val ytMusicState by model.ytMusicState.collectAsStateWithLifecycle()
+                val downloadSettings by model.downloadSettings.collectAsStateWithLifecycle()
                 val snackbars = remember { SnackbarHostState() }
                 LaunchedEffect(model) { model.messages.collect { snackbars.showSnackbar(it) } }
                 LaunchedEffect(tracks, controller) {
@@ -97,10 +106,10 @@ class MainActivity : ComponentActivity() {
                         leavePlaylist = { model.leavePlaylist() },
                         previewSong = { hit -> withNotificationPermission { whenOnlineIdle { if (pauseForPreview()) model.preview(hit) } } },
                         stopPreview = { model.cancelPreview() }, previewError = { model.previewError() }),
-                    onDownload = { url, authorized -> whenOnlineIdle {
-                        withNotificationPermission { whenOnlineIdle {
+                    onDownload = { url, authorized -> whenQueueReady {
+                        withNotificationPermission { whenQueueReady {
                             model.enqueueDownloads(listOf(DownloadRequest(url, "Audio dari link")), authorized) {
-                                IngestService.startBatch(this, it)
+                                IngestService.ensureBatch(this, it)
                             }
                         } }
                     } },
@@ -151,23 +160,71 @@ class MainActivity : ComponentActivity() {
                     ),
                     upgrade = UpgradeUiActions(
                         jobs = jobs, operationBusy = operationBusy,
-                        onDownloadBatch = { hits, authorized -> whenOnlineIdle {
-                            withNotificationPermission { whenOnlineIdle {
+                        downloadSettings = downloadSettings,
+                        onDownloadBatch = { hits, authorized -> whenQueueReady {
+                            withNotificationPermission { whenQueueReady {
                                 model.enqueueDownloads(hits.filter { it.kind == SearchKind.SONGS }.map {
                                     DownloadRequest(it.url, it.title, it.thumbnailUrl)
-                                }, authorized) { IngestService.startBatch(this, it) }
+                                }, authorized) { IngestService.ensureBatch(this, it) }
                             } }
                         } },
                         onCancelBatch = {
-                            val batchId = model.ingest.value.batchId ?: model.jobs.value.firstOrNull()?.batchId
-                            if (batchId != null) model.cancelQueuedBatch(batchId)
+                            val batchIds = buildSet {
+                                model.ingest.value.batchId?.let(::add)
+                                model.jobs.value.filter { it.status == "QUEUED" || it.status == "RUNNING" }.mapTo(this) { it.batchId }
+                            }
+                            batchIds.forEach { model.cancelQueuedBatch(it) }
                             if (model.ingest.value.busy && model.ingest.value.batchId != null) IngestService.cancel(this)
                         },
-                        onRetryFailed = { id -> whenOnlineIdle {
+                        onHaltQueue = {
+                            if (model.ingest.value.busy && model.ingest.value.batchId != null) {
+                                IngestService.pauseQueue(this)
+                            }
+                        },
+                        onContinueQueue = { whenOnlineIdle {
                             withNotificationPermission { whenOnlineIdle {
-                                model.retryDownloads(id) { IngestService.startBatch(this, it) }
+                                model.continueDownloadQueue { IngestService.ensureBatch(this, it) }
                             } }
                         } },
+                        onSkipCurrentJob = { jobId ->
+                            if (model.ingest.value.busy && model.ingest.value.batchId != null) {
+                                IngestService.skipCurrent(this, jobId)
+                            }
+                        },
+                        onMoveQueuedUp = { jobId -> model.moveDownloadJobUp(jobId) },
+                        onMoveQueuedToFront = { jobId -> model.moveDownloadJobToFront(jobId) },
+                        onRetryFailed = { id -> whenQueueReady {
+                            withNotificationPermission { whenQueueReady {
+                                model.retryDownloads(id) { IngestService.ensureBatch(this, it) }
+                            } }
+                        } },
+                        onRetryAllFailed = { whenQueueReady {
+                            withNotificationPermission { whenQueueReady {
+                                model.retryAllFailedDownloads { IngestService.ensureBatch(this, it) }
+                            } }
+                        } },
+                        onRetryJob = { jobId -> whenQueueReady {
+                            withNotificationPermission { whenQueueReady {
+                                model.retryDownloadJob(jobId) { IngestService.ensureBatch(this, it) }
+                            } }
+                        } },
+                        onRequeueJob = { jobId -> whenQueueReady {
+                            withNotificationPermission { whenQueueReady {
+                                model.retryDownloadJob(jobId) { IngestService.ensureBatch(this, it) }
+                            } }
+                        } },
+                        onRequeueJobs = { jobIds -> whenQueueReady {
+                            withNotificationPermission { whenQueueReady {
+                                model.requeueDownloadJobs(jobIds) { IngestService.ensureBatch(this, it) }
+                            } }
+                        } },
+                        onCancelJob = { jobId -> model.cancelDownloadJob(jobId) },
+                        onCancelJobs = { jobIds -> model.cancelDownloadJobs(jobIds) },
+                        onRemoveJob = { jobId -> model.removeDownloadJob(jobId) },
+                        onRemoveJobs = { jobIds -> model.removeDownloadJobs(jobIds) },
+                        onClearFinished = { model.clearFinishedDownloads() },
+                        onSetWifiOnly = { enabled -> model.setDownloadWifiOnly(enabled) },
+                        onSetRateLimit = { limit -> model.setDownloadRateLimit(limit) },
                         onDelete = { track, done -> deleteTrack(track, done) },
                         onDeleteBatch = { selectedTracks, done -> deleteTracks(selectedTracks, done) },
                     ),

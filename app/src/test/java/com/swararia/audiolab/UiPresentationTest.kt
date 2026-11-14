@@ -115,4 +115,41 @@ class UiPresentationTest {
         assertNull(UiPresentation.effectiveBitrateKbps(5_000_000L, null))
         assertEquals("FLAC · --:--", UiPresentation.qualitySummary("Monokrom.flac", 0L, null))
     }
+
+    @Test fun downloadSummaryAndFiltersGroupStatusesAccurately() {
+        val statuses = listOf("RUNNING", "QUEUED", "QUEUED", "COMPLETED", "FAILED", "CANCELED")
+        val summary = UiPresentation.summarizeDownloadStatuses(statuses)
+        assertEquals(6, summary.total)
+        assertEquals(1, summary.running)
+        assertEquals(2, summary.queued)
+        assertEquals(3, summary.active)
+        assertEquals(1, summary.completed)
+        assertEquals(1, summary.failed)
+        assertEquals(1, summary.canceled)
+        assertEquals(2, summary.finished)
+
+        val rows = statuses.mapIndexed { idx, s -> idx to s }
+        assertEquals(6, UiPresentation.filterDownloads(rows, DownloadFilterTab.ALL) { it.second }.size)
+        assertEquals(listOf("RUNNING", "QUEUED", "QUEUED"), UiPresentation.filterDownloads(rows, DownloadFilterTab.ACTIVE) { it.second }.map { it.second })
+        assertEquals(listOf("COMPLETED"), UiPresentation.filterDownloads(rows, DownloadFilterTab.COMPLETED) { it.second }.map { it.second })
+        assertEquals(listOf("FAILED"), UiPresentation.filterDownloads(rows, DownloadFilterTab.FAILED) { it.second }.map { it.second })
+    }
+
+    @Test fun batchGroupLabelFormatsTodayYesterdayAndOlderDates() {
+        val nowCal = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.NOVEMBER, 15, 14, 30, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val todayCal = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.NOVEMBER, 15, 3, 20, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val yesterdayCal = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.NOVEMBER, 14, 21, 5, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        assertEquals("Batch Hari Ini · 03:20", UiPresentation.formatBatchGroupLabel(todayCal.timeInMillis, nowCal.timeInMillis))
+        assertEquals("Batch Kemarin · 21:05", UiPresentation.formatBatchGroupLabel(yesterdayCal.timeInMillis, nowCal.timeInMillis))
+        assertEquals("Riwayat Unduhan", UiPresentation.formatBatchGroupLabel(0L, nowCal.timeInMillis))
+    }
 }
