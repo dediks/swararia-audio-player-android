@@ -34,6 +34,7 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
     var collapsedGroupIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var replaceGuardEnabled by remember { mutableStateOf(true) }
     var keepScreenOn by remember { mutableStateOf(false) }
+    var transportDockCollapsed by remember { mutableStateOf(false) }
     var showDisconnectConfirm by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
     var pendingTrackSwitch by remember { mutableStateOf<PendingTrackChoice?>(null) }
@@ -85,6 +86,7 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
             selectedGroupId = null
             collapsedGroupIds = emptySet()
             replaceGuardEnabled = true
+            transportDockCollapsed = false
             showDisconnectConfirm = false
             showSessionInfo = false
             pendingTrackSwitch = null
@@ -385,6 +387,8 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
             isPlaying = isPlaying,
             isFading = isFading,
             supportsFadeOut = supportsFadeOut,
+            collapsed = transportDockCollapsed,
+            onToggleCollapse = { transportDockCollapsed = !transportDockCollapsed },
             onCommand = { session.command(it) },
         )
     }

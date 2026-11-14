@@ -40,6 +40,7 @@ fun SwarariaUi(
 ) {
     var destination by rememberSaveable { mutableIntStateOf(0) }
     var fullPlayer by rememberSaveable { mutableStateOf(false) }
+    var miniPlayerCollapsed by rememberSaveable { mutableStateOf(false) }
     var settings by rememberSaveable { mutableStateOf(false) }
     var history by rememberSaveable { mutableStateOf(false) }
     var editing by remember { mutableStateOf<AudioTrack?>(null) }
@@ -75,14 +76,24 @@ fun SwarariaUi(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
-                if (destination == 3 && (previewActive || playback.mediaId != null))
+                if (destination == 3 && previewActive)
                     Text("Pemutar HP • terpisah dari Desktop", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
                 // One slot: preview always replaces, never accompanies, local audio.
+                // On the Remote tab (destination == 3), local playback auto-collapses into the top banner pill so bottom decks never double-stack.
                 if (previewActive) SearchPreviewPlayer(searchActions.preview, controller,
                     searchActions.stopPreview, searchActions.previewError,
                     onRetry = { if (!onlineBusy) searchActions.preview.hit?.let(searchActions.previewSong) })
                 else if (playback.mediaId != null) {
-                    if (!fullPlayer) MiniPlayer(current, playback, controller, onOpen = { fullPlayer = true })
+                    if (!fullPlayer && destination != 3) {
+                        MiniPlayer(
+                            current = current,
+                            playback = playback,
+                            controller = controller,
+                            collapsed = miniPlayerCollapsed,
+                            onToggleCollapse = { miniPlayerCollapsed = !miniPlayerCollapsed },
+                            onOpen = { fullPlayer = true },
+                        )
+                    }
                 }
                 NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp,
                     windowInsets = WindowInsets.navigationBars.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)) {
@@ -129,6 +140,16 @@ fun SwarariaUi(
                     serverState = remoteServerState,
                     serverActions = remoteServerActions,
                     modifier = contentModifier,
+                    localAudioBanner = {
+                        if (!previewActive && playback.mediaId != null) {
+                            RemoteLocalAudioPill(
+                                current = current,
+                                playback = playback,
+                                controller = controller,
+                                onOpen = { fullPlayer = true },
+                            )
+                        }
+                    },
                 )
                 else -> DownloadsScreen(upgrade, ingest, contentModifier, onSettings = { settings = true },
                     onCancelIngest = { if (ingest.busy && ingest.cancelable) onCancel() })

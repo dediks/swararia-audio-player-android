@@ -16,6 +16,7 @@ import kotlinx.coroutines.runInterruptible
 import java.io.IOException
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -81,6 +82,37 @@ internal fun GlyphButton(
         Icon(icon, contentDescription = description,
             tint = if (!enabled) colors.onSurface.copy(alpha = .38f) else if (filled) colors.onPrimary else colors.onSurface,
             modifier = Modifier.size(iconSize))
+    }
+}
+
+/** Shared compact circular transport/toggle button reused by collapsed players and top audio pills. */
+@Composable
+internal fun CompactCircleButton(
+    icon: ImageVector,
+    description: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    size: Dp = 32.dp,
+    iconSize: Dp = 17.dp,
+    containerColor: Color = Color.Transparent,
+    contentColor: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = CircleShape,
+        color = containerColor,
+        modifier = modifier.size(size),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = description,
+                tint = if (enabled) contentColor else contentColor.copy(alpha = 0.38f),
+                modifier = Modifier.size(iconSize),
+            )
+        }
     }
 }
 

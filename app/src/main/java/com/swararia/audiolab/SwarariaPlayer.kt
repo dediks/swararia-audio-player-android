@@ -1,11 +1,14 @@
 package com.swararia.audiolab
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -16,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -144,33 +148,236 @@ private fun playbackStatus(playback: SessionPlayback): String = when {
     else -> "Pilih audio dari Pustaka"
 }
 
+/** Compact warning-tinted top strip shown in the Remote tab when local phone audio is active. */
 @Composable
-internal fun MiniPlayer(current: AudioTrack?, playback: SessionPlayback, controller: MediaController?, onOpen: () -> Unit) {
-    Surface(onClick = onOpen, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceVariant,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
-            .semantics { contentDescription = "Buka pemutar lengkap" }) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 60.dp), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                TrackArtwork(current?.artworkKey, Modifier.size(48.dp).clip(RoundedCornerShape(7.dp)))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(playbackTitle(current, playback), style = MaterialTheme.typography.titleSmall,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(playbackStatus(playback), style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+internal fun RemoteLocalAudioPill(
+    current: AudioTrack?,
+    playback: SessionPlayback,
+    controller: MediaController?,
+    onOpen: () -> Unit,
+) {
+    val pillBackground = Color(0xFF282417)
+    val pillBorder = Color(0xFF7A6935)
+    val pillAccent = Color(0xFFF5D782)
+    val title = playbackTitle(current, playback)
+    val elapsed = LibraryRules.durationLabel(playback.positionMs.takeIf { playback.connected && playback.mediaId != null })
+
+    Surface(
+        onClick = onOpen,
+        shape = RoundedCornerShape(14.dp),
+        color = pillBackground,
+        border = BorderStroke(1.dp, pillBorder),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .semantics { contentDescription = "Pemutar HP lokal: $title" },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 38.dp)
+                .padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = UiIcons.Phone,
+                contentDescription = null,
+                tint = pillAccent,
+                modifier = Modifier.size(15.dp),
+            )
+            Text(
+                text = "HP LOKAL:",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = pillAccent,
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = elapsed,
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = pillAccent.copy(alpha = 0.9f),
+            )
+            CompactCircleButton(
+                icon = if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
+                description = if (playback.wantsPlay) "Jeda audio lokal" else "Putar audio lokal",
+                onClick = { toggleSwarariaPlayback(controller) },
+                enabled = playback.connected && playback.canPlay,
+                size = 30.dp,
+                iconSize = 15.dp,
+                containerColor = pillAccent.copy(alpha = 0.16f),
+                contentColor = pillAccent,
+            )
+            CompactCircleButton(
+                icon = UiIcons.Close,
+                description = "Hentikan dan tutup pemutar lokal",
+                onClick = {
+                    connectedCommand(controller, Player.COMMAND_STOP) { p ->
+                        p.pause()
+                        p.stop()
+                        if (p.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) p.clearMediaItems()
+                    }
+                },
+                enabled = playback.connected && playback.canStop,
+                size = 30.dp,
+                iconSize = 14.dp,
+                contentColor = pillAccent.copy(alpha = 0.85f),
+            )
+            CompactCircleButton(
+                icon = UiIcons.ChevronUp,
+                description = "Buka pemutar HP lengkap",
+                onClick = onOpen,
+                size = 28.dp,
+                iconSize = 16.dp,
+                contentColor = pillAccent,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun MiniPlayer(
+    current: AudioTrack?,
+    playback: SessionPlayback,
+    controller: MediaController?,
+    collapsed: Boolean = false,
+    onToggleCollapse: () -> Unit = {},
+    onOpen: () -> Unit,
+) {
+    val togglePlay = { toggleSwarariaPlayback(controller) }
+    val skipNext: () -> Unit = {
+        connectedCommand(controller, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) { p -> if (p.hasNextMediaItem()) p.seekToNextMediaItem() }
+    }
+    val playEnabled = playback.connected && playback.canPlay
+    val nextEnabled = playback.connected && playback.hasNext
+
+    Surface(
+        onClick = onOpen,
+        shape = RoundedCornerShape(if (collapsed) 16.dp else 20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .animateContentSize()
+            .semantics { contentDescription = "Buka pemutar lengkap" },
+    ) {
+        if (collapsed) {
+            Column(Modifier.fillMaxWidth()) {
+                playback.durationMs?.let { duration ->
+                    LinearProgressIndicator(
+                        progress = { (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(2.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.outlineVariant,
+                    )
                 }
-                GlyphButton(if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
-                    if (playback.wantsPlay) "Jeda audio" else "Lanjutkan audio", { toggleSwarariaPlayback(controller) },
-                    enabled = playback.connected && playback.canPlay, filled = true)
-                GlyphButton(UiIcons.Next, "Audio berikutnya", {
-                    connectedCommand(controller, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) { p -> if (p.hasNextMediaItem()) p.seekToNextMediaItem() }
-                }, enabled = playback.connected && playback.hasNext)
+                Row(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TrackArtwork(current?.artworkKey, Modifier.size(32.dp).clip(RoundedCornerShape(6.dp)))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            text = playbackTitle(current, playback),
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val elapsed = LibraryRules.durationLabel(playback.positionMs.takeIf { playback.connected })
+                        val total = playback.durationMs?.let { LibraryRules.durationLabel(it) }
+                        Text(
+                            text = if (total != null) "$elapsed / $total" else playbackStatus(playback),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    CompactCircleButton(
+                        icon = if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
+                        description = if (playback.wantsPlay) "Jeda audio" else "Lanjutkan audio",
+                        onClick = togglePlay,
+                        enabled = playEnabled,
+                        size = 34.dp,
+                        iconSize = 18.dp,
+                        containerColor = if (playEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    CompactCircleButton(
+                        icon = UiIcons.Next,
+                        description = "Audio berikutnya",
+                        onClick = skipNext,
+                        enabled = nextEnabled,
+                        size = 32.dp,
+                        iconSize = 18.dp,
+                    )
+                    CompactCircleButton(
+                        icon = UiIcons.ChevronUp,
+                        description = "Perluas pemutar lokal",
+                        onClick = onToggleCollapse,
+                        size = 32.dp,
+                        iconSize = 18.dp,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            playback.durationMs?.let { duration ->
-                LinearProgressIndicator(progress = { (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(2.dp),
-                    color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.outlineVariant)
+        } else {
+            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TrackArtwork(current?.artworkKey, Modifier.size(46.dp).clip(RoundedCornerShape(7.dp)))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            playbackTitle(current, playback),
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            playbackStatus(playback),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    GlyphButton(
+                        if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
+                        if (playback.wantsPlay) "Jeda audio" else "Lanjutkan audio",
+                        togglePlay,
+                        enabled = playEnabled,
+                        filled = true,
+                    )
+                    GlyphButton(UiIcons.Next, "Audio berikutnya", skipNext, enabled = nextEnabled)
+                    CompactCircleButton(
+                        icon = UiIcons.ChevronDown,
+                        description = "Perkecil pemutar lokal",
+                        onClick = onToggleCollapse,
+                        size = 32.dp,
+                        iconSize = 18.dp,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                playback.durationMs?.let { duration ->
+                    LinearProgressIndicator(
+                        progress = { (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(2.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                }
             }
         }
     }

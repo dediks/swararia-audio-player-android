@@ -31,6 +31,9 @@ internal object UiIcons {
     val ChevronDown = outline("ChevronDown") {
         moveTo(6f, 9f); lineTo(12f, 15f); lineTo(18f, 9f)
     }
+    val ChevronUp = outline("ChevronUp") {
+        moveTo(6f, 15f); lineTo(12f, 9f); lineTo(18f, 15f)
+    }
     val ChevronRight = outline("ChevronRight") {
         moveTo(9f, 6f); lineTo(15f, 12f); lineTo(9f, 18f)
     }
@@ -156,6 +159,10 @@ internal object UiIcons {
         moveTo(17f, 12f); lineTo(21f, 12f)
         moveTo(15f, 12f); arcTo(3f, 3f, 0f, true, true, 9f, 12f)
         arcTo(3f, 3f, 0f, true, true, 15f, 12f)
+    }
+    val Phone = outline("Phone") {
+        moveTo(8f, 3f); lineTo(16f, 3f); lineTo(17f, 4f); lineTo(17f, 20f); lineTo(16f, 21f); lineTo(8f, 21f); lineTo(7f, 20f); lineTo(7f, 4f); close()
+        moveTo(11f, 18f); lineTo(13f, 18f)
     }
 
     private fun outline(name: String, draw: PathBuilder.() -> Unit) =

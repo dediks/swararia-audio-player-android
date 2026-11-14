@@ -42,6 +42,7 @@ internal fun RemoteTabScreen(
     serverState: RemoteServerUiState,
     serverActions: RemoteServerUiActions,
     modifier: Modifier = Modifier,
+    localAudioBanner: @Composable () -> Unit = {},
 ) {
     var serverMode by rememberSaveable { mutableStateOf(false) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -71,6 +72,7 @@ internal fun RemoteTabScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         )
+        localAudioBanner()
         if (serverMode) {
             RemoteServerScreen(
                 state = serverState,
