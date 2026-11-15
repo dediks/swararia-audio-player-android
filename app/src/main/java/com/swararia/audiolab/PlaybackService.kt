@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -82,15 +84,29 @@ class PlaybackService : MediaSessionService() {
     private var postFadeRestoreTick: Runnable? = null
     private var fadePhase = FadePhase.NONE
     private var faderState = FaderState()
+    private var monoSumEnabled = false
+    private var padDuckActive = false
+    private var focusGuardEnabled = false
+    private var focusDucked = false
+    private var focusPausedByLoss = false
+    private var hasAudioFocus = false
+    private var padDuckTick: Runnable? = null
     private var nominalVolume: Float = faderState.effectiveGain
     private var originalVolume: Float? = null
     private var pendingFadeAction: PendingFadeOutAction? = null
     private var internalFadeOpDepth = 0
     private var fadeSettings = PlaybackSettingsState()
     private val playbackPrefs by lazy { getSharedPreferences(PREFERENCES, MODE_PRIVATE) }
+    private val audioManager by lazy { getSystemService(AudioManager::class.java) }
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        handleAudioFocusChange(focusChange)
+    }
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         if (key == PlaybackPreferences.KEY_FADE_IN_MS || key == PlaybackPreferences.KEY_FADE_OUT_MS) {
             handler.post { reloadFadeSettings(prefs) }
+        } else if (key == FohSafeModeController.KEY_SAFE_ENABLED || key == FohSafeModeController.KEY_FOCUS_LOCK) {
+            handler.post { reloadSafeFocusSetting(prefs) }
         }
     }
     private var mode = PlaybackMode.CONTINUE
@@ -111,6 +127,7 @@ class PlaybackService : MediaSessionService() {
     private var explicitlyStopped = false
     private var remoteServerForegroundActive = false
     private var remoteEndpointLabel = "LAN"
+    private val monoSumProcessor = MonoSumAudioProcessor()
     private val signalTapProcessor = LocalAudioSignalTapProcessor()
     private var signalTickRunning = false
     private val signalTick = object : Runnable {
@@ -218,7 +235,13 @@ class PlaybackService : MediaSessionService() {
     }
     private val playerListener = object : Player.Listener {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            if (playWhenReady) explicitlyStopped = false
+            if (playWhenReady) {
+                explicitlyStopped = false
+                focusPausedByLoss = false
+                requestPlaybackAudioFocus()
+            } else if (!focusPausedByLoss) {
+                abandonPlaybackAudioFocus()
+            }
             if (!playWhenReady && internalFadeOpDepth == 0) cancelFade()
             publishState()
         }
@@ -282,6 +305,8 @@ class PlaybackService : MediaSessionService() {
                 .add(PlaybackCommands.immediatePause).add(PlaybackCommands.setFadeSettings)
                 .add(PlaybackCommands.setFader).add(PlaybackCommands.toggleMute)
                 .add(PlaybackCommands.toggleDuck).add(PlaybackCommands.resetFader)
+                .add(PlaybackCommands.setMonoSum).add(PlaybackCommands.setPadDuck)
+                .add(PlaybackCommands.setFocusGuard)
                 .add(PreviewProtocol.start).add(PreviewProtocol.stop).add(PreviewProtocol.forget)
             val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
                 .remove(Player.COMMAND_SET_REPEAT_MODE).remove(Player.COMMAND_SET_SHUFFLE_MODE).build()
@@ -369,6 +394,34 @@ class PlaybackService : MediaSessionService() {
                     applyFaderState(FaderRules.resetUnity())
                     SessionResult.RESULT_SUCCESS
                 }
+                PlaybackCommands.ACTION_SET_MONO_SUM -> {
+                    monoSumEnabled = args.getBoolean(PlaybackCommands.EXTRA_MONO_SUM, !monoSumEnabled)
+                    monoSumProcessor.monoEnabled = monoSumEnabled
+                    playbackPrefs.edit().putBoolean(KEY_MONO_SUM, monoSumEnabled).apply()
+                    publishState()
+                    SessionResult.RESULT_SUCCESS
+                }
+                PlaybackCommands.ACTION_SET_PAD_DUCK -> {
+                    val requestedDuck = args.getBoolean(PlaybackCommands.EXTRA_PAD_DUCK, false)
+                    if (requestedDuck != padDuckActive) {
+                        padDuckActive = requestedDuck
+                        applyPadDuckTransition()
+                    }
+                    publishState()
+                    SessionResult.RESULT_SUCCESS
+                }
+                PlaybackCommands.ACTION_SET_FOCUS_GUARD -> {
+                    val guarded = args.getBoolean(PlaybackCommands.EXTRA_FOCUS_GUARD, focusGuardEnabled)
+                    if (guarded != focusGuardEnabled) {
+                        focusGuardEnabled = guarded
+                        if (focusGuardEnabled && focusDucked) {
+                            focusDucked = false
+                            applyEffectiveNominalNow()
+                        }
+                    }
+                    publishState()
+                    SessionResult.RESULT_SUCCESS
+                }
                 else -> SessionError.ERROR_NOT_SUPPORTED
             }
             return Futures.immediateFuture(SessionResult(result, stateExtras()))
@@ -390,17 +443,20 @@ class PlaybackService : MediaSessionService() {
             ): AudioSink = DefaultAudioSink.Builder(context)
                 .setEnableFloatOutput(enableFloatOutput)
                 .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                .setAudioProcessors(arrayOf(signalTapProcessor))
+                .setAudioProcessors(arrayOf(monoSumProcessor, signalTapProcessor))
                 .build()
         }
         val player = ExoPlayer.Builder(this, renderersFactory)
             .setLoadControl(loadControl)
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), false)
             .setHandleAudioBecomingNoisy(true).setWakeMode(C.WAKE_MODE_LOCAL).build()
         timing("playback_player_init_ms", began)
         appPlayer = player
+        monoSumEnabled = playbackPrefs.getBoolean(KEY_MONO_SUM, false)
+        monoSumProcessor.monoEnabled = monoSumEnabled
         playbackPrefs.registerOnSharedPreferenceChangeListener(prefListener)
         reloadFadeSettings(playbackPrefs)
+        reloadSafeFocusSetting(playbackPrefs)
         previewOwner = PreviewSession((application as SwarariaApp).container.searchRepository, scope, {},
             onResolved = ::preparePreview, onChanged = {
                 if (::previewOwner.isInitialized) {
@@ -498,7 +554,7 @@ class PlaybackService : MediaSessionService() {
         savedExplicitlyStopped = false
         if (!keepError && ::previewOwner.isInitialized) previewOwner.cancelPreview()
         previewPrepared = false; previewPhase = if (keepError) "error" else ""
-        nominalVolume = faderState.effectiveGain
+        nominalVolume = effectiveTargetVolume()
         val player = appPlayer
         if (local != null && player != null) {
             changing = true
@@ -543,6 +599,9 @@ class PlaybackService : MediaSessionService() {
         putBoolean(PlaybackCommands.EXTRA_FADER_MUTED, faderState.muted)
         putBoolean(PlaybackCommands.EXTRA_FADER_DUCKED, faderState.ducked)
         putFloat(PlaybackCommands.EXTRA_FADER_PRE_DUCK, faderState.preDuckPosition)
+        putBoolean(PlaybackCommands.EXTRA_MONO_SUM, monoSumEnabled)
+        putBoolean(PlaybackCommands.EXTRA_PAD_DUCK, padDuckActive)
+        putBoolean(PlaybackCommands.EXTRA_FOCUS_GUARD, focusGuardEnabled)
         if (::previewOwner.isInitialized) {
             val state = previewOwner.preview.value
             state.hit?.let { putString(PreviewProtocol.ID, it.videoId); putString(PreviewProtocol.TITLE, it.title) }
@@ -650,14 +709,172 @@ class PlaybackService : MediaSessionService() {
         publishState()
     }
 
+    private fun reloadSafeFocusSetting(prefs: SharedPreferences) {
+        val next = FohSafeModeRules.shouldIgnoreExternalFocusLoss(
+            FohSafeModeSettings(
+                enabled = prefs.getBoolean(FohSafeModeController.KEY_SAFE_ENABLED, false),
+                autoDnd = prefs.getBoolean(FohSafeModeController.KEY_AUTO_DND, true),
+                focusLock = prefs.getBoolean(FohSafeModeController.KEY_FOCUS_LOCK, true),
+            ),
+        )
+        if (next != focusGuardEnabled) {
+            focusGuardEnabled = next
+            if (focusGuardEnabled && focusDucked) {
+                focusDucked = false
+                applyEffectiveNominalNow()
+            }
+            publishState()
+        }
+    }
+
+    private fun effectiveTargetVolume(): Float {
+        val base = faderState.effectiveGain
+        val padFactor = if (padDuckActive) SoundboardRules.AUTO_DUCK_GAIN else 1f
+        val focusFactor = if (focusDucked && !focusGuardEnabled) 0.25f else 1f
+        return (base * padFactor * focusFactor).coerceIn(0f, 1f)
+    }
+
+    private fun cancelPadDuckRamp() {
+        padDuckTick?.let { handler.removeCallbacks(it) }
+        padDuckTick = null
+    }
+
+    private fun applyEffectiveNominalNow() {
+        nominalVolume = effectiveTargetVolume()
+        if (fadePhase == FadePhase.NONE && originalVolume == null && savedLocal == null) {
+            cancelPadDuckRamp()
+            appPlayer?.volume = nominalVolume
+        }
+    }
+
+    private fun applyPadDuckTransition() {
+        val target = effectiveTargetVolume()
+        nominalVolume = target
+        if (originalVolume != null) originalVolume = target
+        if (fadePhase != FadePhase.NONE || savedLocal != null) return
+        val player = appPlayer ?: return
+        cancelPadDuckRamp()
+        if (!player.isPlaying) {
+            player.volume = target
+            return
+        }
+        val startVol = player.volume.coerceIn(0f, 1f)
+        val durationMs = if (padDuckActive) 85L else 140L
+        if (kotlin.math.abs(startVol - target) < 0.004f) {
+            player.volume = target
+            return
+        }
+        val startedAt = SystemClock.uptimeMillis()
+        val ramp = object : Runnable {
+            override fun run() {
+                if (padDuckTick !== this || fadePhase != FadePhase.NONE || savedLocal != null) return
+                val elapsed = SystemClock.uptimeMillis() - startedAt
+                if (elapsed >= durationMs) {
+                    padDuckTick = null
+                    player.volume = nominalVolume
+                } else {
+                    val t = elapsed.toFloat() / durationMs.toFloat()
+                    player.volume = (startVol + (nominalVolume - startVol) * t).coerceIn(0f, 1f)
+                    handler.postDelayed(this, 16L)
+                }
+            }
+        }
+        padDuckTick = ramp
+        handler.post(ramp)
+    }
+
+    private fun ensureAudioFocusRequest(): AudioFocusRequest {
+        audioFocusRequest?.let { return it }
+        val attrs = android.media.AudioAttributes.Builder()
+            .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
+        return AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(attrs)
+            .setWillPauseWhenDucked(false)
+            .setOnAudioFocusChangeListener(audioFocusListener, handler)
+            .build()
+            .also { audioFocusRequest = it }
+    }
+
+    private fun requestPlaybackAudioFocus() {
+        if (hasAudioFocus) return
+        val manager = audioManager ?: return
+        val result = runCatching { manager.requestAudioFocus(ensureAudioFocusRequest()) }.getOrNull()
+        if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            hasAudioFocus = true
+        }
+    }
+
+    private fun abandonPlaybackAudioFocus() {
+        val req = audioFocusRequest
+        if (hasAudioFocus && req != null) {
+            runCatching { audioManager?.abandonAudioFocusRequest(req) }
+        }
+        hasAudioFocus = false
+        focusDucked = false
+        focusPausedByLoss = false
+    }
+
+    private fun handleAudioFocusChange(focusChange: Int) {
+        if (focusGuardEnabled) {
+            if (focusDucked) {
+                focusDucked = false
+                applyEffectiveNominalNow()
+            }
+            focusPausedByLoss = false
+            return
+        }
+        val player = appPlayer ?: return
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                hasAudioFocus = true
+                val resume = focusPausedByLoss
+                focusPausedByLoss = false
+                if (focusDucked) {
+                    focusDucked = false
+                    applyEffectiveNominalNow()
+                }
+                if (resume && !player.playWhenReady) {
+                    requestPlayWithFade(immediate = true)
+                }
+            }
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                hasAudioFocus = false
+                focusDucked = false
+                focusPausedByLoss = false
+                abandonPlaybackAudioFocus()
+                cancelFade()
+                withInternalGuard { player.pause() }
+                publishState()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                focusDucked = false
+                if (player.isPlaying || player.playWhenReady) {
+                    focusPausedByLoss = true
+                    cancelFade()
+                    withInternalGuard { player.pause() }
+                    publishState()
+                }
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                if (!focusDucked) {
+                    focusDucked = true
+                    applyEffectiveNominalNow()
+                }
+            }
+        }
+    }
+
     /**
      * Applies operator fader changes immediately, canceling any active automated fade ramp so
      * manual console moves never fight Fade In/Out transitions.
      */
     private fun applyFaderState(next: FaderState) {
         cancelPostFadeVolumeRestore()
+        cancelPadDuckRamp()
         faderState = next
-        nominalVolume = next.effectiveGain
+        nominalVolume = effectiveTargetVolume()
         if (fadePhase != FadePhase.NONE || originalVolume != null) {
             cancelFade(restoreVolume = false)
         }
@@ -666,7 +883,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun captureNominalVolume(player: ExoPlayer): Float {
-        nominalVolume = faderState.effectiveGain
+        nominalVolume = effectiveTargetVolume()
         return nominalVolume
     }
 
@@ -699,6 +916,7 @@ class PlaybackService : MediaSessionService() {
     ) {
         val player = appPlayer ?: return
         cancelPostFadeVolumeRestore()
+        cancelPadDuckRamp()
         fadeTick?.let { handler.removeCallbacks(it) }
         fadeTick = null
         val clampedDuration = FadeRules.clampDurationMs(durationMs)
@@ -1021,6 +1239,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun cancelFade(restoreVolume: Boolean = true) {
         cancelPostFadeVolumeRestore()
+        cancelPadDuckRamp()
         val wasBusy = fadePhase == FadePhase.FADE_OUT || originalVolume != null
         fadeTick?.let { handler.removeCallbacks(it) }
         fadeTick = null
@@ -1046,7 +1265,7 @@ class PlaybackService : MediaSessionService() {
                 val clamped = volume.coerceIn(0f, 1f)
                 faderState = FaderRules.withPosition(faderState, FaderRules.positionFromGain(clamped))
                     .copy(muted = clamped <= 0f)
-                nominalVolume = faderState.effectiveGain
+                nominalVolume = effectiveTargetVolume()
                 super.setVolume(nominalVolume)
                 publishState()
                 return
@@ -1087,6 +1306,7 @@ class PlaybackService : MediaSessionService() {
                 super.pause()
                 return
             }
+            if (focusPausedByLoss) abandonPlaybackAudioFocus()
             requestPauseWithFade()
         }
 
@@ -1095,6 +1315,7 @@ class PlaybackService : MediaSessionService() {
                 super.stop()
                 return
             }
+            if (focusPausedByLoss) abandonPlaybackAudioFocus()
             requestStopWithFade(resetToCue = false)
         }
 
@@ -1308,6 +1529,9 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         (application as? SwarariaApp)?.container?.remoteServerController?.detachPlaybackHost(remotePlaybackHost)
         playbackPrefs.unregisterOnSharedPreferenceChangeListener(prefListener)
+        abandonPlaybackAudioFocus()
+        padDuckActive = false
+        cancelPadDuckRamp()
         scope.cancel()
         if (::previewOwner.isInitialized) previewOwner.close()
         signalTickRunning = false
@@ -1321,6 +1545,7 @@ class PlaybackService : MediaSessionService() {
     }
     companion object {
         private const val PREFERENCES = "native_playback"
+        private const val KEY_MONO_SUM = "foh_mono_sum"
         private const val SIGNAL_TICK_MS = 33L
         private const val SWITCH_MERGE_WINDOW_MS = 600L
         private const val POST_FADE_VOLUME_RESTORE_DELAY_MS = 80L

@@ -144,3 +144,82 @@ object FaderRules {
     /** Resets fader to clean Unity (100%, unmuted, unducked). */
     fun resetUnity(): FaderState = FaderState()
 }
+
+/** Operational headroom tier for Android system media volume (`STREAM_MUSIC`). */
+enum class PhoneMediaVolumeTier { MUTED, LOW, MODERATE, OPTIMAL }
+
+/** Read-only snapshot of Android's system media volume (`STREAM_MUSIC`) relative to device ceiling. */
+data class PhoneMediaVolumeState(
+    val currentStep: Int = 1,
+    val maxStep: Int = 1,
+    val minStep: Int = 0,
+    val percent: Int = 100,
+    val isMuted: Boolean = false,
+    val tier: PhoneMediaVolumeTier = PhoneMediaVolumeTier.OPTIMAL,
+) {
+    val shouldWarnPlayer: Boolean
+        get() = tier == PhoneMediaVolumeTier.MUTED || tier == PhoneMediaVolumeTier.LOW
+
+    val percentLabel: String
+        get() = if (isMuted) "MUTED (0%)" else "$percent%"
+
+    val stepLabel: String
+        get() = "$currentStep/$maxStep"
+}
+
+/** Pure classification and formatting helpers for read-only phone media volume monitoring. */
+object PhoneMediaVolumeRules {
+    const val LOW_THRESHOLD_PERCENT: Int = 50
+    const val OPTIMAL_THRESHOLD_PERCENT: Int = 80
+
+    /** Classifies raw `AudioManager.STREAM_MUSIC` step bounds into percentage and headroom tier. */
+    fun classify(
+        currentStep: Int,
+        maxStep: Int,
+        minStep: Int = 0,
+        streamMuted: Boolean = false,
+    ): PhoneMediaVolumeState {
+        val safeMin = minStep.coerceAtLeast(0)
+        val safeMax = maxStep.coerceAtLeast(safeMin)
+        val span = safeMax - safeMin
+        val clampedStep = currentStep.coerceIn(safeMin, safeMax)
+        val muted = streamMuted || (span > 0 && safeMin == 0 && clampedStep == 0)
+        val percent = when {
+            muted -> 0
+            span <= 0 -> 100
+            else -> (((clampedStep - safeMin).toFloat() / span.toFloat()) * 100f)
+                .roundToInt()
+                .let { raw -> if (safeMin > 0) raw.coerceIn(1, 100) else raw.coerceIn(0, 100) }
+        }
+        val tier = when {
+            muted || percent <= 0 -> PhoneMediaVolumeTier.MUTED
+            percent < LOW_THRESHOLD_PERCENT -> PhoneMediaVolumeTier.LOW
+            percent < OPTIMAL_THRESHOLD_PERCENT -> PhoneMediaVolumeTier.MODERATE
+            else -> PhoneMediaVolumeTier.OPTIMAL
+        }
+        return PhoneMediaVolumeState(
+            currentStep = if (muted) safeMin else clampedStep,
+            maxStep = safeMax,
+            minStep = safeMin,
+            percent = percent,
+            isMuted = muted,
+            tier = tier,
+        )
+    }
+
+    /** Compact single-line warning label for player headers when phone volume restricts output. */
+    fun shortBannerText(state: PhoneMediaVolumeState): String = when (state.tier) {
+        PhoneMediaVolumeTier.MUTED -> "Volume Media HP 0% (Bisu) · Tap untuk atur"
+        PhoneMediaVolumeTier.LOW -> "Volume Media HP rendah (${state.percent}%) · Tap untuk atur"
+        PhoneMediaVolumeTier.MODERATE -> "Volume Media HP ${state.percent}% (${state.stepLabel})"
+        PhoneMediaVolumeTier.OPTIMAL -> "Volume Media HP ${state.percent}% (${state.stepLabel})"
+    }
+
+    /** Descriptive FOH gain-staging hint displayed inside the Master Output Fader sheet. */
+    fun faderSheetDetailText(state: PhoneMediaVolumeState): String = when (state.tier) {
+        PhoneMediaVolumeTier.MUTED -> "Volume HP mati — naikkan via tombol volume HP agar suara keluar."
+        PhoneMediaVolumeTier.LOW -> "Batas volume HP rendah (${state.percent}%) — headroom FOH terpotong."
+        PhoneMediaVolumeTier.MODERATE -> "Volume HP ${state.percent}% — fader aplikasi memotong dari batas ini."
+        PhoneMediaVolumeTier.OPTIMAL -> "Headroom HP aman — fader aplikasi mengatur level internal."
+    }
+}

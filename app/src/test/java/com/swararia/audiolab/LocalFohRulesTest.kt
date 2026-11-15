@@ -98,12 +98,13 @@ class LocalFohRulesTest {
     }
 
     @Test
-    fun localPlayerViewModesIncludeCueListAndArtInOrder() {
+    fun localPlayerViewModesIncludeCueListPadsAndArtInOrder() {
         assertEquals(
-            listOf(LocalPlayerViewMode.CUE_LIST, LocalPlayerViewMode.ART),
+            listOf(LocalPlayerViewMode.CUE_LIST, LocalPlayerViewMode.PADS, LocalPlayerViewMode.ART),
             LocalPlayerViewMode.entries,
         )
-        assertEquals("Cue List", LocalPlayerViewMode.CUE_LIST.label)
+        assertEquals("Cue", LocalPlayerViewMode.CUE_LIST.label)
+        assertEquals("Pads", LocalPlayerViewMode.PADS.label)
         assertEquals("Art", LocalPlayerViewMode.ART.label)
     }
 }

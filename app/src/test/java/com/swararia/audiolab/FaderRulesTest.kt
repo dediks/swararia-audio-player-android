@@ -103,4 +103,64 @@ class FaderRulesTest {
         assertTrue(unity.isUnity)
         assertEquals(1f, unity.effectiveGain, 0.0001f)
     }
+
+    @Test
+    fun phoneMediaVolumeClassificationHandlesMutedLowModerateOptimalAndEdgeBounds() {
+        val full = PhoneMediaVolumeRules.classify(currentStep = 15, maxStep = 15)
+        assertEquals(100, full.percent)
+        assertEquals(PhoneMediaVolumeTier.OPTIMAL, full.tier)
+        assertFalse(full.isMuted)
+        assertFalse(full.shouldWarnPlayer)
+        assertEquals("100%", full.percentLabel)
+        assertEquals("15/15", full.stepLabel)
+
+        val optimalThreshold = PhoneMediaVolumeRules.classify(currentStep = 12, maxStep = 15)
+        assertEquals(80, optimalThreshold.percent)
+        assertEquals(PhoneMediaVolumeTier.OPTIMAL, optimalThreshold.tier)
+        assertFalse(optimalThreshold.shouldWarnPlayer)
+
+        val moderate = PhoneMediaVolumeRules.classify(currentStep = 8, maxStep = 15)
+        assertEquals(53, moderate.percent)
+        assertEquals(PhoneMediaVolumeTier.MODERATE, moderate.tier)
+        assertFalse(moderate.shouldWarnPlayer)
+
+        val low = PhoneMediaVolumeRules.classify(currentStep = 7, maxStep = 15)
+        assertEquals(47, low.percent)
+        assertEquals(PhoneMediaVolumeTier.LOW, low.tier)
+        assertTrue(low.shouldWarnPlayer)
+        assertTrue(PhoneMediaVolumeRules.shortBannerText(low).contains("47%"))
+        assertTrue(PhoneMediaVolumeRules.faderSheetDetailText(low).contains("47%"))
+
+        val zeroStep = PhoneMediaVolumeRules.classify(currentStep = 0, maxStep = 15)
+        assertEquals(0, zeroStep.percent)
+        assertTrue(zeroStep.isMuted)
+        assertEquals(PhoneMediaVolumeTier.MUTED, zeroStep.tier)
+        assertTrue(zeroStep.shouldWarnPlayer)
+        assertEquals("MUTED (0%)", zeroStep.percentLabel)
+
+        val streamMutedWhileNonZero = PhoneMediaVolumeRules.classify(
+            currentStep = 10,
+            maxStep = 15,
+            streamMuted = true,
+        )
+        assertTrue(streamMutedWhileNonZero.isMuted)
+        assertEquals(0, streamMutedWhileNonZero.percent)
+        assertEquals(0, streamMutedWhileNonZero.currentStep)
+        assertEquals(PhoneMediaVolumeTier.MUTED, streamMutedWhileNonZero.tier)
+
+        val nonzeroMinUnmuted = PhoneMediaVolumeRules.classify(
+            currentStep = 1,
+            maxStep = 15,
+            minStep = 1,
+            streamMuted = false,
+        )
+        assertFalse(nonzeroMinUnmuted.isMuted)
+        assertEquals(1, nonzeroMinUnmuted.percent)
+        assertEquals(PhoneMediaVolumeTier.LOW, nonzeroMinUnmuted.tier)
+
+        val degenerateZeroSpan = PhoneMediaVolumeRules.classify(currentStep = 0, maxStep = 0)
+        assertFalse(degenerateZeroSpan.isMuted)
+        assertEquals(100, degenerateZeroSpan.percent)
+        assertEquals(PhoneMediaVolumeTier.OPTIMAL, degenerateZeroSpan.tier)
+    }
 }

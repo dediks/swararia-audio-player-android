@@ -4,7 +4,8 @@ import android.media.AudioDeviceInfo
 import java.util.Locale
 
 internal enum class LocalPlayerViewMode(val label: String) {
-    CUE_LIST("Cue List"),
+    CUE_LIST("Cue"),
+    PADS("Pads"),
     ART("Art"),
 }
 

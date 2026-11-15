@@ -120,6 +120,7 @@ internal fun PhaseCheckerScreen(
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val engine = remember(context) { PhaseCheckerEngine(context) }
     val state by engine.state.collectAsStateWithLifecycle()
+    val phoneVolume = rememberPhoneMediaVolumeState()
 
     var topology by rememberSaveable {
         mutableStateOf(
@@ -316,6 +317,8 @@ internal fun PhaseCheckerScreen(
 
         val showsMicUi = (topology == PhasePhoneTopology.SINGLE_PHONE && singleSubMode == PhaseSingleSubMode.PULSE_AND_MIC) ||
             (topology == PhasePhoneTopology.TWO_PHONES && twoPhoneRole == PhaseTwoPhoneRole.RECEIVER)
+        val showsTxUi = topology == PhasePhoneTopology.SINGLE_PHONE ||
+            (topology == PhasePhoneTopology.TWO_PHONES && twoPhoneRole == PhaseTwoPhoneRole.TRANSMITTER)
         if (permissionDeniedOnce && !engine.hasMicPermission() && showsMicUi) {
             item(key = "phase-mic-denied") {
                 AlertMessageBanner(
@@ -331,6 +334,22 @@ internal fun PhaseCheckerScreen(
                         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         runCatching { context.startActivity(intent) }
                     },
+                )
+            }
+        }
+        if (showsTxUi && phoneVolume.shouldWarnPlayer) {
+            item(key = "phase-phone-volume-warning") {
+                AlertMessageBanner(
+                    message = if (phoneVolume.isMuted) {
+                        "Volume Media HP 0% (Bisu) — sinyal uji tidak akan keluar sebelum volume HP dinaikkan."
+                    } else {
+                        "Volume Media HP rendah (${phoneVolume.percent}%) — level sinyal uji terbatasi oleh volume HP."
+                    },
+                    bg = if (phoneVolume.isMuted) foh.alertBg else foh.warnBg,
+                    border = if (phoneVolume.isMuted) foh.alertBorder else foh.warnBorder,
+                    accent = if (phoneVolume.isMuted) foh.alertAccent else foh.warnAccent,
+                    actionLabel = "Panel HP",
+                    onAction = { showSystemMediaVolumePanel(context) },
                 )
             }
         }

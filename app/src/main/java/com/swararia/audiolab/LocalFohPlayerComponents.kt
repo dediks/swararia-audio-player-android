@@ -11,6 +11,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -113,15 +114,20 @@ internal fun rememberAudioOutputRoute(): AudioOutputRoute {
 @Composable
 internal fun LocalFohHeaderBar(
     route: AudioOutputRoute,
+    phoneVolume: PhoneMediaVolumeState = PhoneMediaVolumeState(),
     keepScreenOn: Boolean,
     guardEnabled: Boolean,
+    safeModeEnabled: Boolean = false,
+    safeNeedsDndPermission: Boolean = false,
     hasCurrentTrack: Boolean,
     onMinimize: () -> Unit,
     onToggleKeepScreenOn: () -> Unit,
     onToggleGuard: () -> Unit,
+    onOpenSafeMode: () -> Unit = {},
     onRename: () -> Unit,
     onSettings: () -> Unit,
     onRouteClick: () -> Unit,
+    onPhoneVolumeClick: () -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
     val foh = FohTheme.colors
@@ -165,71 +171,123 @@ internal fun LocalFohHeaderBar(
                 letterSpacing = 0.5.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 4.dp),
+                softWrap = false,
+                modifier = Modifier.padding(horizontal = 2.dp),
             )
 
-            Surface(
-                onClick = onToggleKeepScreenOn,
-                shape = RoundedCornerShape(50),
-                color = if (keepScreenOn) foh.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, if (keepScreenOn) foh.safeBorder else foh.borderSubtle),
+            Row(
                 modifier = Modifier
-                    .heightIn(min = 34.dp)
-                    .semantics { contentDescription = if (keepScreenOn) "Screen Awake aktif" else "Aktifkan Screen Awake" },
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.End),
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(
-                        UiIcons.KeepAwake,
-                        contentDescription = null,
-                        tint = if (keepScreenOn) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text(
-                        text = if (keepScreenOn) "Awake" else "Sleep OK",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (keepScreenOn) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
+                val safeBg = when {
+                    safeNeedsDndPermission -> foh.warnBg
+                    safeModeEnabled -> foh.safeBg
+                    else -> MaterialTheme.colorScheme.surfaceContainerHigh
                 }
-            }
-
-            Surface(
-                onClick = onToggleGuard,
-                shape = RoundedCornerShape(50),
-                color = if (guardEnabled) foh.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, if (guardEnabled) foh.safeBorder else foh.borderSubtle),
-                modifier = Modifier
-                    .heightIn(min = 34.dp)
-                    .semantics { contentDescription = if (guardEnabled) "Guard ON" else "Guard OFF" },
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                val safeBorder = when {
+                    safeNeedsDndPermission -> foh.warnBorder
+                    safeModeEnabled -> foh.safeBorder
+                    else -> foh.borderSubtle
+                }
+                val safeAccent = when {
+                    safeNeedsDndPermission -> foh.warnAccent
+                    safeModeEnabled -> foh.safeAccent
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Surface(
+                    onClick = onOpenSafeMode,
+                    shape = RoundedCornerShape(50),
+                    color = safeBg,
+                    border = BorderStroke(1.dp, safeBorder),
+                    modifier = Modifier
+                        .heightIn(min = 34.dp)
+                        .semantics { contentDescription = if (safeModeEnabled) "FOH Safe Mode ON" else "FOH Safe Mode OFF" },
                 ) {
-                    Icon(
-                        UiIcons.Shield,
-                        contentDescription = null,
-                        tint = if (guardEnabled) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text(
-                        text = if (guardEnabled) "Guard ON" else "Guard OFF",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (guardEnabled) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            UiIcons.VolumeMuted,
+                            contentDescription = null,
+                            tint = safeAccent,
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Text(
+                            text = "Safe",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (safeModeEnabled || safeNeedsDndPermission) FontWeight.Bold else FontWeight.SemiBold,
+                            color = safeAccent,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = onToggleKeepScreenOn,
+                    shape = RoundedCornerShape(50),
+                    color = if (keepScreenOn) foh.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, if (keepScreenOn) foh.safeBorder else foh.borderSubtle),
+                    modifier = Modifier
+                        .heightIn(min = 34.dp)
+                        .semantics { contentDescription = if (keepScreenOn) "Screen Awake aktif" else "Aktifkan Screen Awake" },
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            UiIcons.KeepAwake,
+                            contentDescription = null,
+                            tint = if (keepScreenOn) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            text = if (keepScreenOn) "Awake" else "Sleep OK",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (keepScreenOn) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = onToggleGuard,
+                    shape = RoundedCornerShape(50),
+                    color = if (guardEnabled) foh.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, if (guardEnabled) foh.safeBorder else foh.borderSubtle),
+                    modifier = Modifier
+                        .heightIn(min = 34.dp)
+                        .semantics { contentDescription = if (guardEnabled) "Guard ON" else "Guard OFF" },
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            UiIcons.Shield,
+                            contentDescription = null,
+                            tint = if (guardEnabled) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            text = if (guardEnabled) "Guard ON" else "Guard OFF",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (guardEnabled) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
                 }
             }
 
@@ -298,6 +356,13 @@ internal fun LocalFohHeaderBar(
                 )
             }
         }
+
+        AnimatedVisibility(visible = phoneVolume.shouldWarnPlayer) {
+            PhoneMediaVolumeWarningStrip(
+                phoneVolume = phoneVolume,
+                onClick = onPhoneVolumeClick,
+            )
+        }
     }
 }
 
@@ -359,6 +424,13 @@ internal fun LocalFohTrackSummaryCard(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        if (controlUi.padDucked) {
+                            FohMicroChip(
+                                label = "DUCK -12dB",
+                                containerColor = FohTheme.colors.warnBg,
+                                contentColor = FohTheme.colors.warnAccent,
+                            )
+                        }
                         LibraryRules.sanitizedTag(current?.artist)?.let { artist ->
                             Text(
                                 text = artist,
@@ -587,12 +659,14 @@ private fun LocalFohSeekAndEndingSection(
 internal fun LocalFohViewModeHeader(
     queueCount: Int,
     currentIndex: Int,
+    assignedPads: Int = 0,
     viewMode: LocalPlayerViewMode,
     onSelectViewMode: (LocalPlayerViewMode) -> Unit,
 ) {
     val foh = FohTheme.colors
     val headerCaption = when (viewMode) {
         LocalPlayerViewMode.CUE_LIST -> "LIVE CUE LIST · $queueCount TRACKS"
+        LocalPlayerViewMode.PADS -> "JINGLE PADS · $assignedPads/${SoundboardRules.SLOTS_PER_BANK}"
         LocalPlayerViewMode.ART -> "COVER ART & INFO"
     }
     Row(
@@ -611,7 +685,7 @@ internal fun LocalFohViewModeHeader(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (currentIndex >= 0 && queueCount > 0) {
+            if (viewMode != LocalPlayerViewMode.PADS && currentIndex >= 0 && queueCount > 0) {
                 Text(
                     text = "Active Slot #${currentIndex + 1}",
                     style = MaterialTheme.typography.labelSmall,
@@ -894,6 +968,12 @@ internal fun LocalFohBottomDeck(
                         playing = playback.playing,
                         barCount = 4,
                     )
+                    if (controlUi.monoSum) {
+                        MonoOutputBadge(
+                            monoSum = true,
+                            onClick = onFaderPillClick,
+                        )
+                    }
                     LocalFohLevelPill(
                         faderState = controlUi.faderState,
                         onClick = onFaderPillClick,
@@ -962,6 +1042,10 @@ internal fun LocalFohBottomDeck(
                     CompactSignalVisualizer(
                         playing = playback.playing,
                         barCount = 4,
+                    )
+                    MonoOutputBadge(
+                        monoSum = controlUi.monoSum,
+                        onClick = onFaderPillClick,
                     )
                     LocalFohLevelPill(
                         faderState = controlUi.faderState,
@@ -1160,6 +1244,37 @@ internal fun LocalTrackSwitchGuardDialog(
             }
         },
     )
+}
+
+@Composable
+private fun MonoOutputBadge(
+    monoSum: Boolean,
+    onClick: () -> Unit,
+) {
+    val foh = FohTheme.colors
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        color = if (monoSum) foh.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, if (monoSum) foh.safeBorder else foh.borderSubtle),
+        modifier = Modifier
+            .height(28.dp)
+            .semantics { contentDescription = if (monoSum) "Output Mono L+R" else "Output Stereo" },
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (monoSum) "MONO" else "ST",
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.4.sp),
+                fontWeight = FontWeight.Bold,
+                color = if (monoSum) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
 }
 
 @Composable

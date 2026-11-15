@@ -37,6 +37,8 @@ class AppContainer(context: Context) {
     val downloadQueue: DownloadQueueRepository by lazy { RoomDownloadQueueRepository(database) }
     val downloadPreferences: DownloadPreferences by lazy { DownloadPreferences(appContext) }
     val playbackPreferences: PlaybackPreferences by lazy { PlaybackPreferences(appContext) }
+    val safeModeController: FohSafeModeController by lazy { FohSafeModeController(appContext) }
+    val soundboardEngine: FohSoundboardEngine by lazy { FohSoundboardEngine(appContext) }
     val searchRepository: AudioSearchRepository by lazy {
         YoutubeSearchRepository(appContext, { ingestState.value.busy })
     }

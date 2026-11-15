@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.C
@@ -499,6 +500,9 @@ internal fun FocusedPlayer(
     var pendingGuardEntry by remember { mutableStateOf<SessionQueueItem?>(null) }
     var routeDialogOpen by remember { mutableStateOf(false) }
     var faderSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var safeSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var assignPadTarget by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var editPadSlot by remember { mutableStateOf<SoundPadSlot?>(null) }
     var seekPosition by remember(playback.mediaId, playback.currentIndex) { mutableStateOf<Float?>(null) }
     var pendingSeekTargetMs by remember(playback.mediaId, playback.currentIndex) { mutableStateOf<Long?>(null) }
 
@@ -515,8 +519,38 @@ internal fun FocusedPlayer(
         }
     }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val appContainer = remember(context) { (context.applicationContext as? SwarariaApp)?.container }
+    val safeModeController = appContainer?.safeModeController
+    val soundboardEngine = appContainer?.soundboardEngine
+    val safeSettings by safeModeController?.settings?.collectAsState()
+        ?: remember { mutableStateOf(FohSafeModeSettings()) }
+    val soundboardState by soundboardEngine?.state?.collectAsState()
+        ?: remember { mutableStateOf(SoundboardUiState()) }
+    var dndGranted by remember(safeModeController) {
+        mutableStateOf(safeModeController?.isNotificationPolicyGranted() == true)
+    }
+
+    DisposableEffect(lifecycleOwner, safeModeController) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                dndGranted = safeModeController?.isNotificationPolicyGranted() == true
+                safeModeController?.refreshPolicySync()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(soundboardEngine, tracks) {
+        soundboardEngine?.syncTracks(tracks)
+    }
+
     val outputRoute = rememberAudioOutputRoute()
+    val phoneVolume = rememberPhoneMediaVolumeState()
     val byId = remember(tracks) { tracks.associateBy { it.id.toString() } }
+    val tracksByLongId = remember(tracks) { tracks.associateBy { it.id } }
     val listState = rememberLazyListState()
 
     LaunchedEffect(playback.currentIndex, viewMode, playback.queue.size) {
@@ -526,20 +560,48 @@ internal fun FocusedPlayer(
     }
 
     val activeTitle = playbackTitle(current, playback)
+    val needsDndPermission = FohSafeModeRules.needsDndPermissionPrompt(safeSettings, dndGranted)
+    val assignedInBank = remember(soundboardState.slots, soundboardState.selectedBank, tracksByLongId) {
+        soundboardState.slots.count {
+            it.bankIndex == soundboardState.selectedBank && it.isAssigned && tracksByLongId.containsKey(it.trackId)
+        }
+    }
 
     PlaybackModeBar(controller, modifier.fillMaxSize()) { controlUi ->
+        val latestControlUi by rememberUpdatedState(controlUi)
+        DisposableEffect(soundboardEngine) {
+            soundboardEngine?.setAutoDuckListener { ducked ->
+                latestControlUi.onSetPadDuck(ducked)
+            }
+            onDispose {
+                soundboardEngine?.setAutoDuckListener(null)
+                latestControlUi.onSetPadDuck(false)
+            }
+        }
+        val desiredFocusGuard = FohSafeModeRules.shouldIgnoreExternalFocusLoss(safeSettings)
+        LaunchedEffect(desiredFocusGuard, controlUi.connected, controlUi.focusGuard) {
+            if (controlUi.connected && controlUi.focusGuard != desiredFocusGuard) {
+                controlUi.onSetFocusGuard(desiredFocusGuard)
+            }
+        }
+
         Column(Modifier.fillMaxSize()) {
             LocalFohHeaderBar(
                 route = outputRoute,
+                phoneVolume = phoneVolume,
                 keepScreenOn = keepScreenOn,
                 guardEnabled = guardEnabled,
+                safeModeEnabled = safeSettings.enabled,
+                safeNeedsDndPermission = needsDndPermission,
                 hasCurrentTrack = current != null,
                 onMinimize = onBack,
                 onToggleKeepScreenOn = onToggleKeepScreenOn,
                 onToggleGuard = onToggleGuardEnabled,
+                onOpenSafeMode = { safeSheetOpen = true },
                 onRename = { current?.let(onRename) },
                 onSettings = onSettings,
                 onRouteClick = { routeDialogOpen = true },
+                onPhoneVolumeClick = { showSystemMediaVolumePanel(context) },
             )
 
             LocalFohTrackSummaryCard(
@@ -573,6 +635,7 @@ internal fun FocusedPlayer(
             LocalFohViewModeHeader(
                 queueCount = playback.queue.size,
                 currentIndex = playback.currentIndex,
+                assignedPads = assignedInBank,
                 viewMode = viewMode,
                 onSelectViewMode = onSelectViewMode,
             )
@@ -597,6 +660,18 @@ internal fun FocusedPlayer(
                                     applyQueueEntry(controller, entry, cueOnly = cueOnly)
                                 }
                             },
+                        )
+                    }
+                    LocalPlayerViewMode.PADS -> {
+                        FohSoundboardPanel(
+                            soundboardState = soundboardState,
+                            tracksById = tracksByLongId,
+                            onSelectBank = { soundboardEngine?.selectBank(it) },
+                            onTriggerPad = { bank, slot -> soundboardEngine?.triggerPad(bank, slot) },
+                            onOpenAssignSlot = { bank, slot -> assignPadTarget = bank to slot },
+                            onOpenEditSlot = { editPadSlot = it },
+                            onTogglePadDuck = { soundboardEngine?.setPadDuckEnabled(it) },
+                            onStopAllPads = { soundboardEngine?.stopAll() },
                         )
                     }
                     LocalPlayerViewMode.ART -> {
@@ -639,6 +714,8 @@ internal fun FocusedPlayer(
         if (faderSheetOpen) {
             LocalFohFaderSheet(
                 faderState = controlUi.faderState,
+                phoneVolume = phoneVolume,
+                monoSum = controlUi.monoSum,
                 enabled = controlUi.connected && controlUi.faderSupported,
                 playing = controlUi.playing,
                 fadeBusy = controlUi.fadeBusy,
@@ -646,9 +723,56 @@ internal fun FocusedPlayer(
                 onToggleDuck = controlUi.onToggleDuck,
                 onToggleMute = controlUi.onToggleMute,
                 onResetUnity = controlUi.onResetFader,
+                onSetMonoSum = controlUi.onSetMonoSum,
+                onOpenPhoneVolumePanel = { showSystemMediaVolumePanel(context) },
                 onDismiss = { faderSheetOpen = false },
             )
         }
+    }
+
+    if (safeSheetOpen) {
+        FohSafeModeSheet(
+            settings = safeSettings,
+            dndGranted = dndGranted,
+            route = outputRoute,
+            onToggleEnabled = { enabled -> safeModeController?.setEnabled(enabled) },
+            onToggleAutoDnd = { enabled -> safeModeController?.updateSettings { it.copy(autoDnd = enabled) } },
+            onToggleFocusLock = { enabled -> safeModeController?.updateSettings { it.copy(focusLock = enabled) } },
+            onRequestDndPermission = { FohSafeModeController.openNotificationPolicySettings(context) },
+            onOpenSamsungSeparateAppSound = { FohSafeModeController.openSamsungSeparateAppSound(context) },
+            onDismiss = { safeSheetOpen = false },
+        )
+    }
+
+    assignPadTarget?.let { (targetBank, targetSlot) ->
+        SoundPadTrackPickerSheet(
+            slotNumber = targetSlot + 1,
+            tracks = tracks,
+            onPickTrack = { track ->
+                soundboardEngine?.assignSlot(targetBank, targetSlot, track)
+                assignPadTarget = null
+            },
+            onDismiss = { assignPadTarget = null },
+        )
+    }
+
+    editPadSlot?.let { slot ->
+        SoundPadEditSheet(
+            slot = slot,
+            onSave = { label, trimDb ->
+                soundboardEngine?.updateSlot(slot.bankIndex, slot.slotIndex, label, trimDb)
+                editPadSlot = null
+            },
+            onReplaceAudio = {
+                editPadSlot = null
+                assignPadTarget = slot.bankIndex to slot.slotIndex
+            },
+            onClearSlot = {
+                soundboardEngine?.clearSlot(slot.bankIndex, slot.slotIndex)
+                editPadSlot = null
+            },
+            onDismiss = { editPadSlot = null },
+        )
     }
 
     pendingGuardEntry?.let { entry ->

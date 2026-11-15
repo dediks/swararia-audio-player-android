@@ -57,6 +57,9 @@ object PlaybackCommands {
     const val ACTION_TOGGLE_MUTE = "com.swararia.audiolab.TOGGLE_MUTE"
     const val ACTION_TOGGLE_DUCK = "com.swararia.audiolab.TOGGLE_DUCK"
     const val ACTION_RESET_FADER = "com.swararia.audiolab.RESET_FADER"
+    const val ACTION_SET_MONO_SUM = "com.swararia.audiolab.SET_MONO_SUM"
+    const val ACTION_SET_PAD_DUCK = "com.swararia.audiolab.SET_PAD_DUCK"
+    const val ACTION_SET_FOCUS_GUARD = "com.swararia.audiolab.SET_FOCUS_GUARD"
     const val EXTRA_MODE = "com.swararia.audiolab.playback.MODE"
     const val EXTRA_FADE_BUSY = "com.swararia.audiolab.playback.FADE_BUSY"
     const val EXTRA_FADE_IN_MS = "com.swararia.audiolab.playback.FADE_IN_MS"
@@ -65,6 +68,9 @@ object PlaybackCommands {
     const val EXTRA_FADER_MUTED = "com.swararia.audiolab.playback.FADER_MUTED"
     const val EXTRA_FADER_DUCKED = "com.swararia.audiolab.playback.FADER_DUCKED"
     const val EXTRA_FADER_PRE_DUCK = "com.swararia.audiolab.playback.FADER_PRE_DUCK"
+    const val EXTRA_MONO_SUM = "com.swararia.audiolab.playback.MONO_SUM"
+    const val EXTRA_PAD_DUCK = "com.swararia.audiolab.playback.PAD_DUCK"
+    const val EXTRA_FOCUS_GUARD = "com.swararia.audiolab.playback.FOCUS_GUARD"
     const val EXTRA_PROTOCOL = "com.swararia.audiolab.playback.PROTOCOL"
     val setMode = SessionCommand(ACTION_SET_MODE, Bundle.EMPTY)
     val fade = SessionCommand(ACTION_FADE, Bundle.EMPTY)
@@ -74,6 +80,9 @@ object PlaybackCommands {
     val toggleMute = SessionCommand(ACTION_TOGGLE_MUTE, Bundle.EMPTY)
     val toggleDuck = SessionCommand(ACTION_TOGGLE_DUCK, Bundle.EMPTY)
     val resetFader = SessionCommand(ACTION_RESET_FADER, Bundle.EMPTY)
+    val setMonoSum = SessionCommand(ACTION_SET_MONO_SUM, Bundle.EMPTY)
+    val setPadDuck = SessionCommand(ACTION_SET_PAD_DUCK, Bundle.EMPTY)
+    val setFocusGuard = SessionCommand(ACTION_SET_FOCUS_GUARD, Bundle.EMPTY)
 }
 
 private data class PlaybackControlState(
@@ -82,6 +91,9 @@ private data class PlaybackControlState(
     val fadeInMs: Long = 0L,
     val fadeOutMs: Long = 0L,
     val faderState: FaderState = FaderState(),
+    val monoSum: Boolean = false,
+    val padDucked: Boolean = false,
+    val focusGuard: Boolean = false,
     val modeSupported: Boolean = false,
     val fadeSupported: Boolean = false,
     val faderSupported: Boolean = false,
@@ -112,6 +124,9 @@ private fun MediaController?.readPlaybackControlState(): PlaybackControlState {
         fadeInMs = fadeInMs,
         fadeOutMs = fadeOutMs,
         faderState = faderState,
+        monoSum = knownProtocol && extras.getBoolean(PlaybackCommands.EXTRA_MONO_SUM, false),
+        padDucked = knownProtocol && extras.getBoolean(PlaybackCommands.EXTRA_PAD_DUCK, false),
+        focusGuard = knownProtocol && extras.getBoolean(PlaybackCommands.EXTRA_FOCUS_GUARD, false),
         modeSupported = knownProtocol && mode != null && isSessionCommandAvailable(PlaybackCommands.setMode),
         fadeSupported = knownProtocol && isSessionCommandAvailable(PlaybackCommands.fade),
         faderSupported = knownProtocol && isSessionCommandAvailable(PlaybackCommands.setFader),
@@ -150,6 +165,9 @@ data class LocalPlaybackControlUi(
     val fadeInMs: Long = 0L,
     val fadeOutMs: Long = 0L,
     val faderState: FaderState = FaderState(),
+    val monoSum: Boolean = false,
+    val padDucked: Boolean = false,
+    val focusGuard: Boolean = false,
     val modeSupported: Boolean,
     val fadeSupported: Boolean,
     val faderSupported: Boolean = false,
@@ -164,6 +182,9 @@ data class LocalPlaybackControlUi(
     val onToggleMute: () -> Unit = {},
     val onToggleDuck: () -> Unit = {},
     val onResetFader: () -> Unit = {},
+    val onSetMonoSum: (Boolean) -> Unit = {},
+    val onSetPadDuck: (Boolean) -> Unit = {},
+    val onSetFocusGuard: (Boolean) -> Unit = {},
 ) {
     val manualFadeOutMs: Long get() = FadeRules.manualDurationMs(fadeOutMs)
 }
@@ -183,6 +204,8 @@ fun PlaybackModeBar(
     var error by remember(controller) { mutableStateOf<String?>(null) }
     var optimisticFader by remember(controller) { mutableStateOf<FaderState?>(null) }
     var lastFaderEditUptimeMs by remember(controller) { mutableLongStateOf(0L) }
+    var optimisticMonoSum by remember(controller) { mutableStateOf<Boolean?>(null) }
+    var lastMonoEditUptimeMs by remember(controller) { mutableLongStateOf(0L) }
     val scope = rememberCoroutineScope()
     var commandJob by remember(controller) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var faderJob by remember(controller) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
@@ -210,7 +233,31 @@ fun PlaybackModeBar(
                 ) {
                     optimisticFader = null
                 }
+                if (optimisticMonoSum != null &&
+                    (state.monoSum == optimisticMonoSum ||
+                        SystemClock.uptimeMillis() - lastMonoEditUptimeMs > 500L)
+                ) {
+                    optimisticMonoSum = null
+                }
                 delay(200)
+            }
+        }
+    }
+
+    fun sendQuickCommand(command: SessionCommand, args: Bundle) {
+        val target = controller ?: return
+        if (!target.isConnected || !target.isSessionCommandAvailable(command)) return
+        scope.launch {
+            var future: com.google.common.util.concurrent.ListenableFuture<SessionResult>? = null
+            try {
+                future = target.sendCustomCommand(command, args)
+                withTimeout(2000L) {
+                    while (!future.isDone) delay(12)
+                    future.get()
+                }
+                state = target.readPlaybackControlState()
+            } catch (_: Exception) {
+                if (future?.isDone == false) future.cancel(false)
             }
         }
     }
@@ -281,6 +328,7 @@ fun PlaybackModeBar(
     }
 
     val activeFader = optimisticFader ?: state.faderState
+    val activeMonoSum = optimisticMonoSum ?: state.monoSum
     val status = error ?: when {
         !state.connected -> "Playback disconnected"
         !state.modeSupported -> "Playback modes unavailable"
@@ -296,6 +344,9 @@ fun PlaybackModeBar(
                     fadeInMs = state.fadeInMs,
                     fadeOutMs = state.fadeOutMs,
                     faderState = activeFader,
+                    monoSum = activeMonoSum,
+                    padDucked = state.padDucked,
+                    focusGuard = state.focusGuard,
                     modeSupported = state.modeSupported,
                     fadeSupported = state.fadeSupported,
                     faderSupported = state.faderSupported,
@@ -338,6 +389,26 @@ fun PlaybackModeBar(
                             PlaybackCommands.resetFader,
                             Bundle.EMPTY,
                             FaderRules.resetUnity(),
+                        )
+                    },
+                    onSetMonoSum = { enabled ->
+                        optimisticMonoSum = enabled
+                        lastMonoEditUptimeMs = SystemClock.uptimeMillis()
+                        sendQuickCommand(
+                            PlaybackCommands.setMonoSum,
+                            Bundle().apply { putBoolean(PlaybackCommands.EXTRA_MONO_SUM, enabled) },
+                        )
+                    },
+                    onSetPadDuck = { ducked ->
+                        sendQuickCommand(
+                            PlaybackCommands.setPadDuck,
+                            Bundle().apply { putBoolean(PlaybackCommands.EXTRA_PAD_DUCK, ducked) },
+                        )
+                    },
+                    onSetFocusGuard = { guarded ->
+                        sendQuickCommand(
+                            PlaybackCommands.setFocusGuard,
+                            Bundle().apply { putBoolean(PlaybackCommands.EXTRA_FOCUS_GUARD, guarded) },
                         )
                     },
                 )

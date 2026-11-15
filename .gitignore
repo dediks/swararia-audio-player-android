@@ -11,6 +11,8 @@ dist/
 *.aab
 *.apks
 local.properties
+keystore.properties
+.signing/
 .env
 .env.*
 !.env.example

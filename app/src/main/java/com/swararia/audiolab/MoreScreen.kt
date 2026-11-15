@@ -232,19 +232,21 @@ private fun MoreHubScreen(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
-                                Surface(
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = foh.safeAccent,
-                                ) {
-                                    Text(
-                                        if (txState.running) "TX AKTIF" else "BARU",
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.Black,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                    )
+                                if (txState.running) {
+                                    Surface(
+                                        shape = RoundedCornerShape(999.dp),
+                                        color = foh.safeAccent,
+                                    ) {
+                                        Text(
+                                            "TX AKTIF",
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.Black,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                        )
+                                    }
                                 }
                             }
                             Text(
