@@ -390,7 +390,7 @@ internal fun RemoteServerScreen(
                                 color = colors.onSurfaceVariant,
                             )
                         }
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        FohIndeterminateBar(height = 4.dp)
                     }
                 }
             }
@@ -572,7 +572,7 @@ private fun ServerNetworkCard(
             }
 
             if (busy) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
+                FohIndeterminateBar(height = 4.dp)
             }
 
             if (snapshot.enabled) {

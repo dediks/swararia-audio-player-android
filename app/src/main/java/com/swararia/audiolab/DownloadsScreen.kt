@@ -70,20 +70,10 @@ internal fun DownloadsScreen(
             }
         }
     }
-    val historyGroups = remember(visibleJobs) {
+    val historyJobs = remember(visibleJobs) {
         visibleJobs
             .filterNot { it.status == "RUNNING" || it.status == "QUEUED" }
-            .groupBy { it.batchId }
-            .entries
-            .map { (batchId, items) ->
-                DownloadHistoryBatch(
-                    batchId = batchId,
-                    latestCreatedAt = items.maxOf { it.createdAt },
-                    items = items,
-                    failedCount = items.count { it.status == "FAILED" },
-                )
-            }
-            .sortedByDescending { it.latestCreatedAt }
+            .sortedByDescending { it.createdAt }
     }
 
     val runningJob = jobs.firstOrNull { it.status == "RUNNING" }
@@ -254,48 +244,38 @@ internal fun DownloadsScreen(
                         }
                     }
 
-                    historyGroups.forEach { group ->
-                        item(key = "section-batch-${group.batchId}", contentType = "section-header") {
-                            DownloadSectionHeader(
-                                title = "${UiPresentation.formatBatchGroupLabel(group.latestCreatedAt)} · ${group.items.size} lagu",
-                                accent = MaterialTheme.colorScheme.onSurfaceVariant,
-                                actionLabel = if (group.failedCount > 0 && canDispatch) "Retry (${group.failedCount})" else null,
-                                onAction = { upgrade.onRetryFailed(group.batchId) },
-                            )
-                        }
-                        items(group.items, key = { it.id }, contentType = { "job" }) { job ->
-                            val matchedTrack = job.trackId?.let(tracksById::get)
-                            DownloadJobRow(
-                                job = job,
-                                matchedTrack = matchedTrack,
-                                queuedPosition = null,
-                                isCurrentlyPlayingTrack = matchedTrack != null && matchedTrack.id.toString() == currentPlayingTrackId,
-                                isPlaybackActive = isPlayingActive,
-                                selectionMode = selectionMode,
-                                selected = job.id in selectedIdSet,
-                                connected = connected,
-                                canDispatch = canDispatch,
-                                actionsBusy = upgrade.operationBusy,
-                                onToggleSelect = { toggleSelection(job.id) },
-                                onLongPress = {
-                                    if (!selectionMode) {
-                                        selectionMode = true
-                                        selectedIds = listOf(job.id)
-                                    } else {
-                                        toggleSelection(job.id)
-                                    }
-                                },
-                                onSkipItem = { upgrade.onSkipCurrentJob(job.id) },
-                                onMoveUpItem = { upgrade.onMoveQueuedUp(job.id) },
-                                onMoveToFrontItem = { upgrade.onMoveQueuedToFront(job.id) },
-                                onCancelItem = { upgrade.onCancelJob(job.id) },
-                                onRetryItem = { upgrade.onRetryJob(job.id) },
-                                onRequeueItem = { upgrade.onRequeueJob(job.id) },
-                                onRemoveItem = { upgrade.onRemoveJob(job.id) },
-                                onAddToPlaylist = { playlistPickerTracks = listOf(it) },
-                                onPlayTrack = onPlayTrack,
-                            )
-                        }
+                    items(historyJobs, key = { it.id }, contentType = { "job" }) { job ->
+                        val matchedTrack = job.trackId?.let(tracksById::get)
+                        DownloadJobRow(
+                            job = job,
+                            matchedTrack = matchedTrack,
+                            queuedPosition = null,
+                            isCurrentlyPlayingTrack = matchedTrack != null && matchedTrack.id.toString() == currentPlayingTrackId,
+                            isPlaybackActive = isPlayingActive,
+                            selectionMode = selectionMode,
+                            selected = job.id in selectedIdSet,
+                            connected = connected,
+                            canDispatch = canDispatch,
+                            actionsBusy = upgrade.operationBusy,
+                            onToggleSelect = { toggleSelection(job.id) },
+                            onLongPress = {
+                                if (!selectionMode) {
+                                    selectionMode = true
+                                    selectedIds = listOf(job.id)
+                                } else {
+                                    toggleSelection(job.id)
+                                }
+                            },
+                            onSkipItem = { upgrade.onSkipCurrentJob(job.id) },
+                            onMoveUpItem = { upgrade.onMoveQueuedUp(job.id) },
+                            onMoveToFrontItem = { upgrade.onMoveQueuedToFront(job.id) },
+                            onCancelItem = { upgrade.onCancelJob(job.id) },
+                            onRetryItem = { upgrade.onRetryJob(job.id) },
+                            onRequeueItem = { upgrade.onRequeueJob(job.id) },
+                            onRemoveItem = { upgrade.onRemoveJob(job.id) },
+                            onAddToPlaylist = { playlistPickerTracks = listOf(it) },
+                            onPlayTrack = onPlayTrack,
+                        )
                     }
                 }
             }
@@ -557,15 +537,19 @@ private fun DirectOperationCard(
                 }
             }
             if (ingest.busy) {
-                if (progress != null) {
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(999.dp)),
+                if (progress != null && progress > 0.01f) {
+                    FohDeterminateShimmerBar(
+                        progress = progress,
                         color = FohTheme.colors.safeAccent,
                         trackColor = FohTheme.colors.surfaceDeep,
+                        height = 4.dp,
                     )
                 } else {
-                    FohIndeterminateBar(color = FohTheme.colors.safeAccent, trackColor = FohTheme.colors.surfaceDeep)
+                    FohIndeterminateBar(
+                        color = FohTheme.colors.safeAccent,
+                        trackColor = FohTheme.colors.surfaceDeep,
+                        height = 4.dp,
+                    )
                 }
             }
             if (ingest.error && ingest.detail.isNotBlank()) {
@@ -634,11 +618,10 @@ private fun DownloadsSummaryCard(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         if (isDownloading) {
-                            FohSpinningIndicator(
-                                size = 10.dp,
-                                strokeWidth = 1.6.dp,
+                            FohWaveBarsIndicator(
                                 color = pillFg,
-                                trackColor = pillFg.copy(alpha = 0.25f),
+                                width = 12.dp,
+                                height = 10.dp,
                             )
                         }
                         Text(
@@ -664,13 +647,22 @@ private fun DownloadsSummaryCard(
             }
 
             if (activeQueue) {
-                val ratio = if (summary.total > 0) summary.completed.toFloat() / summary.total else 0f
-                LinearProgressIndicator(
-                    progress = { ratio.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(999.dp)),
-                    color = pillFg,
-                    trackColor = FohTheme.colors.surfaceDeep,
-                )
+                if (summary.completed == 0) {
+                    FohIndeterminateBar(
+                        color = pillFg,
+                        trackColor = FohTheme.colors.surfaceDeep,
+                        height = 4.dp,
+                    )
+                } else {
+                    val ratio = if (summary.total > 0) summary.completed.toFloat() / summary.total else 0f
+                    FohDeterminateShimmerBar(
+                        progress = ratio.coerceIn(0f, 1f),
+                        color = pillFg,
+                        trackColor = FohTheme.colors.surfaceDeep,
+                        height = 4.dp,
+                        shimmerEnabled = isDownloading,
+                    )
+                }
             }
 
             Row(
@@ -988,7 +980,7 @@ private fun DownloadJobRow(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        if (qualityBadge != null) {
+                        if (qualityBadge == "LOSSLESS") {
                             Surface(
                                 shape = RoundedCornerShape(5.dp),
                                 color = FohTheme.colors.safeBg,
@@ -1207,17 +1199,18 @@ private fun DownloadJobRow(
                 }
             }
             if (running) {
-                if (progress != null) {
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(999.dp)),
+                if (progress != null && progress > 0.01f) {
+                    FohDeterminateShimmerBar(
+                        progress = progress,
                         color = FohTheme.colors.safeAccent,
                         trackColor = FohTheme.colors.surfaceDeep,
+                        height = 4.dp,
                     )
                 } else {
                     FohIndeterminateBar(
                         color = FohTheme.colors.safeAccent,
                         trackColor = FohTheme.colors.surfaceDeep,
+                        height = 4.dp,
                     )
                 }
             }
@@ -1330,12 +1323,5 @@ private fun DownloadsBatchActionBar(
         }
     }
 }
-
-private data class DownloadHistoryBatch(
-    val batchId: String,
-    val latestCreatedAt: Long,
-    val items: List<DownloadJob>,
-    val failedCount: Int,
-)
 
 private data class DownloadPillStyle(val label: String, val bg: Color, val border: Color, val fg: Color)

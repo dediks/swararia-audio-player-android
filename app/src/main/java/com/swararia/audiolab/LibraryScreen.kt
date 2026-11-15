@@ -27,7 +27,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -164,7 +163,14 @@ internal fun LibraryPage(
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
             }
-            if (organizerBusy) item(key = "rename-progress", contentType = "progress") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            if (organizerBusy) {
+                item(key = "rename-progress", contentType = "progress") {
+                    FohIndeterminateBar(
+                        color = FohTheme.colors.safeAccent,
+                        trackColor = FohTheme.colors.surfaceDeep,
+                    )
+                }
+            }
 
             when (section) {
                 LibrarySectionTab.ALL_TRACKS -> {
@@ -606,11 +612,13 @@ private fun LibraryAudioRow(
     val activeContainer = when {
         highlighted -> FohTheme.colors.safeBg
         selectionChecked == true -> FohTheme.colors.safeBg
-        selected -> MaterialTheme.colorScheme.primaryContainer
+        selected && wantsPlay -> FohTheme.colors.safeBg
+        selected -> FohTheme.colors.warnBg
         else -> FohTheme.colors.surfaceCard
     }
     val borderStroke = when {
-        highlighted || selectionChecked == true || selected -> BorderStroke(1.dp, FohTheme.colors.safeBorder)
+        highlighted || selectionChecked == true || (selected && wantsPlay) -> BorderStroke(1.dp, FohTheme.colors.safeBorder)
+        selected -> BorderStroke(1.dp, FohTheme.colors.warnBorder)
         else -> BorderStroke(1.dp, FohTheme.colors.borderSubtle.copy(alpha = 0.7f))
     }
 
@@ -653,13 +661,23 @@ private fun LibraryAudioRow(
                 )
             }
 
-            TrackArtwork(track.artworkKey, Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)))
+            FohAnimatedTrackArtwork(
+                artworkKey = track.artworkKey,
+                active = selected,
+                playing = wantsPlay,
+                size = 46.dp,
+                cornerRadius = 9.dp,
+            )
 
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = UiPresentation.title(track.displayName),
                     style = MaterialTheme.typography.titleSmall,
-                    color = if (selected || highlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    color = when {
+                        (selected && wantsPlay) || highlighted -> FohTheme.colors.safeAccent
+                        selected -> FohTheme.colors.warnAccent
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -675,28 +693,11 @@ private fun LibraryAudioRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                val qualityBadge = UiPresentation.highBitrateBadge(track.displayName, track.sizeBytes, track.durationMs)
-                if (qualityBadge != null || selected || playlistBadge != null || reorderBadge != null) {
+                if (playlistBadge != null || reorderBadge != null) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (qualityBadge != null) {
-                            LibraryMiniBadge(
-                                label = qualityBadge,
-                                containerColor = FohTheme.colors.safeBg,
-                                borderColor = FohTheme.colors.safeBorder,
-                                contentColor = FohTheme.colors.safeAccent,
-                            )
-                        }
-                        if (selected) {
-                            LibraryMiniBadge(
-                                label = if (wantsPlay) "PLAYING" else "STANDBY",
-                                containerColor = FohTheme.colors.safeBg,
-                                borderColor = FohTheme.colors.safeBorder,
-                                contentColor = FohTheme.colors.safeAccent,
-                            )
-                        }
                         if (reorderBadge != null) {
                             LibraryMiniBadge(
                                 label = reorderBadge,
@@ -755,10 +756,6 @@ private fun LibraryAudioRow(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     if (selected) {
-                        CompactSignalVisualizer(
-                            playing = wantsPlay,
-                            barCount = 4,
-                        )
                         CompactCircleButton(
                             icon = if (wantsPlay) UiIcons.Pause else UiIcons.Play,
                             description = if (wantsPlay) "Jeda audio" else "Putar audio",
@@ -766,8 +763,8 @@ private fun LibraryAudioRow(
                             enabled = connected,
                             size = 32.dp,
                             iconSize = 16.dp,
-                            containerColor = FohTheme.colors.safeBg,
-                            contentColor = FohTheme.colors.safeAccent,
+                            containerColor = if (wantsPlay) FohTheme.colors.safeBg else FohTheme.colors.warnBg,
+                            contentColor = if (wantsPlay) FohTheme.colors.safeAccent else FohTheme.colors.warnAccent,
                         )
                         CompactCircleButton(
                             icon = UiIcons.ChevronUp,
@@ -779,29 +776,18 @@ private fun LibraryAudioRow(
                             containerColor = FohTheme.colors.surfaceDeep,
                             contentColor = FohTheme.colors.safeAccent,
                         )
-                    } else {
-                        Surface(
-                            onClick = onCue,
-                            enabled = connected,
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (connected) FohTheme.colors.warnBg else FohTheme.colors.surfaceDeep,
-                            border = BorderStroke(
-                                1.dp,
-                                if (connected) FohTheme.colors.warnBorder else FohTheme.colors.borderSubtle,
-                            ),
-                        ) {
-                            Text(
-                                text = "Cue",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (connected) FohTheme.colors.warnAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            )
-                        }
                     }
                     Box {
                         GlyphButton(UiIcons.More, "Menu audio ${UiPresentation.title(track.displayName)}", { menu = true })
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            if (!selected) {
+                                DropdownMenuItem(
+                                    text = { Text("Muat ke Standby (Cue)") },
+                                    leadingIcon = { Icon(UiIcons.Next, null) },
+                                    enabled = connected,
+                                    onClick = { menu = false; onCue() },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Masukkan ke playlist…") },
                                 leadingIcon = { Icon(UiIcons.Queue, null) },

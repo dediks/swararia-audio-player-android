@@ -262,25 +262,55 @@ fun AddAudioScreen(
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = FohTheme.colors.surfaceCard,
-                    border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
+                    border = BorderStroke(1.dp, FohTheme.colors.safeBorder.copy(alpha = 0.7f)),
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        CircularProgressIndicatorCompact()
-                        Text(
-                            text = when {
-                                search.loadingMore -> "Memuat hasil berikutnya…"
-                                inPlaylist -> "Memuat isi playlist…"
-                                else -> "Mencari ${search.kind.label.lowercase()} di ${search.provider.label}…"
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f),
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            FohSpinningIndicator(
+                                size = 20.dp,
+                                strokeWidth = 2.4.dp,
+                                color = FohTheme.colors.safeAccent,
+                            )
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = when {
+                                        search.loadingMore -> "Memuat hasil berikutnya…"
+                                        inPlaylist -> "Memuat isi playlist…"
+                                        else -> "Mencari ${search.kind.label.lowercase()} di ${search.provider.label}…"
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = "Menyusun metadata & kualitas audio…",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            TextButton(onClick = onCancelSearch) { Text("Batalkan") }
+                        }
+                        FohIndeterminateBar(
+                            color = FohTheme.colors.safeAccent,
+                            trackColor = FohTheme.colors.surfaceDeep,
+                            height = 4.dp,
                         )
-                        TextButton(onClick = onCancelSearch) { Text("Batalkan") }
                     }
+                }
+            }
+            if (search.busy && sorted.isEmpty() && !search.loadingMore) {
+                items(4, key = { "search-skeleton-$it" }, contentType = { "skeleton" }) {
+                    SearchSkeletonRow()
                 }
             }
             search.error?.let { error ->
@@ -376,18 +406,31 @@ fun AddAudioScreen(
                 )
             }
             if (search.hasMore) item(key = "more", contentType = "more") {
-                OutlinedButton(
-                    onClick = actions.loadMore,
-                    enabled = idle,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                    shape = RoundedCornerShape(14.dp),
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = actions.loadMore,
+                        enabled = idle,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        if (search.loadingMore) {
+                            FohSpinningIndicator(
+                                size = 18.dp,
+                                strokeWidth = 2.2.dp,
+                                color = FohTheme.colors.safeAccent,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Memuat hasil berikutnya…")
+                        } else {
+                            Text("Tampilkan lebih banyak")
+                        }
+                    }
                     if (search.loadingMore) {
-                        CircularProgressIndicatorCompact()
-                        Spacer(Modifier.width(8.dp))
-                        Text("Memuat…")
-                    } else {
-                        Text("Tampilkan lebih banyak")
+                        FohIndeterminateBar(
+                            color = FohTheme.colors.safeAccent,
+                            trackColor = FohTheme.colors.surfaceDeep,
+                            height = 4.dp,
+                        )
                     }
                 }
             }
@@ -734,6 +777,40 @@ private fun SearchControlsPanel(
 }
 
 @Composable
+private fun SearchSkeletonRow() {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = FohTheme.colors.surfaceCard,
+        border = BorderStroke(1.dp, FohTheme.colors.borderSubtle.copy(alpha = 0.65f)),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            FohShimmerBox(
+                modifier = Modifier.size(52.dp),
+                cornerRadius = 10.dp,
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FohShimmerBox(
+                    modifier = Modifier.fillMaxWidth(0.74f).height(13.dp),
+                    cornerRadius = 6.dp,
+                )
+                FohShimmerBox(
+                    modifier = Modifier.fillMaxWidth(0.46f).height(10.dp),
+                    cornerRadius = 5.dp,
+                )
+            }
+            FohShimmerBox(
+                modifier = Modifier.size(34.dp),
+                cornerRadius = 17.dp,
+            )
+        }
+    }
+}
+
+@Composable
 private fun SearchIngestBanner(
     stage: String,
     cancelable: Boolean,
@@ -746,23 +823,37 @@ private fun SearchIngestBanner(
         color = FohTheme.colors.safeBg,
         border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
     ) {
-        Row(
+        Column(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            CircularProgressIndicatorCompact()
-            Column(Modifier.weight(1f)) {
-                Text(stage, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    "Pencarian baru menunggu proses selesai · Ketuk untuk lihat",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                FohSpinningIndicator(
+                    size = 20.dp,
+                    strokeWidth = 2.4.dp,
+                    color = FohTheme.colors.safeAccent,
                 )
+                Column(Modifier.weight(1f)) {
+                    Text(stage, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        "Pencarian baru menunggu proses selesai · Ketuk untuk lihat",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (cancelable) {
+                    TextButton(onClick = onCancel) { Text("Batalkan") }
+                }
             }
-            if (cancelable) {
-                TextButton(onClick = onCancel) { Text("Batalkan") }
-            }
+            FohIndeterminateBar(
+                color = FohTheme.colors.safeAccent,
+                trackColor = FohTheme.colors.surfaceDeep,
+                height = 4.dp,
+            )
         }
     }
 }

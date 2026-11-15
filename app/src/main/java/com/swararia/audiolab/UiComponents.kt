@@ -17,12 +17,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import kotlin.math.PI
+import kotlin.math.sin
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
@@ -352,8 +357,8 @@ internal fun FohFilterChip(
 }
 
 /**
- * Smooth frame-driven rotating loading indicator with a fading comet arc and leading spark.
- * Uses frame timing while active on screen so rotation stays fluid even if OS animator scale is 0.
+ * Dual counter-rotating orbital loading indicator driven by frame timing.
+ * Keeps motion unmistakably alive even at compact (16-20 dp) icon sizes or OS animator scale 0.
  */
 @Composable
 internal fun FohSpinningIndicator(
@@ -364,24 +369,26 @@ internal fun FohSpinningIndicator(
     trackColor: Color = FohTheme.colors.borderSubtle.copy(alpha = 0.65f),
     periodMs: Long = 850L,
 ) {
-    var angle by remember { mutableFloatStateOf(0f) }
+    var elapsedMs by remember { mutableLongStateOf(0L) }
     LaunchedEffect(periodMs) {
         val startNanos = withFrameNanos { it }
-        val safePeriodMs = periodMs.coerceAtLeast(300L)
         while (true) {
             withFrameNanos { nowNanos ->
-                val elapsedMs = (nowNanos - startNanos) / 1_000_000L
-                angle = ((elapsedMs % safePeriodMs).toFloat() / safePeriodMs.toFloat()) * 360f
+                elapsedMs = (nowNanos - startNanos) / 1_000_000L
             }
         }
     }
-    val sweepBrush = remember(color) {
+    val safePeriodMs = periodMs.coerceAtLeast(300L)
+    val outerAngle = ((elapsedMs % safePeriodMs).toFloat() / safePeriodMs.toFloat()) * 360f
+    val innerPeriodMs = ((safePeriodMs * 100L) / 145L).coerceAtLeast(240L)
+    val innerAngle = -((elapsedMs % innerPeriodMs).toFloat() / innerPeriodMs.toFloat()) * 360f
+    val outerBrush = remember(color) {
         Brush.sweepGradient(
             0.00f to Color.Transparent,
-            0.08f to color.copy(alpha = 0.08f),
-            0.45f to color.copy(alpha = 0.45f),
-            0.72f to color,
-            0.79f to color,
+            0.08f to color.copy(alpha = 0.10f),
+            0.42f to color.copy(alpha = 0.50f),
+            0.70f to color,
+            0.78f to color,
             0.84f to Color.Transparent,
             1.00f to Color.Transparent,
         )
@@ -391,7 +398,7 @@ internal fun FohSpinningIndicator(
         val inset = strokePx / 2f
         val arcSize = Size(this.size.width - strokePx, this.size.height - strokePx)
         val topLeft = Offset(inset, inset)
-        val radius = arcSize.width / 2f
+        val outerRadius = arcSize.width / 2f
         drawArc(
             color = trackColor,
             startAngle = 0f,
@@ -401,21 +408,81 @@ internal fun FohSpinningIndicator(
             size = arcSize,
             style = Stroke(width = strokePx),
         )
-        rotate(degrees = angle) {
+        rotate(degrees = outerAngle) {
             drawArc(
-                brush = sweepBrush,
-                startAngle = 12f,
-                sweepAngle = 258f,
+                brush = outerBrush,
+                startAngle = 14f,
+                sweepAngle = 248f,
                 useCenter = false,
                 topLeft = topLeft,
                 size = arcSize,
                 style = Stroke(width = strokePx, cap = StrokeCap.Round),
             )
-            val tipCenter = Offset(x = center.x, y = center.y - radius)
             drawCircle(
-                color = Color.White.copy(alpha = 0.85f),
+                color = Color.White.copy(alpha = 0.90f),
                 radius = strokePx * 0.45f,
-                center = tipCenter,
+                center = Offset(x = center.x, y = center.y - outerRadius),
+            )
+        }
+        val innerRadius = outerRadius * 0.54f
+        if (innerRadius > strokePx * 1.15f) {
+            val innerSize = Size(innerRadius * 2f, innerRadius * 2f)
+            val innerTopLeft = Offset(center.x - innerRadius, center.y - innerRadius)
+            val innerStroke = (strokePx * 0.78f).coerceAtLeast(1.4f)
+            rotate(degrees = innerAngle) {
+                drawArc(
+                    color = color.copy(alpha = 0.78f),
+                    startAngle = 0f,
+                    sweepAngle = 135f,
+                    useCenter = false,
+                    topLeft = innerTopLeft,
+                    size = innerSize,
+                    style = Stroke(width = innerStroke, cap = StrokeCap.Round),
+                )
+                drawCircle(
+                    color = color.copy(alpha = 0.95f),
+                    radius = innerStroke * 0.45f,
+                    center = Offset(x = center.x + innerRadius, y = center.y),
+                )
+            }
+        }
+    }
+}
+
+/** Compact 3-bar wave equalizer indicator driven by frame timing for active status pills. */
+@Composable
+internal fun FohWaveBarsIndicator(
+    modifier: Modifier = Modifier,
+    color: Color = FohTheme.colors.safeAccent,
+    width: Dp = 13.dp,
+    height: Dp = 11.dp,
+    periodMs: Long = 860L,
+) {
+    var phaseRad by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(periodMs) {
+        val startNanos = withFrameNanos { it }
+        val safePeriodMs = periodMs.coerceAtLeast(360L)
+        while (true) {
+            withFrameNanos { nowNanos ->
+                val elapsedMs = (nowNanos - startNanos) / 1_000_000L
+                phaseRad = ((elapsedMs % safePeriodMs).toFloat() / safePeriodMs.toFloat()) * (2.0 * PI).toFloat()
+            }
+        }
+    }
+    Canvas(modifier = modifier.size(width = width, height = height)) {
+        val barCount = 3
+        val gap = this.size.width * 0.16f
+        val barWidth = ((this.size.width - gap * (barCount - 1)) / barCount).coerceAtLeast(2f)
+        val radius = CornerRadius(barWidth / 2f, barWidth / 2f)
+        for (index in 0 until barCount) {
+            val wave = 0.5f + 0.5f * sin((phaseRad + index * 2.094f).toDouble()).toFloat()
+            val barHeight = this.size.height * (0.30f + 0.70f * wave)
+            val left = index * (barWidth + gap)
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(left, this.size.height - barHeight),
+                size = Size(barWidth, barHeight),
+                cornerRadius = radius,
             )
         }
     }
@@ -465,6 +532,261 @@ internal fun FohIndeterminateBar(
             cornerRadius = CornerRadius(size.height / 2f, size.height / 2f),
         )
     }
+}
+
+/**
+ * Determinate horizontal progress bar with a continuous frame-driven light sweep over the active fill
+ * so slow or paused increments still look unmistakably alive.
+ */
+@Composable
+internal fun FohDeterminateShimmerBar(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    color: Color = FohTheme.colors.safeAccent,
+    trackColor: Color = FohTheme.colors.surfaceDeep,
+    height: Dp = 5.dp,
+    shimmerEnabled: Boolean = true,
+    periodMs: Long = 1350L,
+) {
+    val clamped = progress.coerceIn(0f, 1f)
+    var shimmerPhase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(shimmerEnabled, clamped > 0.01f, periodMs) {
+        if (!shimmerEnabled || clamped <= 0.01f) {
+            shimmerPhase = 0f
+            return@LaunchedEffect
+        }
+        val startNanos = withFrameNanos { it }
+        val safePeriodMs = periodMs.coerceAtLeast(450L)
+        while (true) {
+            withFrameNanos { nowNanos ->
+                val elapsedMs = (nowNanos - startNanos) / 1_000_000L
+                shimmerPhase = ((elapsedMs % safePeriodMs).toFloat() / safePeriodMs.toFloat())
+            }
+        }
+    }
+    val highlightBrush = remember(color) {
+        Brush.horizontalGradient(
+            0.0f to Color.Transparent,
+            0.5f to Color.White.copy(alpha = 0.55f),
+            1.0f to Color.Transparent,
+        )
+    }
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(999.dp)),
+    ) {
+        drawRect(color = trackColor)
+        val fillW = size.width * clamped
+        if (fillW > 0.5f) {
+            val corner = CornerRadius(size.height / 2f, size.height / 2f)
+            drawRoundRect(
+                color = color,
+                topLeft = Offset.Zero,
+                size = Size(fillW, size.height),
+                cornerRadius = corner,
+            )
+            if (shimmerEnabled) {
+                val bandW = (size.width * 0.28f).coerceAtMost(fillW.coerceAtLeast(12f))
+                val travel = fillW + bandW
+                val left = (-bandW + shimmerPhase * travel).coerceIn(-bandW, fillW)
+                val visibleLeft = left.coerceAtLeast(0f)
+                val visibleRight = (left + bandW).coerceAtMost(fillW)
+                if (visibleRight > visibleLeft) {
+                    drawRoundRect(
+                        brush = highlightBrush,
+                        topLeft = Offset(visibleLeft, 0f),
+                        size = Size(visibleRight - visibleLeft, size.height),
+                        cornerRadius = corner,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Frame-driven gliding shimmer block for skeleton loading placeholders. */
+@Composable
+internal fun FohShimmerBox(
+    modifier: Modifier = Modifier,
+    cornerRadius: Dp = 8.dp,
+    baseColor: Color = FohTheme.colors.surfaceDeep,
+    highlightColor: Color = FohTheme.colors.borderSubtle.copy(alpha = 0.85f),
+    periodMs: Long = 1250L,
+) {
+    var phase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(periodMs) {
+        val startNanos = withFrameNanos { it }
+        val safePeriodMs = periodMs.coerceAtLeast(450L)
+        while (true) {
+            withFrameNanos { nowNanos ->
+                val elapsedMs = (nowNanos - startNanos) / 1_000_000L
+                phase = ((elapsedMs % safePeriodMs).toFloat() / safePeriodMs.toFloat())
+            }
+        }
+    }
+    Canvas(modifier = modifier.clip(RoundedCornerShape(cornerRadius))) {
+        drawRect(color = baseColor)
+        val bandW = size.width * 0.45f
+        val startX = -bandW + phase * (size.width + bandW * 2f)
+        drawRect(
+            brush = Brush.linearGradient(
+                colors = listOf(Color.Transparent, highlightColor, Color.Transparent),
+                start = Offset(startX, 0f),
+                end = Offset(startX + bandW, size.height * 0.65f),
+            ),
+            size = size,
+        )
+    }
+}
+
+/**
+ * Square-rounded track artwork with Orbit Glow indicator along the frame edge:
+ * - Active & playing: emerald comet arc + tip spark orbiting the rounded perimeter with breathing halo.
+ * - Active & paused (Standby): steady warm amber frame outline.
+ */
+@Composable
+internal fun FohAnimatedTrackArtwork(
+    artworkKey: String?,
+    active: Boolean,
+    playing: Boolean,
+    modifier: Modifier = Modifier,
+    size: Dp = 46.dp,
+    cornerRadius: Dp = 9.dp,
+) {
+    var orbitPhase by remember { mutableFloatStateOf(0f) }
+    var glowPulse by remember { mutableFloatStateOf(0.5f) }
+    LaunchedEffect(active, playing) {
+        if (!active || !playing) {
+            orbitPhase = 0f
+            glowPulse = 0.5f
+            return@LaunchedEffect
+        }
+        val startNanos = withFrameNanos { it }
+        while (true) {
+            withFrameNanos { nowNanos ->
+                val elapsedMs = (nowNanos - startNanos) / 1_000_000L
+                orbitPhase = ((elapsedMs % 2100L).toFloat() / 2100f)
+                val pulseAngle = ((elapsedMs % 1500L).toFloat() / 1500f) * (2.0 * PI).toFloat()
+                glowPulse = 0.5f + 0.5f * sin(pulseAngle.toDouble()).toFloat()
+            }
+        }
+    }
+
+    val safeAccent = FohTheme.colors.safeAccent
+    val warnAccent = FohTheme.colors.warnAccent
+    val perimeterPath = remember { Path() }
+    val perimeterMeasure = remember { PathMeasure() }
+    val cometSegmentPath = remember { Path() }
+    val innerArtSize = size - 4.dp
+    val innerCorner = (cornerRadius - 1.5.dp).coerceAtLeast(4.dp)
+
+    Box(
+        modifier = modifier.size(size),
+        contentAlignment = Alignment.Center,
+    ) {
+        TrackArtwork(
+            artworkKey = artworkKey,
+            modifier = Modifier
+                .size(innerArtSize)
+                .clip(RoundedCornerShape(innerCorner)),
+        )
+        if (active) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokePx = if (playing) 2.2.dp.toPx() else 1.8.dp.toPx()
+                val inset = strokePx / 2f
+                val cornerPx = cornerRadius.toPx()
+                if (playing) {
+                    val corner = CornerRadius(cornerPx, cornerPx)
+                    drawRoundRect(
+                        color = safeAccent.copy(alpha = 0.18f + 0.16f * glowPulse),
+                        topLeft = Offset(inset, inset),
+                        size = Size(this.size.width - strokePx, this.size.height - strokePx),
+                        cornerRadius = corner,
+                        style = Stroke(width = strokePx + 2.4.dp.toPx()),
+                    )
+                    perimeterPath.reset()
+                    perimeterPath.addRoundRect(
+                        RoundRect(
+                            left = inset,
+                            top = inset,
+                            right = this.size.width - inset,
+                            bottom = this.size.height - inset,
+                            cornerRadius = corner,
+                        ),
+                    )
+                    perimeterMeasure.setPath(perimeterPath, forceClosed = false)
+                    val totalLen = perimeterMeasure.length
+                    if (totalLen > 0f) {
+                        val headDist = orbitPhase * totalLen
+                        drawWrappedSegment(
+                            measure = perimeterMeasure,
+                            segmentPath = cometSegmentPath,
+                            totalLen = totalLen,
+                            start = headDist - totalLen * 0.44f,
+                            end = headDist - totalLen * 0.16f,
+                            color = safeAccent.copy(alpha = 0.42f),
+                            strokeWidth = strokePx,
+                        )
+                        drawWrappedSegment(
+                            measure = perimeterMeasure,
+                            segmentPath = cometSegmentPath,
+                            totalLen = totalLen,
+                            start = headDist - totalLen * 0.16f,
+                            end = headDist,
+                            color = safeAccent,
+                            strokeWidth = strokePx,
+                        )
+                        val tipPos = perimeterMeasure.getPosition(headDist)
+                        drawCircle(
+                            color = safeAccent.copy(alpha = 0.42f),
+                            radius = strokePx * 1.35f,
+                            center = tipPos,
+                        )
+                        drawCircle(
+                            color = Color.White.copy(alpha = 0.95f),
+                            radius = strokePx * 0.62f,
+                            center = tipPos,
+                        )
+                    }
+                } else {
+                    drawRoundRect(
+                        color = warnAccent.copy(alpha = 0.85f),
+                        topLeft = Offset(inset, inset),
+                        size = Size(this.size.width - strokePx, this.size.height - strokePx),
+                        cornerRadius = CornerRadius(cornerPx, cornerPx),
+                        style = Stroke(width = strokePx),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawWrappedSegment(
+    measure: PathMeasure,
+    segmentPath: Path,
+    totalLen: Float,
+    start: Float,
+    end: Float,
+    color: Color,
+    strokeWidth: Float,
+) {
+    val normalizedStart = ((start % totalLen) + totalLen) % totalLen
+    val normalizedEnd = ((end % totalLen) + totalLen) % totalLen
+    segmentPath.reset()
+    if (normalizedStart < normalizedEnd) {
+        measure.getSegment(normalizedStart, normalizedEnd, segmentPath, startWithMoveTo = true)
+    } else {
+        measure.getSegment(normalizedStart, totalLen, segmentPath, startWithMoveTo = true)
+        measure.getSegment(0f, normalizedEnd, segmentPath, startWithMoveTo = true)
+    }
+    drawPath(
+        path = segmentPath,
+        color = color,
+        style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+    )
 }
 
 /** Compact 18 dp spinner shared by status banners in Library, Search, and Downloads. */

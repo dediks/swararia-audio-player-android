@@ -74,7 +74,7 @@ fun SearchPreviewPlayer(state: PreviewState, controller: MediaController?, onSto
                     }, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     Text(state.hit?.title.orEmpty(), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                if (waiting) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                if (waiting) FohSpinningIndicator(size = 22.dp, strokeWidth = 2.4.dp)
                 else if (active) GlyphButton(if (playing) UiIcons.Pause else UiIcons.Play,
                     if (playing) "Pause Preview" else "Play Preview", {
                         if (player?.isCommandAvailable(Player.COMMAND_PLAY_PAUSE) == true) {
@@ -83,7 +83,7 @@ fun SearchPreviewPlayer(state: PreviewState, controller: MediaController?, onSto
                     })
                 GlyphButton(UiIcons.Close, "Stop Preview", onStop)
             }
-            if (waiting) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (waiting) FohIndeterminateBar(height = 4.dp)
             state.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                 TextButton(onClick = onRetry, enabled = !state.loading) { Text("Retry") }

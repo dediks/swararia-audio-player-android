@@ -639,10 +639,11 @@ private fun TrackDownloadActionButton(
                     .clickable(onClick = onCancel),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator(
-                    strokeWidth = 2.dp,
+                FohSpinningIndicator(
+                    size = 18.dp,
+                    strokeWidth = 2.2.dp,
                     color = activeColor,
-                    modifier = Modifier.size(17.dp),
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 )
             }
         }
@@ -656,13 +657,22 @@ private fun TrackDownloadActionButton(
                     .clickable(onClick = onCancel),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator(
-                    progress = { pct },
-                    strokeWidth = 2.5.dp,
-                    color = activeColor,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.size(20.dp),
-                )
+                if (pct > 0.01f) {
+                    CircularProgressIndicator(
+                        progress = { pct },
+                        strokeWidth = 2.5.dp,
+                        color = activeColor,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                } else {
+                    FohSpinningIndicator(
+                        size = 20.dp,
+                        strokeWidth = 2.4.dp,
+                        color = activeColor,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                }
             }
         }
         DesktopRemoteTrackDownload.Status.SAVED,
@@ -764,7 +774,11 @@ internal fun FohTransportDock(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             if (isFading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(3.dp))
+                FohIndeterminateBar(
+                    height = 3.dp,
+                    color = FohTheme.colors.warnAccent,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
             } else {
                 LinearProgressIndicator(
                     progress = { progress },
@@ -1213,7 +1227,11 @@ private fun ExpandedFohTransportBody(
                     )
                 }
                 if (isFading) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)))
+                    FohIndeterminateBar(
+                        color = FohTheme.colors.warnAccent,
+                        trackColor = FohTheme.colors.surfaceDeep,
+                        height = 4.dp,
+                    )
                 }
             } else if (state.fresh && state.role == "control" && state.playback?.online == true) {
                 Text(
@@ -1378,7 +1396,13 @@ internal fun DisconnectedPairingSection(
                 Spacer(Modifier.width(8.dp))
                 Text(if (scanning) "Menyiapkan Scanner…" else "Pindai QR Perangkat")
             }
-            if (scanning || busy) LinearProgressIndicator(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)))
+            if (scanning || busy) {
+                FohIndeterminateBar(
+                    color = FohTheme.colors.safeAccent,
+                    trackColor = FohTheme.colors.surfaceDeep,
+                    height = 4.dp,
+                )
+            }
             scanFeedback?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = foh.alertAccent)
             }
@@ -1525,7 +1549,11 @@ internal fun PendingApprovalCard(state: DesktopRemoteUiState, onRefresh: () -> U
                 fontWeight = FontWeight.Bold,
                 color = foh.warnAccent,
             )
-            LinearProgressIndicator(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)))
+            FohIndeterminateBar(
+                color = foh.warnAccent,
+                trackColor = FohTheme.colors.surfaceDeep,
+                height = 4.dp,
+            )
             Text(
                 if (state.remotePhase == RemotePhase.CONNECTING) {
                     "Memverifikasi identitas TLS dan mendaftarkan sesi pairing."
