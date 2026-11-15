@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -739,13 +740,10 @@ private fun ServerInviteCard(
     val colors = MaterialTheme.colorScheme
     val foh = FohTheme.colors
     var inviteTab by rememberSaveable { mutableIntStateOf(0) }
-    val showBothTabs = pairingUri != null && webUrl != null
-    val effectiveTab = when {
-        showBothTabs -> inviteTab
-        pairingUri != null -> 0
-        else -> 1
-    }
+    val showBothTabs = webUrl != null
+    val effectiveTab = if (showBothTabs) inviteTab else 0
     val remainingSec = rememberRemainingSeconds(if (effectiveTab == 0) nativeExpiresAt else webExpiresAt)
+    val showStatusPill = (effectiveTab == 0 && pairingUri != null) || (effectiveTab == 1 && webPin != null)
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -766,13 +764,13 @@ private fun ServerInviteCard(
                     modifier = Modifier.weight(1f),
                 )
                 StatusPill(
-                    text = if (remainingSec > 0) {
-                        if (effectiveTab == 0) "${remainingSec}s" else "PIN ${remainingSec}s"
-                    } else {
-                        "Kedaluwarsa"
+                    text = when {
+                        !showStatusPill -> "Terpakai / Kosong"
+                        remainingSec > 0 -> if (effectiveTab == 0) "${remainingSec}s" else "PIN ${remainingSec}s"
+                        else -> "Kedaluwarsa"
                     },
-                    active = remainingSec > 0,
-                    warn = remainingSec <= 0,
+                    active = showStatusPill && remainingSec > 0,
+                    warn = !showStatusPill || remainingSec <= 0,
                 )
             }
 
@@ -843,7 +841,55 @@ private fun ServerInviteCard(
                         Text("QR Baru", maxLines = 1, softWrap = false)
                     }
                 }
+            } else if (effectiveTab == 0) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = foh.surfaceDeep,
+                    border = BorderStroke(1.dp, foh.borderSubtle),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            text = "QR undangan aplikasi terpakai atau kedaluwarsa",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onSurface,
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            text = "Setiap QR aplikasi hanya berlaku satu kali pairing. Buat QR baru untuk menautkan perangkat Swararia Android lain.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        Button(onClick = onRefreshInvite) {
+                            Text("Buat QR Undangan Baru")
+                        }
+                    }
+                }
             } else if (webUrl != null) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    QrCodeBox(
+                        payload = webUrl,
+                        modifier = Modifier
+                            .size(168.dp)
+                            .clip(RoundedCornerShape(14.dp)),
+                    )
+                    Text(
+                        text = "Pindai QR untuk membuka URL browser lokal di perangkat FOH lain.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = foh.surfaceDeep,

@@ -34,7 +34,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -183,9 +182,10 @@ internal fun YoutubeMusicSignInDialog(
                 }
 
                 if (progress in 1..99) {
-                    LinearProgressIndicator(
-                        progress = { progress / 100f },
+                    FohDeterminateShimmerBar(
+                        progress = progress / 100f,
                         modifier = Modifier.fillMaxWidth(),
+                        height = 3.dp,
                     )
                 } else {
                     HorizontalDivider()

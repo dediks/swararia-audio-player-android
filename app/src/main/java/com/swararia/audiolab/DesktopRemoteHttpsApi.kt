@@ -82,9 +82,11 @@ interface DesktopRemoteApi {
     suspend fun commandStatus(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, id: String): DesktopRemoteCommand
 }
 
-class DesktopRemoteHttpsApi : DesktopRemoteApi {
+class DesktopRemoteHttpsApi(
+    private val clientLabelProvider: () -> String = { defaultAndroidClientLabel() },
+) : DesktopRemoteApi {
     override suspend fun pair(pairing: DesktopRemotePairing) = DesktopRemoteJson.grant(
-        request(pairing, pairing.invitation(), "/v1/pair", "{\"label\":\"Swararia Android\"}".toByteArray(), 202))
+        request(pairing, pairing.invitation(), "/v1/pair", DesktopRemoteJson.pairBody(clientLabelProvider()), 202))
     override suspend fun session(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
         DesktopRemoteJson.approval(request(pairing, grant.authorization(), "/v1/session"))
     override suspend fun capabilities(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
@@ -416,4 +418,20 @@ class DesktopRemoteHttpsApi : DesktopRemoteApi {
             continuation.invokeOnCancellation { abortTransport(); worker.cancel() }
         }
     }
+}
+
+private fun defaultAndroidClientLabel(): String {
+    val manufacturer = android.os.Build.MANUFACTURER?.trim().orEmpty()
+    val model = android.os.Build.MODEL?.trim().orEmpty()
+    val prettyManufacturer = manufacturer
+        .lowercase(java.util.Locale.ROOT)
+        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }
+    val combined = when {
+        model.isBlank() && prettyManufacturer.isBlank() -> "Swararia Android"
+        model.isBlank() -> prettyManufacturer
+        prettyManufacturer.isBlank() -> model
+        model.startsWith(prettyManufacturer, ignoreCase = true) -> model
+        else -> "$prettyManufacturer $model"
+    }
+    return DesktopRemoteJson.sanitizePairLabel(combined)
 }

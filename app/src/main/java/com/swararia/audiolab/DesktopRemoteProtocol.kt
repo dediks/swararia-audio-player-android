@@ -331,6 +331,18 @@ object DesktopRemoteJson {
         if (status !in setOf("accepted", "pending", "applied", "rejected", "expired", "unknown")) throw DesktopRemoteFailure()
         return DesktopRemoteCommand(id(node, "command_id"), status)
     }
+    fun sanitizePairLabel(raw: String): String {
+        val cleaned = buildString(raw.length) {
+            for (ch in raw) {
+                if (!ch.isISOControl()) append(ch)
+            }
+        }.trim().take(80)
+        return cleaned.ifEmpty { "Swararia Android" }
+    }
+
+    fun pairBody(rawLabel: String): ByteArray =
+        mapper.writeValueAsBytes(mapOf("label" to sanitizePairLabel(rawLabel)))
+
     fun commandBody(action: String, key: String, trackId: String? = null, autoPlay: Boolean = false, groupId: String? = null): ByteArray {
         if (action !in allowedCommands || !key.matches(Regex("[A-Za-z0-9_-]{8,80}"))) throw DesktopRemoteFailure()
         if (action == "select_track") {

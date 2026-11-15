@@ -237,5 +237,35 @@ class AndroidRemoteServerEngineTest {
         }
         assertEquals("master_unavailable", previewErr.code)
     }
+
+    @Test
+    fun pairNativeLocksOutAfterFiveFailedAttempts() {
+        var nowSec = 1_700_000_000.0
+        val engine = AndroidRemoteServerEngine(clock = { nowSec })
+        val tls = AndroidRemoteTlsIdentity.generate("127.0.0.1")
+        engine.activate("127.0.0.1", 8443, tls.fingerprintBase64Url, tls.formattedHexColon())
+
+        val validInvite = engine.issueNativeInvite()
+        val wrongInvite = "WrongInviteTokenValue0123456789ABCDEFabcdef"
+        repeat(AndroidRemoteServerEngine.NATIVE_INVITE_MAX_FAILURES) {
+            val err = assertThrows(RemoteServerError::class.java) {
+                engine.pairNative(wrongInvite, "FOH Tablet")
+            }
+            assertEquals("invalid_invite", err.code)
+            assertEquals(401, err.httpStatus)
+        }
+
+        // Valid invite must now be invalidated / locked out until re-issued.
+        val lockedErr = assertThrows(RemoteServerError::class.java) {
+            engine.pairNative(validInvite, "FOH Tablet")
+        }
+        assertEquals("invalid_invite", lockedErr.code)
+        assertEquals(401, lockedErr.httpStatus)
+
+        // Re-issuing resets failure counter cleanly.
+        val freshInvite = engine.issueNativeInvite()
+        val paired = engine.pairNative(freshInvite, "FOH Tablet")
+        assertEquals("pending", paired["status"])
+    }
 }
 

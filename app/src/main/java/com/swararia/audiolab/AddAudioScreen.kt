@@ -134,7 +134,7 @@ fun AddAudioScreen(
                 search.error != null ||
                 search.busy
             )
-        if (shouldSwitch && activeQuery != null) {
+        if (shouldSwitch) {
             if (query != activeQuery) query = activeQuery
             executeSearch(activeQuery, nextProvider, nextKind, nextSort, true)
         } else if (nextKind == SearchKind.PLAYLISTS && nextSort != search.sort) {

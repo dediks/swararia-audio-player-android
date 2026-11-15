@@ -9,7 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -41,7 +41,7 @@ internal fun DeleteAudioDialog(track: AudioTrack, busy: Boolean, onDismiss: () -
                 }
             }
             Text("File salinan yang dikelola aplikasi di HP akan dihapus permanen. Sumber import asli tetap aman.")
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (busy) FohIndeterminateBar(Modifier.fillMaxWidth(), height = 4.dp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Cancel") }
                 Button(onClick = { if (!busy) onDelete(track, onDismiss) }, enabled = !busy,
@@ -92,7 +92,7 @@ internal fun DeleteBatchAudioDialog(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (busy) FohIndeterminateBar(Modifier.fillMaxWidth(), height = 4.dp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(
                     onClick = onDismiss,
@@ -122,10 +122,10 @@ internal fun DownloadLinkDialog(
 ) {
     var url by remember(initialUrl) { mutableStateOf(initialUrl) }
     var authorized by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     val validUrl = remember(url) { runCatching { DownloadQueueRules.validatedPublicSourceUrl(url) }.getOrNull() }
     val pasteFromClipboard = {
-        clipboard.getText()?.text?.let {
+        readPlainTextFromClipboard(context)?.let {
             url = it.trim()
             authorized = false
         }
@@ -290,7 +290,7 @@ internal fun RenameAudioDialog(
                 if (validated.isSuccess) Text("Nama file: ${validated.getOrNull()}", style = MaterialTheme.typography.bodySmall)
                 else Text(validated.exceptionOrNull()?.message ?: "Nama tidak valid.",
                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (busy) FohIndeterminateBar(Modifier.fillMaxWidth(), height = 4.dp)
             }
         },
         confirmButton = { TextButton(onClick = { onRename(track.id, title, onDismiss) }, enabled = canSave) { Text("Simpan nama") } },
@@ -313,7 +313,7 @@ internal fun RenameHistoryDialog(record: RenameRecord?, busy: Boolean, onDismiss
                     Text("Urungkan untuk mengembalikan nama sebelumnya. Riwayat yang lebih lama akan tampil jika masih tersedia.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (busy) FohIndeterminateBar(Modifier.fillMaxWidth(), height = 4.dp)
             }
         },
         confirmButton = { TextButton(onClick = onUndo, enabled = record != null && !busy) { Text("Urungkan nama terakhir") } },
@@ -399,7 +399,7 @@ internal fun EngineSettingsDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    if (ytMusic.checking) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (ytMusic.checking) FohIndeterminateBar(Modifier.fillMaxWidth(), height = 4.dp)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -526,7 +526,7 @@ internal fun CreateOrRenamePlaylistDialog(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (busy) FohIndeterminateBar(Modifier.fillMaxWidth(), height = 4.dp)
             }
         },
         confirmButton = {
@@ -560,7 +560,7 @@ internal fun DeletePlaylistDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (busy) FohIndeterminateBar(Modifier.fillMaxWidth(), height = 4.dp)
             }
         },
         confirmButton = {
@@ -647,7 +647,7 @@ internal fun PlaylistPickerDialog(
                     onCancelCreate = { creating = false },
                     onCreate = { clean -> onCreatePlaylistWithTrack(clean, track.id) },
                 )
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (busy) FohIndeterminateBar(Modifier.fillMaxWidth(), height = 4.dp)
             }
         },
         confirmButton = {
@@ -744,7 +744,7 @@ internal fun BatchPlaylistPickerDialog(
                     onCancelCreate = { creating = false },
                     onCreate = { clean -> onCreatePlaylistWithTracks(clean, selectedIds) },
                 )
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (busy) FohIndeterminateBar(Modifier.fillMaxWidth(), height = 4.dp)
             }
         },
         confirmButton = {
@@ -893,7 +893,7 @@ internal fun AddTracksToPlaylistDialog(
                         }
                     }
                 }
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (busy) FohIndeterminateBar(Modifier.fillMaxWidth(), height = 4.dp)
             }
         },
         confirmButton = {

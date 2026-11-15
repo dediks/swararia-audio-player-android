@@ -161,6 +161,7 @@ class AndroidRemoteServerEngine(
 
     private var nativeInvite: String? = null
     private var nativeInviteExpiresAt = 0.0
+    private var nativeInviteFailures = 0
     private var webPin: String? = null
     private var webPinExpiresAt = 0.0
     private var webPinFailures = 0
@@ -228,6 +229,7 @@ class AndroidRemoteServerEngine(
             this.fingerprintHex = fingerprintHex
             nativeInvite = null
             nativeInviteExpiresAt = 0.0
+            nativeInviteFailures = 0
             webPin = null
             webPinExpiresAt = 0.0
             webPinFailures = 0
@@ -250,6 +252,7 @@ class AndroidRemoteServerEngine(
             fingerprintHex = null
             nativeInvite = null
             nativeInviteExpiresAt = 0.0
+            nativeInviteFailures = 0
             webPin = null
             webPinExpiresAt = 0.0
             webPinFailures = 0
@@ -285,6 +288,7 @@ class AndroidRemoteServerEngine(
             val token = randomToken43()
             nativeInvite = token
             nativeInviteExpiresAt = clock() + INVITE_TTL_SEC
+            nativeInviteFailures = 0
             token
         }
         onStateChanged()
@@ -399,12 +403,19 @@ class AndroidRemoteServerEngine(
             pruneAuthStateLocked()
             val expected = nativeInvite ?: throw RemoteServerError("invalid_invite", 401)
             if (!INVITE_REGEX.matches(inviteToken) || !constantTimeEquals(inviteToken, expected)) {
+                nativeInviteFailures += 1
+                if (nativeInviteFailures >= NATIVE_INVITE_MAX_FAILURES) {
+                    nativeInvite = null
+                    nativeInviteExpiresAt = 0.0
+                    nativeInviteFailures = 0
+                }
                 throw RemoteServerError("invalid_invite", 401)
             }
             val label = sanitizeLabel(rawLabel) ?: throw RemoteServerError("invalid_label", 400)
             ensureDeviceSlotLocked()
             nativeInvite = null
             nativeInviteExpiresAt = 0.0
+            nativeInviteFailures = 0
 
             val deviceId = randomId24()
             val token = randomToken43()
@@ -962,6 +973,7 @@ class AndroidRemoteServerEngine(
         const val MAX_TRACKS = 250
         const val MAX_MANIFEST_TRACKS = 5000
         const val MAX_GROUPS = 64
+        const val NATIVE_INVITE_MAX_FAILURES = 5
         const val WEB_PIN_MAX_FAILURES = 5
         const val MAX_UPLOAD_BYTES = 150L * 1024L * 1024L
         val ALLOWED_AUDIO_EXTENSIONS = listOf("aac", "flac", "m4a", "mp3", "mp4", "ogg", "opus", "wav", "webm")

@@ -40,4 +40,15 @@ class DesktopRemoteProtocolTest {
         assertTrue(DesktopRemoteJson.isValidSha256Hex("a".repeat(64)))
         assertFalse(DesktopRemoteJson.isValidSha256Hex("z".repeat(64)))
     }
+
+    @Test
+    fun sanitizePairLabelAndPairBodyHandleControlCharsLengthAndBlank() {
+        assertEquals("Swararia Android", DesktopRemoteJson.sanitizePairLabel(" \t\r\n "))
+        assertEquals("Samsung SM-M156B", DesktopRemoteJson.sanitizePairLabel("  Samsung\u0007 SM-M156B\n "))
+        assertEquals(80, DesktopRemoteJson.sanitizePairLabel("A".repeat(120)).length)
+
+        val body = DesktopRemoteJson.pairBody("FOH \"Main\"\\Lab\u0001\n")
+        val json = DesktopRemoteJson.objectValue(body)
+        assertEquals("FOH \"Main\"\\Lab", json.get("label")?.asText())
+    }
 }

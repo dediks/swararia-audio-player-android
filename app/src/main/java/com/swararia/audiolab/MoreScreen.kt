@@ -288,8 +288,13 @@ private fun MoreHubScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp),
                             )
+                            val appVersion = remember(context) {
+                                runCatching {
+                                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                                }.getOrNull()?.takeIf { it.isNotBlank() } ?: "0.6.0-spike"
+                            }
                             Text(
-                                "Swararia Audio Lab · Versi 0.6.0-spike",
+                                "Swararia Audio Lab · Versi $appVersion",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
