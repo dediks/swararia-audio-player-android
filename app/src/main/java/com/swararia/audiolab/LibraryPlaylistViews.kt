@@ -38,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -66,9 +67,13 @@ internal fun LibraryCompactHeader(
     onToggleSort: (Boolean) -> Unit,
     onHistory: () -> Unit,
     onSettings: () -> Unit,
+    onOpenStageRta: () -> Unit = {},
+    onOpenBrandStudio: () -> Unit = {},
 ) {
     var appMenu by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
+    val brand = FohTheme.brand
+    val showRtaLabel = LocalConfiguration.current.screenWidthDp >= 380 || section != LibrarySectionTab.ALL_TRACKS
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
@@ -76,25 +81,45 @@ internal fun LibraryCompactHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            RoyalBrandLogo(size = 28.dp)
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "SETELO",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onOpenBrandStudio),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PrestigeBrandEmblem(
+                    logoKey = brand.customLogoKey,
+                    size = 28.dp,
+                    shimmerEnabled = brand.prestigeAnimations,
                 )
-                Text(
-                    text = "by Swararia",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = BrandSkinRules.effectiveRentalTitle(brand),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = BrandSkinRules.effectiveEventSubtitle(brand),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (BrandSkinRules.hasCustomBrand(brand)) {
+                            FohTheme.colors.safeAccent
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
+            StageRtaEntryPill(
+                onClick = onOpenStageRta,
+                showLabel = showRtaLabel,
+            )
             if (section == LibrarySectionTab.ALL_TRACKS) {
                 FohHeaderChipButton(
                     label = "Import",
@@ -129,6 +154,16 @@ internal fun LibraryCompactHeader(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 )
                 DropdownMenu(expanded = appMenu, onDismissRequest = { appMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Stage Brand & Live RTA") },
+                        leadingIcon = { Icon(UiIcons.Rta, null) },
+                        onClick = { appMenu = false; onOpenStageRta() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Logo & Skin Tema") },
+                        leadingIcon = { Icon(UiIcons.Palette, null) },
+                        onClick = { appMenu = false; onOpenBrandStudio() },
+                    )
                     DropdownMenuItem(
                         text = { Text("Riwayat nama & urungkan") },
                         leadingIcon = { Icon(UiIcons.History, null) },

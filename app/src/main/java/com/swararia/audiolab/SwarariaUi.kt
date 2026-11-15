@@ -48,6 +48,7 @@ fun SwarariaUi(
     var destination by rememberSaveable { mutableIntStateOf(0) }
     var moreToolRoute by rememberSaveable { mutableStateOf(MoreToolRoute.HUB) }
     var fullPlayer by rememberSaveable { mutableStateOf(false) }
+    var stageShowcaseOpen by rememberSaveable { mutableStateOf(false) }
     var playerViewMode by rememberSaveable { mutableStateOf(LocalPlayerViewMode.CUE_LIST) }
     var playerDeckCollapsed by rememberSaveable { mutableStateOf(false) }
     var playerKeepScreenOn by rememberSaveable { mutableStateOf(true) }
@@ -63,17 +64,24 @@ fun SwarariaUi(
     val previewActive = searchActions.preview.let { it.hit != null || it.loading || it.media != null || it.error != null }
     val onlineBusy = ingest.busy || upgrade.operationBusy || search.busy || searchActions.preview.loading
     val view = LocalView.current
-    val keepWakeLock = playerKeepScreenOn && ((fullPlayer && !previewActive) || playback.wantsPlay)
+    val keepWakeLock = playerKeepScreenOn && (((fullPlayer || stageShowcaseOpen) && !previewActive) || playback.wantsPlay)
     DisposableEffect(view, keepWakeLock) {
         val previous = view.keepScreenOn
         view.keepScreenOn = keepWakeLock
         onDispose { view.keepScreenOn = previous }
     }
     val navigate: (Int) -> Unit = { target ->
-        if (target != 3 && destination != 3 && (target != destination || fullPlayer)) searchActions.stopPreview()
-        if (target == 4 && destination == 4 && !fullPlayer) moreToolRoute = MoreToolRoute.HUB
+        if (target != 3 && destination != 3 && (target != destination || fullPlayer || stageShowcaseOpen)) searchActions.stopPreview()
+        if (target == 4 && destination == 4 && !fullPlayer && !stageShowcaseOpen) moreToolRoute = MoreToolRoute.HUB
+        stageShowcaseOpen = false
         fullPlayer = false
         destination = target
+    }
+    val openBrandStudio: () -> Unit = {
+        stageShowcaseOpen = false
+        fullPlayer = false
+        destination = 4
+        moreToolRoute = MoreToolRoute.BRAND_STUDIO
     }
     val executePlayOrCue: (AudioTrack, List<AudioTrack>?, Boolean) -> Unit = { track, queue, cueOnly ->
         searchActions.stopPreview()
@@ -121,10 +129,16 @@ fun SwarariaUi(
             }
         }
     }
-    LaunchedEffect(previewActive) { if (previewActive) fullPlayer = false }
-    BackHandler(enabled = fullPlayer || (destination == 4 && moreToolRoute != MoreToolRoute.HUB) || destination != 0 || previewActive) {
+    LaunchedEffect(previewActive) {
+        if (previewActive) {
+            stageShowcaseOpen = false
+            fullPlayer = false
+        }
+    }
+    BackHandler(enabled = stageShowcaseOpen || fullPlayer || (destination == 4 && moreToolRoute != MoreToolRoute.HUB) || destination != 0 || previewActive) {
         if (destination != 3) searchActions.stopPreview()
         when {
+            stageShowcaseOpen -> stageShowcaseOpen = false
             fullPlayer -> fullPlayer = false
             destination == 4 && moreToolRoute != MoreToolRoute.HUB -> moreToolRoute = MoreToolRoute.HUB
             else -> destination = 0
@@ -141,7 +155,7 @@ fun SwarariaUi(
         contentWindowInsets = WindowInsets.safeDrawing,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            if (!fullPlayer || previewActive) {
+            if ((!fullPlayer && !stageShowcaseOpen) || previewActive) {
                 Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
                     if (destination == 3 && previewActive)
                         Text("Pemutar HP • terpisah dari Desktop", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
@@ -197,11 +211,19 @@ fun SwarariaUi(
         },
     ) { padding ->
         val contentModifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)
-        if (fullPlayer && !previewActive) FocusedPlayer(
+        if (stageShowcaseOpen && !previewActive) StageRtaScreen(
+            current = current,
+            playback = playback,
+            controller = controller,
+            onClose = { stageShowcaseOpen = false },
+            onOpenBrandStudio = openBrandStudio,
+            modifier = contentModifier,
+        ) else if (fullPlayer && !previewActive) FocusedPlayer(
             tracks = tracks, current = current, playback = playback, controller = controller,
             modifier = contentModifier, onBack = { fullPlayer = false },
             onRename = { activeModal = SwarariaModal.RenameTrack(it) },
             onSettings = { activeModal = SwarariaModal.EngineSettings },
+            onOpenStageRta = { stageShowcaseOpen = true },
             viewMode = playerViewMode,
             onSelectViewMode = { playerViewMode = it },
             deckCollapsed = playerDeckCollapsed,
@@ -226,6 +248,7 @@ fun SwarariaUi(
                     modifier = contentModifier,
                     onOpenSettings = { activeModal = SwarariaModal.EngineSettings },
                     onOpenRenameHistory = { activeModal = SwarariaModal.RenameHistory },
+                    onOpenStageRta = { stageShowcaseOpen = true },
                     onPauseOtherAudio = {
                         searchActions.stopPreview()
                         controller?.takeIf { it.isConnected && (it.isPlaying || it.playWhenReady) }?.let {
@@ -252,6 +275,8 @@ fun SwarariaUi(
                     },
                     onToggleCurrentPlayPause = { toggleSwarariaPlayback(controller) },
                     onOpenPlayer = { fullPlayer = true },
+                    onOpenStageRta = { stageShowcaseOpen = true },
+                    onOpenBrandStudio = openBrandStudio,
                     playlistActions = playlistActions,
                     onRename = { activeModal = SwarariaModal.RenameTrack(it) },
                     onHistory = { activeModal = SwarariaModal.RenameHistory },

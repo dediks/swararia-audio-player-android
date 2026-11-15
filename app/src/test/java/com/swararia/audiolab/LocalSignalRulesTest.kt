@@ -175,6 +175,39 @@ class LocalSignalRulesTest {
         assertEquals(0f, state.levelL, 0.0001f)
         assertEquals(0f, state.peakHoldL, 0.0001f)
         assertTrue(state.bands.all { it == 0f })
+        assertTrue(state.bandsL.all { it == 0f })
+        assertTrue(state.bandsR.all { it == 0f })
         assertEquals("-∞ dB", state.peakDbLabel)
+    }
+
+    @Test
+    fun stereoRtaSeparatesLeftAndRightFrequencyContent() {
+        val frames = LocalSignalRules.FFT_SIZE
+        val sampleRate = 48_000.0
+        val leftBass = FloatArray(frames) { i ->
+            (0.8 * sin(2.0 * PI * 180.0 * i / sampleRate)).toFloat()
+        }
+        val rightTreble = FloatArray(frames) { i ->
+            (0.8 * sin(2.0 * PI * 6000.0 * i / sampleRate)).toFloat()
+        }
+
+        val raw = LocalSignalRules.analyzeFloatSamples(leftBass, rightTreble, frames)
+        assertTrue("Expected Left channel low band strong", raw.bandsL[0] > 0.5f)
+        assertTrue("Expected Left channel 6kHz silent", raw.bandsL[11] < 0.1f)
+        assertTrue("Expected Right channel 6kHz strong", raw.bandsR[11] > 0.7f)
+        assertTrue("Expected Right channel low band silent", raw.bandsR[0] < 0.1f)
+
+        val stepped = LocalSignalRules.stepBallistics(
+            previous = LocalAudioSignalSnapshot(),
+            rawFrame = raw,
+            playing = true,
+            postFaderGain = 1f,
+            muted = false,
+            nowMs = 100L,
+        )
+        assertTrue(stepped.bandsL[0] > 0.5f)
+        assertTrue(stepped.bandPeaksL[0] >= stepped.bandsL[0])
+        assertTrue(stepped.bandsR[11] > 0.7f)
+        assertTrue(stepped.bandPeaksR[11] >= stepped.bandsR[11])
     }
 }

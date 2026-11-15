@@ -172,7 +172,7 @@ internal fun pauseSwarariaPlaybackImmediately(controller: MediaController?) {
     }
 }
 
-private fun playbackTitle(current: AudioTrack?, playback: SessionPlayback): String =
+internal fun playbackTitle(current: AudioTrack?, playback: SessionPlayback): String =
     current?.let { UiPresentation.title(it.displayName) }
         ?: playback.title?.takeIf { it.isNotBlank() }?.let { UiPresentation.title(it) }
         ?: if (playback.mediaId == null) "Pilih audio dari Pustaka" else "Audio tidak tersedia"
@@ -487,6 +487,7 @@ internal fun FocusedPlayer(
     onBack: () -> Unit,
     onRename: (AudioTrack) -> Unit,
     onSettings: () -> Unit,
+    onOpenStageRta: () -> Unit = {},
     viewMode: LocalPlayerViewMode,
     onSelectViewMode: (LocalPlayerViewMode) -> Unit,
     deckCollapsed: Boolean,
@@ -600,6 +601,7 @@ internal fun FocusedPlayer(
                 onOpenSafeMode = { safeSheetOpen = true },
                 onRename = { current?.let(onRename) },
                 onSettings = onSettings,
+                onOpenStageRta = onOpenStageRta,
                 onRouteClick = { routeDialogOpen = true },
                 onPhoneVolumeClick = { showSystemMediaVolumePanel(context) },
             )
@@ -629,6 +631,7 @@ internal fun FocusedPlayer(
                         if (dispatched) pendingSeekTargetMs = targetMs
                     }
                 },
+                onOpenStageRta = onOpenStageRta,
                 positionMsProvider = positionMsProvider,
             )
 
@@ -681,6 +684,7 @@ internal fun FocusedPlayer(
                             playback = playback,
                             muted = controlUi.faderState.muted,
                             effectiveGain = controlUi.faderState.effectiveGain,
+                            onOpenStageRta = onOpenStageRta,
                         )
                     }
                 }

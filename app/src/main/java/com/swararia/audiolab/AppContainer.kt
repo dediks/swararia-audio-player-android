@@ -39,6 +39,7 @@ class AppContainer(context: Context) {
     val playbackPreferences: PlaybackPreferences by lazy { PlaybackPreferences(appContext) }
     val safeModeController: FohSafeModeController by lazy { FohSafeModeController(appContext) }
     val soundboardEngine: FohSoundboardEngine by lazy { FohSoundboardEngine(appContext) }
+    val brandSkinManager: BrandSkinManager by lazy { BrandSkinManager(appContext) }
     val searchRepository: AudioSearchRepository by lazy {
         YoutubeSearchRepository(appContext, { ingestState.value.busy })
     }

@@ -81,7 +81,9 @@ class MainActivity : ComponentActivity() {
         model = ViewModelProvider(this, AppViewModelFactory((application as SwarariaApp).container))[AppViewModel::class.java]
         connectPlayer()
         setContent {
-            AudioTheme {
+            val container = (application as SwarariaApp).container
+            val brandSkinConfig by container.brandSkinManager.state.collectAsStateWithLifecycle()
+            AudioTheme(skinConfig = brandSkinConfig) {
                 val tracks by model.tracks.collectAsStateWithLifecycle()
                 val playlists by model.playlists.collectAsStateWithLifecycle()
                 val ingest by model.ingest.collectAsStateWithLifecycle()

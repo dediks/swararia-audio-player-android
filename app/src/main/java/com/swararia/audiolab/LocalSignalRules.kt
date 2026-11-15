@@ -16,6 +16,8 @@ data class RawPcmSignalFrame(
     val rmsL: Float = 0f,
     val rmsR: Float = 0f,
     val bands: List<Float> = LocalSignalRules.EmptyBands,
+    val bandsL: List<Float> = bands,
+    val bandsR: List<Float> = bands,
 )
 
 /** Ballistic-smoothed, post-fader UI signal snapshot for local playback meters and RTA bars. */
@@ -33,6 +35,10 @@ data class LocalAudioSignalSnapshot(
     val peakDbLabel: String = "-∞ dB",
     val bands: List<Float> = LocalSignalRules.EmptyBands,
     val bandPeaks: List<Float> = LocalSignalRules.EmptyBands,
+    val bandsL: List<Float> = bands,
+    val bandsR: List<Float> = bands,
+    val bandPeaksL: List<Float> = bandPeaks,
+    val bandPeaksR: List<Float> = bandPeaks,
     val holdUntilMsL: Long = 0L,
     val holdUntilMsR: Long = 0L,
 )
@@ -124,24 +130,78 @@ object LocalSignalRules {
         val rmsR = sqrt(sumSqR / count).toFloat().coerceIn(0f, 1f)
 
         val fftFrames = minOf(count, FFT_SIZE)
-        val real = FloatArray(FFT_SIZE)
-        val imag = FloatArray(FFT_SIZE)
         val denom = (fftFrames - 1).coerceAtLeast(1)
         val startOffset = count - fftFrames
+        var channelsIdentical = true
         for (i in 0 until fftFrames) {
             val idx = startOffset + i
-            val l = if (left[idx].isFinite()) left[idx].coerceIn(-1f, 1f) else 0f
-            val r = if (right[idx].isFinite()) right[idx].coerceIn(-1f, 1f) else 0f
-            val mono = 0.5f * (l + r)
-            val hann = if (fftFrames == 1) 1f else (0.5 - 0.5 * cos(2.0 * PI * i / denom)).toFloat()
-            real[i] = mono * hann
+            if (left[idx] != right[idx]) {
+                channelsIdentical = false
+                break
+            }
         }
 
+        val bandsMono = computeFftBands(
+            fftFrames = fftFrames,
+            denom = denom,
+            sampleAt = { i ->
+                val idx = startOffset + i
+                val l = if (left[idx].isFinite()) left[idx].coerceIn(-1f, 1f) else 0f
+                val r = if (right[idx].isFinite()) right[idx].coerceIn(-1f, 1f) else 0f
+                0.5f * (l + r)
+            },
+        )
+        val bandsL: List<Float>
+        val bandsR: List<Float>
+        if (channelsIdentical) {
+            bandsL = bandsMono
+            bandsR = bandsMono
+        } else {
+            bandsL = computeFftBands(
+                fftFrames = fftFrames,
+                denom = denom,
+                sampleAt = { i ->
+                    val v = left[startOffset + i]
+                    if (v.isFinite()) v.coerceIn(-1f, 1f) else 0f
+                },
+            )
+            bandsR = computeFftBands(
+                fftFrames = fftFrames,
+                denom = denom,
+                sampleAt = { i ->
+                    val v = right[startOffset + i]
+                    if (v.isFinite()) v.coerceIn(-1f, 1f) else 0f
+                },
+            )
+        }
+
+        return RawPcmSignalFrame(
+            peakL = peakL.coerceIn(0f, 1f),
+            peakR = peakR.coerceIn(0f, 1f),
+            rmsL = rmsL,
+            rmsR = rmsR,
+            bands = bandsMono,
+            bandsL = bandsL,
+            bandsR = bandsR,
+        )
+    }
+
+    private inline fun computeFftBands(
+        fftFrames: Int,
+        denom: Int,
+        sampleAt: (Int) -> Float,
+    ): List<Float> {
+        val real = FloatArray(FFT_SIZE)
+        val imag = FloatArray(FFT_SIZE)
+        for (i in 0 until fftFrames) {
+            val hann = if (fftFrames == 1) 1f else (0.5 - 0.5 * cos(2.0 * PI * i / denom)).toFloat()
+            real[i] = sampleAt(i) * hann
+        }
         fftInPlace(real, imag)
 
         // Coherent gain of Hann window is 0.5, and symmetric DFT splits sine energy in half -> N/4 normalization.
         val normFactor = (fftFrames.coerceAtLeast(1) * 0.25f)
-        val bands = List(BAND_COUNT) { bandIdx ->
+        return List(BAND_COUNT) { bandIdx ->
             val binStart = BAND_BIN_STARTS[bandIdx]
             val binEnd = BAND_BIN_ENDS[bandIdx]
             var maxMag = 0f
@@ -151,14 +211,6 @@ object LocalSignalRules {
             }
             linearToMeterFraction(maxMag.coerceIn(0f, 1f))
         }
-
-        return RawPcmSignalFrame(
-            peakL = peakL.coerceIn(0f, 1f),
-            peakR = peakR.coerceIn(0f, 1f),
-            rmsL = rmsL,
-            rmsR = rmsR,
-            bands = bands,
-        )
     }
 
     /**
@@ -215,28 +267,12 @@ object LocalSignalRules {
             -1f
         }
 
-        val prevBands = previous.bands
-        val prevBandPeaks = previous.bandPeaks
-        val nextBands = List(BAND_COUNT) { idx ->
-            val rawBand = rawFrame?.bands?.getOrNull(idx) ?: 0f
-            val targetBand = if (rawBand <= 0f || effectiveGain <= 0.0001f) {
-                0f
-            } else {
-                (rawBand + gainDbMeterOffset).coerceIn(0f, 1f)
-            }
-            val prevBand = prevBands.getOrNull(idx) ?: 0f
-            maxOf(targetBand, prevBand * BAND_DECAY).let { if (it < METER_FLOOR) 0f else it }
-        }
-        val nextBandPeaks = List(BAND_COUNT) { idx ->
-            val currentBand = nextBands[idx]
-            val prevPeak = prevBandPeaks.getOrNull(idx) ?: 0f
-            if (currentBand >= prevPeak) {
-                currentBand
-            } else {
-                maxOf(currentBand, (prevPeak - BAND_PEAK_STEP_DECAY).coerceAtLeast(0f))
-                    .let { if (it < METER_FLOOR) 0f else it }
-            }
-        }
+        val nextBands = stepBandSeries(rawFrame?.bands, previous.bands, effectiveGain, gainDbMeterOffset)
+        val nextBandPeaks = stepBandPeakSeries(nextBands, previous.bandPeaks)
+        val nextBandsL = stepBandSeries(rawFrame?.bandsL, previous.bandsL, effectiveGain, gainDbMeterOffset)
+        val nextBandPeaksL = stepBandPeakSeries(nextBandsL, previous.bandPeaksL)
+        val nextBandsR = stepBandSeries(rawFrame?.bandsR, previous.bandsR, effectiveGain, gainDbMeterOffset)
+        val nextBandPeaksR = stepBandPeakSeries(nextBandsR, previous.bandPeaksR)
 
         val active = playing ||
             nextLevelL > 0.01f ||
@@ -260,9 +296,43 @@ object LocalSignalRules {
             peakDbLabel = peakDecibelsLabel(maxLinear, muted = muted),
             bands = nextBands,
             bandPeaks = nextBandPeaks,
+            bandsL = nextBandsL,
+            bandsR = nextBandsR,
+            bandPeaksL = nextBandPeaksL,
+            bandPeaksR = nextBandPeaksR,
             holdUntilMsL = nextHoldUntilMsL,
             holdUntilMsR = nextHoldUntilMsR,
         )
+    }
+
+    private fun stepBandSeries(
+        rawBands: List<Float>?,
+        previousBands: List<Float>,
+        effectiveGain: Float,
+        gainDbMeterOffset: Float,
+    ): List<Float> = List(BAND_COUNT) { idx ->
+        val rawBand = rawBands?.getOrNull(idx) ?: 0f
+        val targetBand = if (rawBand <= 0f || effectiveGain <= 0.0001f) {
+            0f
+        } else {
+            (rawBand + gainDbMeterOffset).coerceIn(0f, 1f)
+        }
+        val prevBand = previousBands.getOrNull(idx) ?: 0f
+        maxOf(targetBand, prevBand * BAND_DECAY).let { if (it < METER_FLOOR) 0f else it }
+    }
+
+    private fun stepBandPeakSeries(
+        currentBands: List<Float>,
+        previousPeaks: List<Float>,
+    ): List<Float> = List(BAND_COUNT) { idx ->
+        val currentBand = currentBands[idx]
+        val prevPeak = previousPeaks.getOrNull(idx) ?: 0f
+        if (currentBand >= prevPeak) {
+            currentBand
+        } else {
+            maxOf(currentBand, (prevPeak - BAND_PEAK_STEP_DECAY).coerceAtLeast(0f))
+                .let { if (it < METER_FLOOR) 0f else it }
+        }
     }
 
     private fun stepSinglePeakHold(

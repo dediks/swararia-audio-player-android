@@ -128,6 +128,7 @@ internal fun LocalFohHeaderBar(
     onSettings: () -> Unit,
     onRouteClick: () -> Unit,
     onPhoneVolumeClick: () -> Unit = {},
+    onOpenStageRta: () -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
     val foh = FohTheme.colors
@@ -302,6 +303,14 @@ internal fun LocalFohHeaderBar(
                 )
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(
+                        text = { Text("Stage Brand & Live RTA") },
+                        leadingIcon = { Icon(UiIcons.Rta, null) },
+                        onClick = {
+                            menu = false
+                            onOpenStageRta()
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text("Ubah nama audio") },
                         leadingIcon = { Icon(UiIcons.Rename, null) },
                         enabled = hasCurrentTrack,
@@ -375,6 +384,7 @@ internal fun LocalFohTrackSummaryCard(
     seekPosition: Float?,
     onSeekChange: (Float) -> Unit,
     onSeekCommit: () -> Unit,
+    onOpenStageRta: () -> Unit = {},
     positionMsProvider: () -> Long = { playback.positionMs },
 ) {
     val foh = FohTheme.colors
@@ -454,6 +464,7 @@ internal fun LocalFohTrackSummaryCard(
                 playing = playback.playing,
                 muted = controlUi.faderState.muted,
                 effectiveGain = controlUi.faderState.effectiveGain,
+                modifier = Modifier.clickable(onClick = onOpenStageRta),
             )
 
             LocalFohSeekAndEndingSection(
@@ -870,6 +881,7 @@ internal fun LocalFohCoverView(
     playback: SessionPlayback,
     muted: Boolean = false,
     effectiveGain: Float = 1f,
+    onOpenStageRta: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -911,7 +923,9 @@ internal fun LocalFohCoverView(
                 playing = playback.playing,
                 muted = muted,
                 effectiveGain = effectiveGain,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenStageRta),
             )
         }
     }

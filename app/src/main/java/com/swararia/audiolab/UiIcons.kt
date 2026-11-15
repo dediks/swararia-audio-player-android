@@ -231,6 +231,35 @@ internal object UiIcons {
         moveTo(15.5f, 9.5f); lineTo(20.5f, 14.5f)
         moveTo(20.5f, 9.5f); lineTo(15.5f, 14.5f)
     }
+    val Rta = outline("Rta") {
+        moveTo(4f, 19f); lineTo(20f, 19f)
+        moveTo(5.5f, 16f); lineTo(5.5f, 11f)
+        moveTo(9.8f, 16f); lineTo(9.8f, 5f)
+        moveTo(14.2f, 16f); lineTo(14.2f, 8.5f)
+        moveTo(18.5f, 16f); lineTo(18.5f, 4f)
+    }
+    val Palette = outline("Palette") {
+        moveTo(12f, 3.5f); arcTo(8.5f, 8.5f, 0f, true, false, 20.5f, 12f)
+        curveTo(20.5f, 14.2f, 18.5f, 15f, 16.5f, 15f)
+        lineTo(15f, 15f); curveTo(13.6f, 15f, 13.5f, 16.4f, 14.3f, 17.5f)
+        curveTo(14.9f, 18.3f, 14.4f, 20.5f, 12f, 20.5f)
+        moveTo(8f, 10f); lineTo(8.2f, 10f)
+        moveTo(11.5f, 7f); lineTo(11.7f, 7f)
+        moveTo(15.5f, 8.5f); lineTo(15.7f, 8.5f)
+        moveTo(8.2f, 14.5f); lineTo(8.4f, 14.5f)
+    }
+    val Fullscreen = outline("Fullscreen") {
+        moveTo(4f, 9f); lineTo(4f, 4f); lineTo(9f, 4f)
+        moveTo(15f, 4f); lineTo(20f, 4f); lineTo(20f, 9f)
+        moveTo(20f, 15f); lineTo(20f, 20f); lineTo(15f, 20f)
+        moveTo(9f, 20f); lineTo(4f, 20f); lineTo(4f, 15f)
+    }
+    val FullscreenExit = outline("FullscreenExit") {
+        moveTo(9f, 4f); lineTo(9f, 9f); lineTo(4f, 9f)
+        moveTo(20f, 9f); lineTo(15f, 9f); lineTo(15f, 4f)
+        moveTo(15f, 20f); lineTo(15f, 15f); lineTo(20f, 15f)
+        moveTo(4f, 15f); lineTo(9f, 15f); lineTo(9f, 20f)
+    }
 
     private fun outline(name: String, draw: PathBuilder.() -> Unit) =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {

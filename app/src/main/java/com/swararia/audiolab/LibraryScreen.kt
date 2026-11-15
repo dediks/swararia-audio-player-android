@@ -77,6 +77,8 @@ internal fun LibraryPage(
     },
     onToggleCurrentPlayPause: () -> Unit = {},
     onOpenPlayer: () -> Unit = {},
+    onOpenStageRta: () -> Unit = {},
+    onOpenBrandStudio: () -> Unit = {},
     playlistActions: PlaylistUiActions = PlaylistUiActions(),
     onRename: (AudioTrack) -> Unit,
     onHistory: () -> Unit,
@@ -134,6 +136,8 @@ internal fun LibraryPage(
                         onToggleSort = { state.alphabetical = it },
                         onHistory = onHistory,
                         onSettings = onSettings,
+                        onOpenStageRta = onOpenStageRta,
+                        onOpenBrandStudio = onOpenBrandStudio,
                     )
                 }
             }

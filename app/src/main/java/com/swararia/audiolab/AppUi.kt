@@ -64,32 +64,99 @@ internal data class FohColors(
 )
 
 internal val LocalFohColors = staticCompositionLocalOf { FohColors() }
+internal val LocalBrandSkinConfig = staticCompositionLocalOf { BrandSkinConfig() }
 
 internal object FohTheme {
     val colors: FohColors
         @Composable
         @ReadOnlyComposable
         get() = LocalFohColors.current
+
+    val brand: BrandSkinConfig
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalBrandSkinConfig.current
+}
+
+internal fun resolveFohColors(skinConfig: BrandSkinConfig): FohColors {
+    val preset = BrandSkinRules.resolvePreset(skinConfig.presetId)
+    val customAccentActive = skinConfig.useCustomLogoAccent && skinConfig.customAccentArgb != null
+    val accentColor = Color(BrandSkinRules.activeAccentArgb(skinConfig))
+    val safeBgColor = Color(
+        if (customAccentActive) BrandSkinRules.derivedSafeBgArgb(BrandSkinRules.activeAccentArgb(skinConfig))
+        else preset.safeBgArgb,
+    )
+    val safeBorderColor = Color(
+        if (customAccentActive) BrandSkinRules.derivedSafeBorderArgb(BrandSkinRules.activeAccentArgb(skinConfig))
+        else preset.safeBorderArgb,
+    )
+    val oled = skinConfig.oledTrueBlack
+    return FohColors(
+        safeBg = safeBgColor,
+        safeBorder = safeBorderColor,
+        safeAccent = accentColor,
+        surfaceDeep = if (oled) Color(0xFF000000) else Color(preset.bgDeepArgb),
+        surfaceCard = if (oled) Color(0xFF0B0E0D) else Color(preset.bgCardArgb),
+        surfaceDeck = if (oled) Color(0xFF060807) else Color(preset.bgDeckArgb),
+        borderSubtle = Color(preset.borderSubtleArgb),
+    )
 }
 
 @Composable
-fun AudioTheme(content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalFohColors provides FohColors()) {
-        MaterialTheme(colorScheme = darkColorScheme(
-            primary = Color(0xFF8CE3C7), onPrimary = Color(0xFF12392C),
-            primaryContainer = Color(0xFF173B2E), onPrimaryContainer = Color(0xFF8CE3C7),
-            secondary = Color(0xFFB5D7C6), onSecondary = Color(0xFF15372A),
-            secondaryContainer = Color(0xFF2B4538), onSecondaryContainer = Color(0xFFD6EDE0),
-            background = Color(0xFF101715), onBackground = Color(0xFFF1F5EF),
-            surface = Color(0xFF19231F), onSurface = Color(0xFFF1F5EF),
-            surfaceVariant = Color(0xFF22322A), onSurfaceVariant = Color(0xFFA9B6AD),
-            surfaceContainerLowest = Color(0xFF0B120F), surfaceContainerLow = Color(0xFF141E19),
-            surfaceContainer = Color(0xFF19231F), surfaceContainerHigh = Color(0xFF202D26),
-            surfaceContainerHighest = Color(0xFF28372F), surfaceBright = Color(0xFF304138),
-            surfaceDim = Color(0xFF101715), outline = Color(0xFF6A8071), outlineVariant = Color(0xFF354C3F),
-            error = Color(0xFFFFB4AB), onError = Color(0xFF690005),
-            errorContainer = Color(0xFF4B2526), onErrorContainer = Color(0xFFFFDAD6),
-            inverseSurface = Color(0xFFF1F5EF), inverseOnSurface = Color(0xFF19231F), inversePrimary = Color(0xFF236B53),
-        ), typography = SwarariaTypography, content = content)
+fun AudioTheme(
+    skinConfig: BrandSkinConfig = BrandSkinConfig(),
+    content: @Composable () -> Unit,
+) {
+    val preset = BrandSkinRules.resolvePreset(skinConfig.presetId)
+    val fohColors = remember(skinConfig) { resolveFohColors(skinConfig) }
+    val customAccentActive = skinConfig.useCustomLogoAccent && skinConfig.customAccentArgb != null
+    val onAccent = if (customAccentActive) Color(0xFF0A1410L) else Color(preset.onAccentArgb)
+    val bgColor = if (skinConfig.oledTrueBlack) Color(0xFF000000) else Color(preset.bgAppArgb)
+    val cardColor = fohColors.surfaceCard
+    val lowestContainer = if (skinConfig.oledTrueBlack) Color(0xFF000000) else Color(0xFF0B120F).takeIf {
+        preset == FohSkinPreset.SWARARIA_EMERALD
+    } ?: Color(preset.bgDeepArgb)
+    val lowContainer = if (skinConfig.oledTrueBlack) Color(0xFF070908) else Color(preset.bgDeckArgb)
+
+    CompositionLocalProvider(
+        LocalFohColors provides fohColors,
+        LocalBrandSkinConfig provides skinConfig,
+    ) {
+        MaterialTheme(
+            colorScheme = darkColorScheme(
+                primary = fohColors.safeAccent,
+                onPrimary = onAccent,
+                primaryContainer = fohColors.safeBg,
+                onPrimaryContainer = fohColors.safeAccent,
+                secondary = Color(0xFFB5D7C6),
+                onSecondary = Color(0xFF15372A),
+                secondaryContainer = fohColors.surfaceDeck,
+                onSecondaryContainer = Color(0xFFD6EDE0),
+                background = bgColor,
+                onBackground = Color(0xFFF1F5EF),
+                surface = cardColor,
+                onSurface = Color(0xFFF1F5EF),
+                surfaceVariant = fohColors.surfaceDeck,
+                onSurfaceVariant = Color(0xFFA9B6AD),
+                surfaceContainerLowest = lowestContainer,
+                surfaceContainerLow = lowContainer,
+                surfaceContainer = cardColor,
+                surfaceContainerHigh = fohColors.surfaceCard,
+                surfaceContainerHighest = fohColors.borderSubtle,
+                surfaceBright = fohColors.borderSubtle,
+                surfaceDim = bgColor,
+                outline = fohColors.borderSubtle,
+                outlineVariant = fohColors.borderSubtle,
+                error = Color(0xFFFFB4AB),
+                onError = Color(0xFF690005),
+                errorContainer = Color(0xFF4B2526),
+                onErrorContainer = Color(0xFFFFDAD6),
+                inverseSurface = Color(0xFFF1F5EF),
+                inverseOnSurface = cardColor,
+                inversePrimary = fohColors.safeBg,
+            ),
+            typography = SwarariaTypography,
+            content = content,
+        )
     }
 }

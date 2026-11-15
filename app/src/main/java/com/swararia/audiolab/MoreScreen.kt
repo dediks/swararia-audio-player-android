@@ -46,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 internal enum class MoreToolRoute {
     HUB,
     PHASE_CHECKER,
+    BRAND_STUDIO,
 }
 
 @Composable
@@ -63,11 +64,18 @@ internal fun MoreScreen(
     onOpenRenameHistory: () -> Unit,
     onPauseOtherAudio: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenStageRta: () -> Unit = {},
 ) {
     when (activeTool) {
         MoreToolRoute.PHASE_CHECKER -> PhaseCheckerScreen(
             onBack = { onSelectTool(MoreToolRoute.HUB) },
             onPauseOtherAudio = onPauseOtherAudio,
+            modifier = modifier,
+        )
+
+        MoreToolRoute.BRAND_STUDIO -> BrandSkinStudioScreen(
+            onBack = { onSelectTool(MoreToolRoute.HUB) },
+            onOpenStageRta = onOpenStageRta,
             modifier = modifier,
         )
 
@@ -80,6 +88,8 @@ internal fun MoreScreen(
             remoteServerState = remoteServerState,
             jobs = jobs,
             onOpenPhaseChecker = { onSelectTool(MoreToolRoute.PHASE_CHECKER) },
+            onOpenBrandStudio = { onSelectTool(MoreToolRoute.BRAND_STUDIO) },
+            onOpenStageRta = onOpenStageRta,
             onOpenSettings = onOpenSettings,
             onOpenRenameHistory = onOpenRenameHistory,
             modifier = modifier,
@@ -98,6 +108,8 @@ private fun MoreHubScreen(
     remoteServerState: RemoteServerUiState,
     jobs: List<DownloadJob>,
     onOpenPhaseChecker: () -> Unit,
+    onOpenBrandStudio: () -> Unit,
+    onOpenStageRta: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenRenameHistory: () -> Unit,
     modifier: Modifier = Modifier,
@@ -123,6 +135,7 @@ private fun MoreHubScreen(
     }
 
     val foh = FohTheme.colors
+    val brand = FohTheme.brand
     val ytSummary = when {
         ytMusicState.needsReauth -> "YT Music perlu login ulang"
         ytMusicState.connected && ytMusicState.enabledForDownloads -> "YT Music aktif"
@@ -155,39 +168,49 @@ private fun MoreHubScreen(
             Surface(
                 shape = RoundedCornerShape(18.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
-                border = BorderStroke(1.dp, foh.borderSubtle),
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenSettings),
+                border = BorderStroke(1.dp, foh.safeBorder.copy(alpha = 0.7f)),
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenBrandStudio),
             ) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    RoyalBrandLogo(size = 46.dp)
+                    PrestigeBrandEmblem(
+                        logoKey = brand.customLogoKey,
+                        size = 48.dp,
+                        shimmerEnabled = brand.prestigeAnimations,
+                    )
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = "SETELO",
+                            text = BrandSkinRules.effectiveRentalTitle(brand),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = "by Swararia · Audio Lab FOH",
+                            text = "${BrandSkinRules.effectiveEventSubtitle(brand)} · Skin ${BrandSkinRules.resolvePreset(brand.presetId).label}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     Surface(
                         shape = RoundedCornerShape(999.dp),
-                        color = foh.surfaceDeep,
-                        border = BorderStroke(1.dp, foh.borderSubtle),
+                        color = foh.safeBg,
+                        border = BorderStroke(1.dp, foh.safeBorder),
                     ) {
                         Text(
-                            text = "v$appVersion",
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                            text = "Logo & Skin",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                             style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = FontWeight.Bold,
                             color = foh.safeAccent,
+                            maxLines = 1,
+                            softWrap = false,
                         )
                     }
                 }
@@ -197,6 +220,13 @@ private fun MoreHubScreen(
         item(key = "section-tools") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 MoreSectionLabel("Alat Uji & FOH")
+                MoreActionTile(
+                    icon = UiIcons.Rta,
+                    title = "Stage Brand & Live RTA",
+                    subtitle = "Layar penuh spektrum RTA 16-band, logo rental & meter stereo",
+                    accentColor = foh.safeAccent,
+                    onClick = onOpenStageRta,
+                )
                 Surface(
                     shape = RoundedCornerShape(18.dp),
                     color = foh.safeBg,
