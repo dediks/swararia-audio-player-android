@@ -96,4 +96,14 @@ class LocalFohRulesTest {
         assertEquals("Auto-Stop · Next Ready: 02 Backsound MC", LocalFohRules.nextUpLabel(playback, byId, PlaybackMode.ONCE))
         assertEquals("Loop Active · Track Diulang", LocalFohRules.nextUpLabel(playback, byId, PlaybackMode.LOOP_TRACK))
     }
+
+    @Test
+    fun localPlayerViewModesIncludeCueListAndArtInOrder() {
+        assertEquals(
+            listOf(LocalPlayerViewMode.CUE_LIST, LocalPlayerViewMode.ART),
+            LocalPlayerViewMode.entries,
+        )
+        assertEquals("Cue List", LocalPlayerViewMode.CUE_LIST.label)
+        assertEquals("Art", LocalPlayerViewMode.ART.label)
+    }
 }

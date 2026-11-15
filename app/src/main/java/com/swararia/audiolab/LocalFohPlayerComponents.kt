@@ -582,6 +582,10 @@ internal fun LocalFohViewModeHeader(
     onSelectViewMode: (LocalPlayerViewMode) -> Unit,
 ) {
     val foh = FohTheme.colors
+    val headerCaption = when (viewMode) {
+        LocalPlayerViewMode.CUE_LIST -> "LIVE CUE LIST · $queueCount TRACKS"
+        LocalPlayerViewMode.ART -> "COVER ART & INFO"
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -589,18 +593,22 @@ internal fun LocalFohViewModeHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Column {
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
             Text(
-                text = if (viewMode == LocalPlayerViewMode.CUE_LIST) "LIVE CUE LIST · $queueCount TRACKS" else "COVER ART & INFO",
+                text = headerCaption,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (currentIndex >= 0 && queueCount > 0) {
                 Text(
                     text = "Active Slot #${currentIndex + 1}",
                     style = MaterialTheme.typography.labelSmall,
                     color = foh.safeAccent,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -624,7 +632,9 @@ internal fun LocalFohViewModeHeader(
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             color = if (isSelected) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         )
                     }
                 }
@@ -820,6 +830,7 @@ internal fun LocalFohBottomDeck(
     onStop: () -> Unit,
     onNext: () -> Unit,
     onCueStart: () -> Unit,
+    onFaderPillClick: () -> Unit = {},
     positionMsProvider: () -> Long = { playback.positionMs },
 ) {
     val foh = FohTheme.colors
@@ -839,7 +850,7 @@ internal fun LocalFohBottomDeck(
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     LocalFohCollapsedCountdown(
                         playback = playback,
@@ -853,12 +864,17 @@ internal fun LocalFohBottomDeck(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
+                    LocalFohLevelPill(
+                        faderState = controlUi.faderState,
+                        onClick = onFaderPillClick,
+                        compact = true,
+                    )
                     CompactCircleButton(
                         icon = if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
                         description = if (playback.wantsPlay) "Jeda audio" else "Putar audio",
                         onClick = onPlayPause,
                         enabled = playback.connected && playback.mediaId != null && playback.canPlay,
-                        size = 36.dp,
+                        size = 34.dp,
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
                     )
@@ -867,22 +883,22 @@ internal fun LocalFohBottomDeck(
                         description = "Stop audio",
                         onClick = onStop,
                         enabled = playback.connected && playback.mediaId != null && playback.canStop,
-                        size = 36.dp,
+                        size = 34.dp,
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     )
                     OutlinedButton(
                         onClick = controlUi.onFadeOut,
                         enabled = controlUi.fadeSupported && controlUi.playing && !controlUi.fadeBusy && !controlUi.pending,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                        modifier = Modifier.height(34.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.height(32.dp),
                     ) {
-                        Text(if (controlUi.fadeBusy) "Fading…" else "Fade", style = MaterialTheme.typography.labelSmall)
+                        Text(if (controlUi.fadeBusy) "Fade…" else "Fade", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
                     }
                     CompactCircleButton(
                         icon = UiIcons.ChevronUp,
                         description = "Perluas transport deck",
                         onClick = onToggleCollapsed,
-                        size = 34.dp,
+                        size = 32.dp,
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     )
                 }
@@ -907,6 +923,11 @@ internal fun LocalFohBottomDeck(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
+                    )
+                    LocalFohLevelPill(
+                        faderState = controlUi.faderState,
+                        onClick = onFaderPillClick,
+                        compact = true,
                     )
                     CompactCircleButton(
                         icon = UiIcons.ChevronDown,

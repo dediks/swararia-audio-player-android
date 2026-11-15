@@ -190,6 +190,7 @@ internal fun RemoteLocalAudioPill(
     val pillBorder = foh.localBannerBorder
     val pillAccent = foh.localBannerAccent
     val title = playbackTitle(current, playback)
+    val faderState = rememberControllerFaderState(controller)
 
     Surface(
         onClick = onOpen,
@@ -229,6 +230,9 @@ internal fun RemoteLocalAudioPill(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (faderState.isAttenuated) {
+                LocalFohLevelPill(faderState = faderState, compact = true)
+            }
             RemoteLocalAudioElapsed(
                 active = playback.connected && playback.mediaId != null,
                 accent = pillAccent,
@@ -294,6 +298,7 @@ internal fun MiniPlayer(
     positionMsProvider: () -> Long = { playback.positionMs },
 ) {
     val foh = FohTheme.colors
+    val faderState = rememberControllerFaderState(controller)
     val togglePlay = { toggleSwarariaPlayback(controller) }
     val skipNext: () -> Unit = {
         connectedCommand(controller, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) { p -> if (p.hasNextMediaItem()) p.seekToNextMediaItem() }
@@ -339,6 +344,9 @@ internal fun MiniPlayer(
                         playback = playback,
                         positionMsProvider = positionMsProvider,
                     )
+                }
+                if (faderState.isAttenuated) {
+                    LocalFohLevelPill(faderState = faderState, compact = true)
                 }
                 CompactCircleButton(
                     icon = if (playback.wantsPlay) UiIcons.Pause else UiIcons.Play,
@@ -459,6 +467,7 @@ internal fun FocusedPlayer(
     var guardEnabled by rememberSaveable { mutableStateOf(true) }
     var pendingGuardEntry by remember { mutableStateOf<SessionQueueItem?>(null) }
     var routeDialogOpen by remember { mutableStateOf(false) }
+    var faderSheetOpen by rememberSaveable { mutableStateOf(false) }
     var seekPosition by remember(playback.mediaId, playback.currentIndex) { mutableStateOf<Float?>(null) }
 
     val view = LocalView.current
@@ -520,31 +529,34 @@ internal fun FocusedPlayer(
             )
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (viewMode == LocalPlayerViewMode.CUE_LIST) {
-                    LocalFohCueList(
-                        queue = playback.queue,
-                        tracksById = byId,
-                        currentIndex = playback.currentIndex,
-                        wantsPlay = playback.wantsPlay,
-                        enabled = playback.connected && playback.canChooseQueue,
-                        listState = listState,
-                        onSelectEntry = { entry, cueOnly ->
-                            if (entry.index == playback.currentIndex) {
-                                if (cueOnly) cueCurrentTrackToStart(controller, playback)
-                                else applyQueueEntry(controller, entry, cueOnly = false)
-                            } else if (guardEnabled && playback.wantsPlay) {
-                                pendingGuardEntry = entry
-                            } else {
-                                applyQueueEntry(controller, entry, cueOnly = cueOnly)
-                            }
-                        },
-                    )
-                } else {
-                    LocalFohCoverView(
-                        current = current,
-                        title = activeTitle,
-                        playback = playback,
-                    )
+                when (viewMode) {
+                    LocalPlayerViewMode.CUE_LIST -> {
+                        LocalFohCueList(
+                            queue = playback.queue,
+                            tracksById = byId,
+                            currentIndex = playback.currentIndex,
+                            wantsPlay = playback.wantsPlay,
+                            enabled = playback.connected && playback.canChooseQueue,
+                            listState = listState,
+                            onSelectEntry = { entry, cueOnly ->
+                                if (entry.index == playback.currentIndex) {
+                                    if (cueOnly) cueCurrentTrackToStart(controller, playback)
+                                    else applyQueueEntry(controller, entry, cueOnly = false)
+                                } else if (guardEnabled && playback.wantsPlay) {
+                                    pendingGuardEntry = entry
+                                } else {
+                                    applyQueueEntry(controller, entry, cueOnly = cueOnly)
+                                }
+                            },
+                        )
+                    }
+                    LocalPlayerViewMode.ART -> {
+                        LocalFohCoverView(
+                            current = current,
+                            title = activeTitle,
+                            playback = playback,
+                        )
+                    }
                 }
             }
 
@@ -568,7 +580,22 @@ internal fun FocusedPlayer(
                     }
                 },
                 onCueStart = { cueCurrentTrackToStart(controller, playback) },
+                onFaderPillClick = { faderSheetOpen = true },
                 positionMsProvider = positionMsProvider,
+            )
+        }
+
+        if (faderSheetOpen) {
+            LocalFohFaderSheet(
+                faderState = controlUi.faderState,
+                enabled = controlUi.connected && controlUi.faderSupported,
+                playing = controlUi.playing,
+                fadeBusy = controlUi.fadeBusy,
+                onPositionChange = controlUi.onSetFaderPosition,
+                onToggleDuck = controlUi.onToggleDuck,
+                onToggleMute = controlUi.onToggleMute,
+                onResetUnity = controlUi.onResetFader,
+                onDismiss = { faderSheetOpen = false },
             )
         }
     }

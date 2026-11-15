@@ -219,6 +219,18 @@ internal object UiIcons {
         moveTo(3.5f, 6f); lineTo(9.5f, 6f); lineTo(11.5f, 8.5f); lineTo(20.5f, 8.5f)
         lineTo(20.5f, 18.5f); lineTo(3.5f, 18.5f); close()
     }
+    val VolumeUp = outline("VolumeUp") {
+        moveTo(3.5f, 9.5f); lineTo(7.5f, 9.5f); lineTo(12f, 5.5f); lineTo(12f, 18.5f)
+        lineTo(7.5f, 14.5f); lineTo(3.5f, 14.5f); close()
+        moveTo(15.2f, 9.2f); curveTo(16.6f, 10.6f, 16.6f, 13.4f, 15.2f, 14.8f)
+        moveTo(17.9f, 6.8f); curveTo(20.4f, 9.6f, 20.4f, 14.4f, 17.9f, 17.2f)
+    }
+    val VolumeMuted = outline("VolumeMuted") {
+        moveTo(3.5f, 9.5f); lineTo(7.5f, 9.5f); lineTo(12f, 5.5f); lineTo(12f, 18.5f)
+        lineTo(7.5f, 14.5f); lineTo(3.5f, 14.5f); close()
+        moveTo(15.5f, 9.5f); lineTo(20.5f, 14.5f)
+        moveTo(20.5f, 9.5f); lineTo(15.5f, 14.5f)
+    }
 
     private fun outline(name: String, draw: PathBuilder.() -> Unit) =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
