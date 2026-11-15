@@ -76,12 +76,25 @@ internal fun LibraryCompactHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(
-                text = "Library",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f),
-            )
+            RoyalBrandLogo(size = 28.dp)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "SETELO",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "by Swararia",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             if (section == LibrarySectionTab.ALL_TRACKS) {
                 FohHeaderChipButton(
                     label = "Import",

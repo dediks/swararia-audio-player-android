@@ -434,6 +434,12 @@ class AndroidRemoteHttpListener(
                     writeBytesResponse(output, 200, mime, bytes)
                     return
                 }
+                path == "/web/logo.png" -> {
+                    val (mime, bytes) = webAssets.load("remote_server/setelo-logo.png")
+                        ?: throw RemoteServerError("unavailable", 503)
+                    writeBytesResponse(output, 200, mime, bytes)
+                    return
+                }
             }
 
             val cmdId = CMD_STATUS_WEB_REGEX.matchEntire(path)?.groupValues?.get(1)

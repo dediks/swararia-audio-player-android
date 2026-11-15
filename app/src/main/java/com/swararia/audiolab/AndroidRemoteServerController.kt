@@ -509,6 +509,7 @@ class AndroidRemoteServerController(
             "remote_server/index.html" to "text/html; charset=utf-8",
             "remote_server/remote.css" to "text/css; charset=utf-8",
             "remote_server/remote.js" to "application/javascript; charset=utf-8",
+            "remote_server/setelo-logo.png" to "image/png",
         )
     }
 }

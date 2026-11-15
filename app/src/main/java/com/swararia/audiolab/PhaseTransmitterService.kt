@@ -303,7 +303,7 @@ class PhaseTransmitterService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_audio)
-            .setContentTitle("Swararia TX Uji Fasa Aktif")
+            .setContentTitle("SETELO TX Uji Fasa Aktif")
             .setContentText("${mode.shortLabel} • Level ${(currentGain * 100).toInt()}%")
             .setContentIntent(openApp)
             .addAction(R.drawable.ic_audio, "Hentikan", stopIntent)

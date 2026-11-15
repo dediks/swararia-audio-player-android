@@ -24,7 +24,9 @@ class UiIntegrationContracts(unittest.TestCase):
 
     def test_brand_logo_and_font_preserve_approved_asset_bytes(self):
         self.assertEqual((ROOT/'app/src/main/res/drawable-nodpi/swararia_logo.png').read_bytes(),
-                         (ROOT/'design/ui-preview-v2-logo/assets/swararia-logo-512.png').read_bytes())
+                         (ROOT/'design/setelo-branding/cassava-play-emblem-512.png').read_bytes())
+        self.assertEqual((ROOT/'app/src/main/res/drawable-nodpi/setelo_logo_royal.png').read_bytes(),
+                         (ROOT/'design/setelo-branding/setelo-royal-emblem-512.png').read_bytes())
         self.assertEqual((ROOT/'app/src/main/res/font/inter_variable.ttf').read_bytes(),
                          (ROOT/'design/ui-preview-v1/assets/Inter-variable.ttf').read_bytes())
         for index in range(5):

@@ -1382,7 +1382,7 @@ internal fun DisconnectedPairingSection(
                 )
             }
             Text(
-                text = "Buka Mode Server di perangkat target (HP lain atau menu Android Remote di Swararia Laptop/PC), lalu pindai kode QR-nya.",
+                text = "Buka Mode Server di perangkat target (HP SETELO lain atau menu Android Remote di Swararia Laptop/PC), lalu pindai kode QR-nya.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1558,7 +1558,7 @@ internal fun PendingApprovalCard(state: DesktopRemoteUiState, onRefresh: () -> U
                 if (state.remotePhase == RemotePhase.CONNECTING) {
                     "Memverifikasi identitas TLS dan mendaftarkan sesi pairing."
                 } else {
-                    "Di perangkat target (Mode Server atau jendela Swararia Laptop/PC), ketuk Izinkan Control atau View-Only untuk menyetujui perangkat ini."
+                    "Di perangkat target (Mode Server atau jendela SETELO / Swararia Laptop), ketuk Izinkan Control atau View-Only untuk menyetujui perangkat ini."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

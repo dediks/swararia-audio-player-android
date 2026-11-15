@@ -250,7 +250,7 @@ private fun RemoteGuideDialog(onDismiss: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = "• Mode Server: Jadikan perangkat ini pemutar panggung agar bisa dikendalikan dari Swararia lain (QR) atau browser HP/Laptop/iPhone (URL HTTPS + PIN).",
+                    text = "• Mode Server: Jadikan perangkat ini pemutar panggung agar bisa dikendalikan dari aplikasi SETELO lain (QR) atau browser HP/Laptop/iPhone (URL HTTPS + PIN).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -488,7 +488,7 @@ internal fun RemoteServerScreen(
                 ) {
                     Text(
                         text = if (snapshot.enabled) {
-                            "Belum ada perangkat terhubung. Pindai QR dari tab Kendalikan di perangkat Swararia lain atau buka URL HTTPS di browser FOH."
+                            "Belum ada perangkat terhubung. Pindai QR dari tab Kendalikan di perangkat SETELO lain atau buka URL HTTPS di browser FOH."
                         } else {
                             "Nyalakan Server FOH agar HP lain, Laptop/PC, atau browser dapat terhubung."
                         },
@@ -861,7 +861,7 @@ private fun ServerInviteCard(
                             textAlign = TextAlign.Center,
                         )
                         Text(
-                            text = "Setiap QR aplikasi hanya berlaku satu kali pairing. Buat QR baru untuk menautkan perangkat Swararia Android lain.",
+                            text = "Setiap QR aplikasi hanya berlaku satu kali pairing. Buat QR baru untuk menautkan perangkat SETELO Android lain.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant,
                             textAlign = TextAlign.Center,
@@ -1031,7 +1031,7 @@ private fun PendingDeviceCard(
                     Text(device.label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Text(
                         text = if (device.kind == RemoteClientKind.WEB) "Browser Web • ${device.deviceId.take(8)}"
-                        else "Aplikasi Swararia • ${device.deviceId.take(8)}",
+                        else "Aplikasi SETELO • ${device.deviceId.take(8)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSurfaceVariant,
                     )
@@ -1107,7 +1107,7 @@ private fun ConnectedDeviceCard(
                 Column(Modifier.weight(1f)) {
                     Text(device.label, style = MaterialTheme.typography.titleSmall)
                     val roleLabel = if (device.role == "control") "Kendali Penuh (Control)" else "Pantau Saja (View-Only)"
-                    val kindLabel = if (device.kind == RemoteClientKind.WEB) "Browser Web" else "Aplikasi Swararia"
+                    val kindLabel = if (device.kind == RemoteClientKind.WEB) "Browser Web" else "Aplikasi SETELO"
                     Text(
                         text = "$kindLabel • $roleLabel",
                         style = MaterialTheme.typography.bodySmall,

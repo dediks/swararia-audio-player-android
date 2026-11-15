@@ -55,17 +55,23 @@ body {
   gap: 12px;
 }
 
-.logo-dot {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--primary);
-  box-shadow: 0 0 12px rgba(140, 227, 199, 0.5);
+.brand-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  flex: 0 0 auto;
 }
 
 .brand-title {
   margin: 0;
   font-size: 1.1rem;
+}
+
+.brand-by {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 4px;
 }
 
 .brand-sub {

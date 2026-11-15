@@ -132,6 +132,11 @@ private fun MoreHubScreen(
     val activeJobCount = remember(jobs) {
         jobs.count { it.status == "QUEUED" || it.status == "RUNNING" }
     }
+    val appVersion = remember(context) {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "0.6.0-spike"
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -144,6 +149,49 @@ private fun MoreHubScreen(
                 onOpenPhaseChecker = onOpenPhaseChecker,
                 onOpenSettings = onOpenSettings,
             )
+        }
+
+        item(key = "more-brand-banner") {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, foh.borderSubtle),
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenSettings),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    RoyalBrandLogo(size = 46.dp)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "SETELO",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "by Swararia · Audio Lab FOH",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = foh.surfaceDeep,
+                        border = BorderStroke(1.dp, foh.borderSubtle),
+                    ) {
+                        Text(
+                            text = "v$appVersion",
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium,
+                            color = foh.safeAccent,
+                        )
+                    }
+                }
+            }
         }
 
         item(key = "section-tools") {
@@ -248,7 +296,7 @@ private fun MoreHubScreen(
 
         item(key = "section-summary") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                MoreSectionLabel("Ringkasan Audio Lab")
+                MoreSectionLabel("Ringkasan SETELO")
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -288,13 +336,8 @@ private fun MoreHubScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp),
                             )
-                            val appVersion = remember(context) {
-                                runCatching {
-                                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
-                                }.getOrNull()?.takeIf { it.isNotBlank() } ?: "0.6.0-spike"
-                            }
                             Text(
-                                "Swararia Audio Lab · Versi $appVersion",
+                                "SETELO by Swararia · Versi $appVersion",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

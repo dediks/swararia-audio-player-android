@@ -43,7 +43,7 @@ class DesktopRemoteProtocolTest {
 
     @Test
     fun sanitizePairLabelAndPairBodyHandleControlCharsLengthAndBlank() {
-        assertEquals("Swararia Android", DesktopRemoteJson.sanitizePairLabel(" \t\r\n "))
+        assertEquals("SETELO Android", DesktopRemoteJson.sanitizePairLabel(" \t\r\n "))
         assertEquals("Samsung SM-M156B", DesktopRemoteJson.sanitizePairLabel("  Samsung\u0007 SM-M156B\n "))
         assertEquals(80, DesktopRemoteJson.sanitizePairLabel("A".repeat(120)).length)
 

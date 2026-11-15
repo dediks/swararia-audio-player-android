@@ -260,6 +260,7 @@ class AndroidRemoteHttpLoopbackTest {
             webAssets = { path ->
                 when (path) {
                     "remote_server/index.html" -> "text/html; charset=utf-8" to "<!doctype html><html><body>OK</body></html>".toByteArray()
+                    "remote_server/setelo-logo.png" -> "image/png" to byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47)
                     else -> null
                 }
             },
@@ -270,12 +271,16 @@ class AndroidRemoteHttpLoopbackTest {
             engine.activate("127.0.0.1", port, tls.fingerprintBase64Url, tls.formattedHexColon())
             val ssl = httpsClient(tls)
 
-            // 1) Verify strict CSP + anti-framing headers on "/".
+            // 1) Verify strict CSP + anti-framing headers on "/" and public SETELO web logo asset.
             val home = sendHttp(ssl, port, "GET", "/")
             assertEquals(200, home.status)
             assertEquals("DENY", home.header("x-frame-options"))
             assertEquals("nosniff", home.header("x-content-type-options"))
             assertTrue(home.header("content-security-policy")!!.contains("frame-ancestors 'none'"))
+            val logo = sendHttp(ssl, port, "GET", "/web/logo.png")
+            assertEquals(200, logo.status)
+            assertEquals("image/png", logo.header("content-type"))
+            assertArrayEquals(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47), logo.body)
 
             // 2) Cross-origin POST /web/pair must fail closed (403).
             val pin = engine.issueWebPin()

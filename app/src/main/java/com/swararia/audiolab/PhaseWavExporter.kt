@@ -68,7 +68,7 @@ internal object PhaseWavExporter {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "audio/wav"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "Swararia Phase Test Signal ($tag)")
+            putExtra(Intent.EXTRA_SUBJECT, "SETELO Phase Test Signal ($tag)")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         return Intent.createChooser(send, "Bagikan File Uji Fasa (.wav)").apply {
