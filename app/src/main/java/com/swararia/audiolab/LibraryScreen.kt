@@ -755,6 +755,10 @@ private fun LibraryAudioRow(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     if (selected) {
+                        CompactSignalVisualizer(
+                            playing = wantsPlay,
+                            barCount = 4,
+                        )
                         CompactCircleButton(
                             icon = if (wantsPlay) UiIcons.Pause else UiIcons.Play,
                             description = if (wantsPlay) "Jeda audio" else "Putar audio",

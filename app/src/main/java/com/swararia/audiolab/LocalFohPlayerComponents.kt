@@ -379,6 +379,12 @@ internal fun LocalFohTrackSummaryCard(
                 )
             }
 
+            LocalFohSignalStrip(
+                playing = playback.playing,
+                muted = controlUi.faderState.muted,
+                effectiveGain = controlUi.faderState.effectiveGain,
+            )
+
             LocalFohSeekAndEndingSection(
                 playback = playback,
                 mode = controlUi.mode,
@@ -738,11 +744,20 @@ internal fun LocalFohCueList(
                     }
 
                     if (active) {
-                        FohMicroChip(
-                            label = if (wantsPlay) "PLAYING" else "STANDBY",
-                            containerColor = foh.safeAccent.copy(alpha = 0.16f),
-                            contentColor = foh.safeAccent,
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            CompactSignalVisualizer(
+                                playing = wantsPlay,
+                                barCount = 4,
+                            )
+                            FohMicroChip(
+                                label = if (wantsPlay) "PLAYING" else "STANDBY",
+                                containerColor = foh.safeAccent.copy(alpha = 0.16f),
+                                contentColor = foh.safeAccent,
+                            )
+                        }
                     } else {
                         Surface(
                             onClick = { onSelectEntry(entry, true) },
@@ -776,6 +791,8 @@ internal fun LocalFohCoverView(
     current: AudioTrack?,
     title: String,
     playback: SessionPlayback,
+    muted: Boolean = false,
+    effectiveGain: Float = 1f,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -813,6 +830,12 @@ internal fun LocalFohCoverView(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            LocalFohSignalStrip(
+                playing = playback.playing,
+                muted = muted,
+                effectiveGain = effectiveGain,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -863,6 +886,10 @@ internal fun LocalFohBottomDeck(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
+                    )
+                    CompactSignalVisualizer(
+                        playing = playback.playing,
+                        barCount = 4,
                     )
                     LocalFohLevelPill(
                         faderState = controlUi.faderState,
@@ -923,6 +950,10 @@ internal fun LocalFohBottomDeck(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
+                    )
+                    CompactSignalVisualizer(
+                        playing = playback.playing,
+                        barCount = 4,
                     )
                     LocalFohLevelPill(
                         faderState = controlUi.faderState,

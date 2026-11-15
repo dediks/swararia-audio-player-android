@@ -48,6 +48,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
@@ -268,7 +269,7 @@ internal fun LocalFohFaderSheet(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         FaderScaleColumn(modifier = Modifier.fillMaxHeight())
@@ -280,14 +281,15 @@ internal fun LocalFohFaderSheet(
                             dbLabel = faderState.dbLabel,
                             onPositionChange = onPositionChange,
                             modifier = Modifier
-                                .width(74.dp)
+                                .width(68.dp)
                                 .fillMaxHeight(),
                         )
                         PostFaderLevelBar(
                             effectiveGain = faderState.effectiveGain,
                             playing = playing,
+                            muted = faderState.muted,
                             modifier = Modifier
-                                .width(14.dp)
+                                .width(28.dp)
                                 .fillMaxHeight()
                                 .padding(vertical = 8.dp),
                         )
@@ -302,6 +304,7 @@ internal fun LocalFohFaderSheet(
                     ) {
                         FaderNumericReadoutCard(
                             faderState = faderState,
+                            playing = playing,
                             fadeBusy = fadeBusy,
                             accent = stripAccent,
                         )
@@ -532,41 +535,74 @@ private fun VerticalConsoleFaderTrack(
 private fun PostFaderLevelBar(
     effectiveGain: Float,
     playing: Boolean,
+    muted: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val foh = FohTheme.colors
-    val segments = 12
-    val fraction = effectiveGain.coerceIn(0f, 1f)
-    val litSegments = if (fraction <= 0f) 0 else (fraction * segments).roundToInt().coerceIn(1, segments)
+    val signal by rememberLocalAudioSignal()
+    val segments = 14
+    val gainFraction = effectiveGain.coerceIn(0f, 1f)
+    val ceilingSeg = if (gainFraction <= 0f || muted) -1 else ((gainFraction * segments).roundToInt() - 1).coerceIn(0, segments - 1)
+    val showLive = !muted && (playing || signal.active)
 
     Surface(
-        shape = RoundedCornerShape(7.dp),
+        shape = RoundedCornerShape(8.dp),
         color = Color(0xFF0C1310),
         border = BorderStroke(1.dp, foh.borderSubtle),
-        modifier = modifier,
+        modifier = modifier.semantics {
+            contentDescription = if (muted) "Stereo meter muted" else "Stereo post-fader level meter ${signal.peakDbLabel}"
+        },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 2.dp, vertical = 3.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+                .padding(horizontal = 3.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-            for (idx in 0 until segments) {
-                val fromBottom = segments - 1 - idx
-                val lit = fromBottom < litSegments
-                // Standard digital mixer meter ladder: bottom green (safe), upper amber (-6..-1 dB), top red (0 dB peak).
-                val segColor = when {
-                    !lit -> Color(0xFF1D2B24)
-                    fromBottom == segments - 1 -> foh.alertAccent
-                    fromBottom >= segments - 4 -> foh.warnAccent
-                    else -> foh.safeAccent
-                }.copy(alpha = if (lit && playing) 0.95f else if (lit) 0.65f else 0.70f)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(segColor),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                StereoMeterColumn(
+                    level = if (showLive) signal.levelL else 0f,
+                    peakHold = if (showLive) signal.peakHoldL else 0f,
+                    ceilingSegment = ceilingSeg,
+                    signalActive = signal.active,
+                    segments = segments,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+                StereoMeterColumn(
+                    level = if (showLive) signal.levelR else 0f,
+                    peakHold = if (showLive) signal.peakHoldR else 0f,
+                    ceilingSegment = ceilingSeg,
+                    signalActive = signal.active,
+                    segments = segments,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceAround,
+            ) {
+                Text(
+                    text = "L",
+                    style = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                )
+                Text(
+                    text = "R",
+                    style = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
                 )
             }
         }
@@ -574,8 +610,56 @@ private fun PostFaderLevelBar(
 }
 
 @Composable
+private fun StereoMeterColumn(
+    level: Float,
+    peakHold: Float,
+    ceilingSegment: Int,
+    signalActive: Boolean,
+    segments: Int,
+    modifier: Modifier = Modifier,
+) {
+    val foh = FohTheme.colors
+    val clampedLevel = level.coerceIn(0f, 1f)
+    val clampedHold = peakHold.coerceIn(0f, 1f)
+    val litSegments = if (clampedLevel <= 0.01f) 0 else (clampedLevel * segments).roundToInt().coerceIn(1, segments)
+    val peakSeg = if (clampedHold <= 0.01f) -1 else ((clampedHold * segments).roundToInt() - 1).coerceIn(0, segments - 1)
+
+    Canvas(modifier = modifier) {
+        val gapPx = 2.dp.toPx()
+        val totalGaps = gapPx * (segments - 1)
+        val segHeight = ((size.height - totalGaps) / segments).coerceAtLeast(1f)
+        val radius = CornerRadius(1.5.dp.toPx(), 1.5.dp.toPx())
+        for (idx in 0 until segments) {
+            val fromBottom = segments - 1 - idx
+            val topY = idx * (segHeight + gapPx)
+            val isLit = fromBottom < litSegments
+            val isPeakHold = fromBottom == peakSeg
+            val isCeilingMarker = !signalActive && ceilingSegment >= 0 && fromBottom == ceilingSegment
+            val baseColor = when {
+                fromBottom == segments - 1 -> foh.alertAccent
+                fromBottom >= segments - 4 -> foh.warnAccent
+                else -> foh.safeAccent
+            }
+            val color = when {
+                isPeakHold -> baseColor
+                isLit -> baseColor.copy(alpha = 0.94f)
+                isCeilingMarker -> baseColor.copy(alpha = 0.28f)
+                else -> Color(0xFF1D2B24).copy(alpha = 0.72f)
+            }
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(0f, topY),
+                size = Size(size.width, segHeight),
+                cornerRadius = radius,
+            )
+        }
+    }
+}
+
+@Composable
 private fun FaderNumericReadoutCard(
     faderState: FaderState,
+    playing: Boolean,
     fadeBusy: Boolean,
     accent: Color,
 ) {
@@ -625,7 +709,324 @@ private fun FaderNumericReadoutCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            FaderLivePeakReadout(muted = faderState.muted, playing = playing)
         }
+    }
+}
+
+@Composable
+private fun FaderLivePeakReadout(
+    muted: Boolean,
+    playing: Boolean,
+) {
+    val foh = FohTheme.colors
+    val signal by rememberLocalAudioSignal()
+    val maxLinear = maxOf(signal.peakLinearL, signal.peakLinearR)
+    val text = when {
+        muted -> "Peak MUTED"
+        playing || signal.active -> "Peak ${signal.peakDbLabel}"
+        else -> "Peak -∞ dB"
+    }
+    val color = when {
+        muted -> foh.alertAccent
+        (playing || signal.active) && maxLinear >= 0.89f -> foh.alertAccent
+        (playing || signal.active) && maxLinear >= 0.50f -> foh.warnAccent
+        playing || signal.active -> foh.safeAccent
+        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+    }
+    Text(
+        text = text,
+        style = TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFeatureSettings = "tnum",
+            color = color,
+        ),
+        maxLines = 1,
+        softWrap = false,
+    )
+}
+
+/**
+ * Full-width FOH live signal analyzer strip combining a dBFS peak readout, 16-band logarithmic
+ * RTA spectrum bars, and stereo L/R peak-hold LED meters driven by decoded PCM audio.
+ */
+@Composable
+internal fun LocalFohSignalStrip(
+    playing: Boolean,
+    muted: Boolean,
+    effectiveGain: Float,
+    modifier: Modifier = Modifier,
+) {
+    val foh = FohTheme.colors
+    val signal by rememberLocalAudioSignal()
+    val liveActive = !muted && (playing || signal.active)
+    val maxLinear = maxOf(signal.peakLinearL, signal.peakLinearR)
+    val peakText = when {
+        muted -> "MUTED"
+        liveActive -> signal.peakDbLabel
+        else -> "STANDBY"
+    }
+    val peakColor = when {
+        muted -> foh.alertAccent
+        liveActive && maxLinear >= 0.89f -> foh.alertAccent
+        liveActive && maxLinear >= 0.50f -> foh.warnAccent
+        liveActive -> foh.safeAccent
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val gainTag = if (muted) "0%" else "${(effectiveGain.coerceIn(0f, 1f) * 100f).roundToInt()}%"
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF080E0B),
+        border = BorderStroke(1.dp, foh.borderSubtle),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(46.dp)
+            .semantics {
+                contentDescription = if (liveActive) "Spektrum sinyal lokal ${signal.peakDbLabel}" else "Spektrum sinyal lokal $peakText"
+            },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(
+                modifier = Modifier.width(62.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                Text(
+                    text = if (muted) "SIGNAL $gainTag" else "SIGNAL",
+                    style = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp,
+                        color = if (liveActive) foh.safeAccent.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                Text(
+                    text = peakText,
+                    style = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFeatureSettings = "tnum",
+                        color = peakColor,
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+
+            Canvas(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+            ) {
+                drawRtaSpectrum(
+                    bands = signal.bands,
+                    bandPeaks = signal.bandPeaks,
+                    muted = muted,
+                    active = liveActive,
+                    safeAccent = foh.safeAccent,
+                    warnAccent = foh.warnAccent,
+                    alertAccent = foh.alertAccent,
+                )
+            }
+
+            Canvas(
+                modifier = Modifier
+                    .width(20.dp)
+                    .fillMaxHeight(),
+            ) {
+                drawDualCompactLedMeters(
+                    levelL = if (liveActive) signal.levelL else 0f,
+                    peakHoldL = if (liveActive) signal.peakHoldL else 0f,
+                    levelR = if (liveActive) signal.levelR else 0f,
+                    peakHoldR = if (liveActive) signal.peakHoldR else 0f,
+                    safeAccent = foh.safeAccent,
+                    warnAccent = foh.warnAccent,
+                    alertAccent = foh.alertAccent,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Compact multi-band live signal equalizer bars for MiniPlayer, Remote banner, Cue rows, and Library rows.
+ */
+@Composable
+internal fun CompactSignalVisualizer(
+    playing: Boolean,
+    modifier: Modifier = Modifier,
+    barCount: Int = 5,
+) {
+    val foh = FohTheme.colors
+    val signal by rememberLocalAudioSignal()
+    val safeBars = barCount.coerceIn(3, 8)
+    val widthDp = (safeBars * 3 + (safeBars - 1) * 2).dp
+    val isLive = !signal.muted && (playing || signal.active)
+
+    Canvas(
+        modifier = modifier
+            .width(widthDp)
+            .height(16.dp),
+    ) {
+        val gapPx = 2.dp.toPx()
+        val barWidth = ((size.width - gapPx * (safeBars - 1)) / safeBars).coerceAtLeast(1.5f)
+        val radius = CornerRadius(1.dp.toPx(), 1.dp.toPx())
+        val totalSourceBands = signal.bands.size.coerceAtLeast(1)
+
+        for (i in 0 until safeBars) {
+            val startIdx = (i * totalSourceBands) / safeBars
+            val endIdx = (((i + 1) * totalSourceBands) / safeBars).coerceAtLeast(startIdx + 1).coerceAtMost(totalSourceBands)
+            var peakBand = 0f
+            for (b in startIdx until endIdx) {
+                val value = signal.bands.getOrElse(b) { 0f }
+                if (value > peakBand) peakBand = value
+            }
+            val level = if (isLive) peakBand.coerceIn(0f, 1f) else 0f
+            val minBaseline = 2.dp.toPx().coerceAtMost(size.height)
+            val barHeight = if (level <= 0.01f) minBaseline else (minBaseline + level * (size.height - minBaseline)).coerceAtMost(size.height)
+            val x = i * (barWidth + gapPx)
+            val y = size.height - barHeight
+            val color = when {
+                signal.muted -> foh.alertAccent.copy(alpha = 0.45f)
+                !isLive || level <= 0.01f -> foh.safeAccent.copy(alpha = 0.30f)
+                level > 0.86f -> foh.alertAccent
+                level > 0.66f -> foh.warnAccent
+                else -> foh.safeAccent
+            }
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(x, y),
+                size = Size(barWidth, barHeight),
+                cornerRadius = radius,
+            )
+        }
+    }
+}
+
+private fun DrawScope.drawRtaSpectrum(
+    bands: List<Float>,
+    bandPeaks: List<Float>,
+    muted: Boolean,
+    active: Boolean,
+    safeAccent: Color,
+    warnAccent: Color,
+    alertAccent: Color,
+) {
+    val gridColor = Color.White.copy(alpha = 0.07f)
+    for (row in 1..2) {
+        val y = (size.height / 3f) * row
+        drawLine(color = gridColor, start = Offset(0f, y), end = Offset(size.width, y), strokeWidth = 1f)
+    }
+
+    val count = LocalSignalRules.BAND_COUNT
+    val gapPx = 2.dp.toPx()
+    val barWidth = ((size.width - gapPx * (count - 1)) / count).coerceAtLeast(2f)
+    val minHeight = 2.dp.toPx().coerceAtMost(size.height)
+    val radius = CornerRadius(1.2.dp.toPx(), 1.2.dp.toPx())
+
+    for (i in 0 until count) {
+        val x = i * (barWidth + gapPx)
+        val bandValue = if (!active || muted) 0f else bands.getOrElse(i) { 0f }.coerceIn(0f, 1f)
+        val peakValue = if (!active || muted) 0f else bandPeaks.getOrElse(i) { 0f }.coerceIn(0f, 1f)
+        val barHeight = if (bandValue <= 0.01f) minHeight else (minHeight + bandValue * (size.height - minHeight)).coerceAtMost(size.height)
+        val barTop = size.height - barHeight
+        val barColor = when {
+            muted -> alertAccent.copy(alpha = 0.25f)
+            bandValue <= 0.01f -> safeAccent.copy(alpha = 0.20f)
+            bandValue > 0.86f -> alertAccent
+            bandValue > 0.66f -> warnAccent
+            else -> safeAccent
+        }
+        drawRoundRect(
+            color = barColor,
+            topLeft = Offset(x, barTop),
+            size = Size(barWidth, barHeight),
+            cornerRadius = radius,
+        )
+
+        if (peakValue > 0.03f && peakValue > bandValue + 0.02f) {
+            val capHeight = 1.5.dp.toPx()
+            val peakY = (size.height - (minHeight + peakValue * (size.height - minHeight))).coerceIn(0f, size.height - capHeight)
+            val capColor = when {
+                peakValue > 0.86f -> alertAccent
+                peakValue > 0.66f -> warnAccent
+                else -> safeAccent.copy(alpha = 0.90f)
+            }
+            drawRect(
+                color = capColor,
+                topLeft = Offset(x, peakY),
+                size = Size(barWidth, capHeight),
+            )
+        }
+    }
+}
+
+private fun DrawScope.drawDualCompactLedMeters(
+    levelL: Float,
+    peakHoldL: Float,
+    levelR: Float,
+    peakHoldR: Float,
+    safeAccent: Color,
+    warnAccent: Color,
+    alertAccent: Color,
+) {
+    val channelGap = 2.dp.toPx()
+    val colWidth = ((size.width - channelGap) / 2f).coerceAtLeast(3f)
+    drawSingleCompactMeterColumn(0f, colWidth, levelL, peakHoldL, safeAccent, warnAccent, alertAccent)
+    drawSingleCompactMeterColumn(colWidth + channelGap, colWidth, levelR, peakHoldR, safeAccent, warnAccent, alertAccent)
+}
+
+private fun DrawScope.drawSingleCompactMeterColumn(
+    x: Float,
+    width: Float,
+    level: Float,
+    peakHold: Float,
+    safeAccent: Color,
+    warnAccent: Color,
+    alertAccent: Color,
+) {
+    val segments = 8
+    val segGap = 1.5.dp.toPx()
+    val segHeight = ((size.height - segGap * (segments - 1)) / segments).coerceAtLeast(1f)
+    val radius = CornerRadius(1.dp.toPx(), 1.dp.toPx())
+    val clamped = level.coerceIn(0f, 1f)
+    val clampedHold = peakHold.coerceIn(0f, 1f)
+    val litCount = if (clamped <= 0.01f) 0 else (clamped * segments).roundToInt().coerceIn(1, segments)
+    val holdIdx = if (clampedHold <= 0.01f) -1 else ((clampedHold * segments).roundToInt() - 1).coerceIn(0, segments - 1)
+
+    for (idx in 0 until segments) {
+        val fromBottom = segments - 1 - idx
+        val topY = idx * (segHeight + segGap)
+        val lit = fromBottom < litCount
+        val hold = fromBottom == holdIdx
+        val base = when {
+            fromBottom == segments - 1 -> alertAccent
+            fromBottom >= segments - 3 -> warnAccent
+            else -> safeAccent
+        }
+        val color = when {
+            hold -> base
+            lit -> base.copy(alpha = 0.94f)
+            else -> Color(0xFF1D2B24).copy(alpha = 0.72f)
+        }
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(x, topY),
+            size = Size(width, segHeight),
+            cornerRadius = radius,
+        )
     }
 }
 

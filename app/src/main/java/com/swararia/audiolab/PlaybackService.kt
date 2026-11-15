@@ -3,6 +3,7 @@ package com.swararia.audiolab
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
@@ -24,7 +25,10 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -89,6 +93,30 @@ class PlaybackService : MediaSessionService() {
     private var explicitlyStopped = false
     private var remoteServerForegroundActive = false
     private var remoteEndpointLabel = "LAN"
+    private val signalTapProcessor = LocalAudioSignalTapProcessor()
+    private var signalTickRunning = false
+    private val signalTick = object : Runnable {
+        override fun run() {
+            val player = appPlayer
+            val localPlaying = savedLocal == null && player?.isPlaying == true
+            val currentGain = if (savedLocal == null) (player?.volume ?: 0f).coerceIn(0f, 1f) else 0f
+            val raw = if (localPlaying) signalTapProcessor.pollNextFrame() else null
+            val next = LocalSignalRules.stepBallistics(
+                previous = LocalAudioSignalBus.state.value,
+                rawFrame = raw,
+                playing = localPlaying,
+                postFaderGain = currentGain,
+                muted = faderState.muted,
+                nowMs = SystemClock.uptimeMillis(),
+            )
+            LocalAudioSignalBus.publish(next)
+            if (localPlaying || next.active) {
+                handler.postDelayed(this, SIGNAL_TICK_MS)
+            } else {
+                signalTickRunning = false
+            }
+        }
+    }
 
     private val remotePlaybackHost = object : RemoteServicePlaybackHost {
         override fun currentSnapshot(): RemoteServerPlaybackSnapshot = buildRemoteSnapshot()
@@ -325,7 +353,18 @@ class PlaybackService : MediaSessionService() {
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(15_000, 30_000, 200, 600)
             .build()
-        val player = ExoPlayer.Builder(this)
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink = DefaultAudioSink.Builder(context)
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                .setAudioProcessors(arrayOf(signalTapProcessor))
+                .build()
+        }
+        val player = ExoPlayer.Builder(this, renderersFactory)
             .setLoadControl(loadControl)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true).setWakeMode(C.WAKE_MODE_LOCAL).build()
@@ -473,9 +512,19 @@ class PlaybackService : MediaSessionService() {
             putBoolean(PreviewProtocol.ERROR, state.error != null)
         }
     }
+    private fun ensureSignalTicker() {
+        val localPlaying = savedLocal == null && appPlayer?.isPlaying == true
+        if ((localPlaying || LocalAudioSignalBus.state.value.active) && !signalTickRunning) {
+            signalTickRunning = true
+            handler.removeCallbacks(signalTick)
+            handler.post(signalTick)
+        }
+    }
+
     private fun publishState() {
         session?.setSessionExtras(stateExtras())
         (application as? SwarariaApp)?.container?.remoteServerController?.notifyPlaybackChanged(buildRemoteSnapshot())
+        ensureSignalTicker()
     }
 
     private fun toMediaItems(entries: List<RemoteQueueEntry>): List<MediaItem> = entries.map { entry ->
@@ -1224,6 +1273,9 @@ class PlaybackService : MediaSessionService() {
         playbackPrefs.unregisterOnSharedPreferenceChangeListener(prefListener)
         scope.cancel()
         if (::previewOwner.isInitialized) previewOwner.close()
+        signalTickRunning = false
+        handler.removeCallbacks(signalTick)
+        LocalAudioSignalBus.reset()
         cancelFade(); handler.removeCallbacksAndMessages(null)
         appPlayer?.removeListener(playerListener); session?.release(); session = null
         appPlayer?.release(); appPlayer = null
@@ -1231,6 +1283,7 @@ class PlaybackService : MediaSessionService() {
     }
     companion object {
         private const val PREFERENCES = "native_playback"
+        private const val SIGNAL_TICK_MS = 33L
         private const val ACTION_CANCEL_PREVIEW = "com.swararia.audiolab.CANCEL_PREVIEW"
         private const val REMOTE_SERVER_CHANNEL = "remote_server"
         private const val REMOTE_SERVER_NOTIFICATION_ID = 2103

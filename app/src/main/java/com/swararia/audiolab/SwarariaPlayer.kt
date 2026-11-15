@@ -230,6 +230,10 @@ internal fun RemoteLocalAudioPill(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            CompactSignalVisualizer(
+                playing = playback.playing,
+                barCount = 4,
+            )
             if (faderState.isAttenuated) {
                 LocalFohLevelPill(faderState = faderState, compact = true)
             }
@@ -345,6 +349,10 @@ internal fun MiniPlayer(
                         positionMsProvider = positionMsProvider,
                     )
                 }
+                CompactSignalVisualizer(
+                    playing = playback.playing,
+                    barCount = 5,
+                )
                 if (faderState.isAttenuated) {
                     LocalFohLevelPill(faderState = faderState, compact = true)
                 }
@@ -555,6 +563,8 @@ internal fun FocusedPlayer(
                             current = current,
                             title = activeTitle,
                             playback = playback,
+                            muted = controlUi.faderState.muted,
+                            effectiveGain = controlUi.faderState.effectiveGain,
                         )
                     }
                 }
