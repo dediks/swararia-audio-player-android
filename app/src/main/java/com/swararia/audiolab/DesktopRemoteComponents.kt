@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,6 +27,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,11 +40,11 @@ internal data class RemoteBadge(val label: String, val highlighted: Boolean, val
 internal fun resolveConnectionBadge(state: DesktopRemoteUiState): RemoteBadge? = when (state.remotePhase) {
     RemotePhase.DISCONNECTED -> null
     RemotePhase.CONNECTING -> RemoteBadge("Menghubungkan…", highlighted = false)
-    RemotePhase.PENDING -> RemoteBadge("Menunggu PC", highlighted = false)
+    RemotePhase.PENDING -> RemoteBadge("Menunggu Persetujuan", highlighted = false)
     RemotePhase.ACTIVE -> when {
         !state.fresh && state.remoteRole == null -> RemoteBadge("Menyambung…", highlighted = false)
         !state.fresh -> RemoteBadge("Syncing", highlighted = false)
-        state.playback?.online != true -> RemoteBadge("PC Offline", highlighted = false, error = true)
+        state.playback?.online != true -> RemoteBadge("Target Offline", highlighted = false, error = true)
         state.remoteRole == RemoteRole.VIEW_ONLY -> RemoteBadge("Pantau Saja", highlighted = false)
         else -> RemoteBadge("FOH Ready", highlighted = true)
     }
@@ -71,12 +73,12 @@ internal fun formatRemainingLabel(timeSec: Number?, durationSec: Number?): Strin
 
 internal fun formatOutcomeFeedback(outcome: String): Pair<String, Boolean> =
     when (RemoteCommandOutcome.fromWire(outcome) ?: RemoteCommandOutcome.REJECTED) {
-        RemoteCommandOutcome.ACCEPTED -> "Mengirim perintah ke PC…" to false
-        RemoteCommandOutcome.PENDING -> "Menunggu konfirmasi pemutar PC…" to false
-        RemoteCommandOutcome.APPLIED -> "Perintah diterapkan di PC" to false
+        RemoteCommandOutcome.ACCEPTED -> "Mengirim perintah ke target…" to false
+        RemoteCommandOutcome.PENDING -> "Menunggu konfirmasi pemutar target…" to false
+        RemoteCommandOutcome.APPLIED -> "Perintah diterapkan" to false
         RemoteCommandOutcome.UNKNOWN -> "Hasil belum pasti — tidak dikirim ulang" to true
-        RemoteCommandOutcome.EXPIRED -> "Batas waktu habis — cek PC" to true
-        RemoteCommandOutcome.REJECTED -> "Perintah ditolak oleh pemutar PC" to true
+        RemoteCommandOutcome.EXPIRED -> "Batas waktu habis — cek perangkat target" to true
+        RemoteCommandOutcome.REJECTED -> "Perintah ditolak oleh pemutar target" to true
     }
 
 @Composable
@@ -90,141 +92,138 @@ internal fun ActiveRemoteHeaderBar(
     onShowSessionInfo: () -> Unit,
     onRequestDisconnect: () -> Unit,
 ) {
+    val foh = FohTheme.colors
     var menuOpen by remember { mutableStateOf(false) }
     val statusNote = when {
         !state.fresh && state.role == null ->
-            (state.message ?: "Menyambung ulang ke Desktop… kontrol terkunci sementara.") to false
-        !state.fresh -> "Menyegarkan status terbaru dari PC…" to false
-        state.playback?.online != true -> "Pemutar web PC belum aktif di browser PC." to true
+            (state.message ?: "Menyambung ulang ke perangkat target… kontrol terkunci sementara.") to false
+        !state.fresh -> "Menyegarkan status terbaru dari perangkat target…" to false
+        state.playback?.online != true -> "Pemutar di perangkat target belum aktif." to true
         state.message != null -> state.message to true
         else -> null
     }
     Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = foh.surfaceCard,
+            border = BorderStroke(1.dp, foh.borderSubtle),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 16.dp, vertical = 4.dp),
         ) {
-            BrandLogo(30.dp)
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    text = state.endpoint ?: "Desktop PC",
-                    style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    resolveConnectionBadge(state)?.let { badge ->
-                        StatusPill(badge = badge, compact = true)
-                    }
+                    Text(
+                        text = state.endpoint ?: "Perangkat Target",
+                        style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val roleLabel = if (state.role == "control") "Kendali Penuh" else if (state.role == "view_only") "Pantau Saja" else "Menyambung"
                     val metaTag = when {
-                        !state.fresh && state.role == null -> "Menunggu PC"
-                        state.fresh && state.playback?.online == true && state.tracks.isNotEmpty() -> "${state.tracks.size} lagu"
-                        state.fresh && state.playback?.online != true -> "Pemutar PC nonaktif"
-                        else -> null
+                        !state.fresh && state.role == null -> "Menunggu perangkat target…"
+                        state.fresh && state.playback?.online == true && state.tracks.isNotEmpty() ->
+                            "Perangkat target · ${state.tracks.size} lagu · $roleLabel"
+                        state.fresh && state.playback?.online != true -> "Pemutar target nonaktif · $roleLabel"
+                        else -> "Perangkat target · $roleLabel"
                     }
-                    if (metaTag != null) {
-                        Text(
-                            text = metaTag,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-            Surface(
-                onClick = onToggleKeepScreenOn,
-                shape = CircleShape,
-                color = if (keepScreenOn) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                border = BorderStroke(
-                    1.dp,
-                    if (keepScreenOn) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                ),
-                modifier = Modifier.size(34.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = UiIcons.Sun,
-                        contentDescription = if (keepScreenOn) "Layar selalu menyala aktif" else "Jaga layar tetap menyala",
-                        tint = if (keepScreenOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(17.dp),
+                    Text(
+                        text = metaTag,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-            }
-            IconButton(
-                onClick = onRefresh,
-                enabled = !state.busy,
-                modifier = Modifier.size(34.dp),
-            ) {
-                Icon(UiIcons.Refresh, contentDescription = "Segarkan status PC", modifier = Modifier.size(18.dp))
-            }
-            Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(34.dp)) {
-                    Icon(UiIcons.More, contentDescription = "Menu sesi", modifier = Modifier.size(18.dp))
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    if (canSyncGroupToPc) {
+                CompactCircleButton(
+                    icon = UiIcons.Sun,
+                    description = if (keepScreenOn) "Layar selalu menyala aktif" else "Jaga layar tetap menyala",
+                    onClick = onToggleKeepScreenOn,
+                    size = 34.dp,
+                    iconSize = 17.dp,
+                    containerColor = if (keepScreenOn) foh.safeBg else foh.surfaceDeep,
+                    contentColor = if (keepScreenOn) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box {
+                    CompactCircleButton(
+                        icon = UiIcons.More,
+                        description = "Menu sesi remote",
+                        onClick = { menuOpen = true },
+                        size = 34.dp,
+                        iconSize = 18.dp,
+                        containerColor = foh.surfaceDeep,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                    )
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
-                            text = { Text("Terapkan folder ini di PC") },
+                            text = { Text("Segarkan status") },
                             leadingIcon = { Icon(UiIcons.Refresh, null, modifier = Modifier.size(18.dp)) },
-                            onClick = { menuOpen = false; onSyncGroupToPc() },
+                            onClick = { menuOpen = false; onRefresh() },
+                        )
+                        if (canSyncGroupToPc) {
+                            DropdownMenuItem(
+                                text = { Text("Terapkan folder ini ke target") },
+                                leadingIcon = { Icon(UiIcons.Refresh, null, modifier = Modifier.size(18.dp)) },
+                                onClick = { menuOpen = false; onSyncGroupToPc() },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Info & keamanan sesi") },
+                            leadingIcon = { Icon(UiIcons.Info, null, modifier = Modifier.size(18.dp)) },
+                            onClick = { menuOpen = false; onShowSessionInfo() },
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Putuskan sesi", color = foh.alertAccent) },
+                            leadingIcon = { Icon(UiIcons.Close, null, tint = foh.alertAccent, modifier = Modifier.size(18.dp)) },
+                            onClick = { menuOpen = false; onRequestDisconnect() },
                         )
                     }
-                    DropdownMenuItem(
-                        text = { Text("Info & keamanan sesi") },
-                        leadingIcon = { Icon(UiIcons.Info, null, modifier = Modifier.size(18.dp)) },
-                        onClick = { menuOpen = false; onShowSessionInfo() },
-                    )
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text("Putuskan sesi PC", color = MaterialTheme.colorScheme.error) },
-                        leadingIcon = { Icon(UiIcons.Close, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp)) },
-                        onClick = { menuOpen = false; onRequestDisconnect() },
-                    )
                 }
             }
         }
         statusNote?.let { (text, isError) ->
             Surface(
-                color = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
-                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
-                modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+                color = if (isError) foh.alertBg else foh.surfaceDeep,
+                border = BorderStroke(1.dp, if (isError) foh.alertBorder else foh.borderSubtle),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
                         UiIcons.Info,
                         contentDescription = null,
-                        tint = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (isError) foh.alertAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(14.dp),
                     )
                     Text(
                         text = text,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                        color = if (isError) foh.alertAccent else MaterialTheme.colorScheme.onSurface,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
     }
 }
 
@@ -257,9 +256,9 @@ internal fun RemoteSearchFilterStrip(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+            shape = RoundedCornerShape(14.dp),
+            color = FohTheme.colors.surfaceDeep,
+            border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
@@ -354,19 +353,10 @@ internal fun RemoteSearchFilterStrip(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 items(groups, key = { it.id }, contentType = { "remote-group-chip" }) { group ->
-                    val selected = group.id == selectedGroupId
-                    FilterChip(
-                        selected = selected,
+                    FohFilterChip(
+                        label = if (group.count > 0) "${group.name} (${group.count})" else group.name,
+                        selected = group.id == selectedGroupId,
                         onClick = { onSelectGroup(group) },
-                        shape = RoundedCornerShape(999.dp),
-                        label = {
-                            Text(
-                                text = if (group.count > 0) "${group.name} (${group.count})" else group.name,
-                                style = MaterialTheme.typography.labelMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
                     )
                 }
             }
@@ -443,9 +433,9 @@ internal fun RemoteSearchFilterStrip(
                             modifier = Modifier.size(14.dp),
                         )
                         Text(
-                            text = "Sinkron Grup PC",
+                            text = "Sinkron Grup",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = FohTheme.colors.safeAccent,
                             fontWeight = FontWeight.Medium,
                         )
                     }
@@ -515,29 +505,30 @@ internal fun TrackPickerRow(
     onDownload: () -> Unit,
     onCancelDownload: () -> Unit,
 ) {
-    val activeHighlight = MaterialTheme.colorScheme.primary
+    val foh = FohTheme.colors
+    val activeHighlight = foh.safeAccent
     val containerColor = if (isCurrent) {
-        activeHighlight.copy(alpha = 0.14f)
+        foh.safeBg
     } else {
-        MaterialTheme.colorScheme.surface
+        foh.surfaceCard
     }
     val borderStroke = if (isCurrent) {
-        BorderStroke(1.5.dp, activeHighlight.copy(alpha = 0.8f))
+        BorderStroke(1.5.dp, foh.safeBorder)
     } else {
-        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f))
+        BorderStroke(1.dp, foh.borderSubtle)
     }
     val downloadSubtext = when (downloadState?.status) {
-        DesktopRemoteTrackDownload.Status.CHECKING -> "Memeriksa lagu di PC…"
+        DesktopRemoteTrackDownload.Status.CHECKING -> "Memeriksa file…"
         DesktopRemoteTrackDownload.Status.DOWNLOADING -> {
             val total = downloadState.totalBytes
             if (total > 0L) {
                 val pct = ((downloadState.downloadedBytes.toDouble() / total.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
-                "Mengunduh ke HP… $pct%"
-            } else "Mengunduh ke HP…"
+                "Mengunduh… $pct%"
+            } else "Mengunduh…"
         }
         DesktopRemoteTrackDownload.Status.IMPORTING -> "Memverifikasi & menyimpan ke Library…"
-        DesktopRemoteTrackDownload.Status.SAVED -> "Tersimpan di Library HP"
-        DesktopRemoteTrackDownload.Status.ALREADY_IN_LIBRARY -> "Sudah ada di Library HP"
+        DesktopRemoteTrackDownload.Status.SAVED -> "Tersimpan di Library"
+        DesktopRemoteTrackDownload.Status.ALREADY_IN_LIBRARY -> "Sudah ada di Library"
         DesktopRemoteTrackDownload.Status.FAILED -> downloadState.detail ?: "Unduhan gagal"
         null -> null
     }
@@ -574,7 +565,7 @@ internal fun TrackPickerRow(
                 )
                 if (isCurrent) {
                     Text(
-                        text = if (isCurrentPlaying) "Sedang diputar di PC" else "Aktif (Standby) di PC",
+                        text = if (isCurrentPlaying) "Sedang diputar" else "Aktif · Standby",
                         style = MaterialTheme.typography.labelSmall,
                         color = activeHighlight,
                     )
@@ -749,7 +740,7 @@ internal fun FohTransportDock(
             append(activeSlotNumber.toString().padStart(2, '0'))
             append(" • ")
         }
-        append(playback?.title?.takeIf { it.isNotBlank() } ?: "Belum ada track dipilih di PC")
+        append(playback?.title?.takeIf { it.isNotBlank() } ?: "Belum ada track dipilih")
     }
     val supportsPrevNext = "prev" in state.commands || "next" in state.commands
     val waitingCommand = state.waitingCommand
@@ -864,7 +855,7 @@ private fun CollapsedFohTransportBody(
         ) {
             CompactCircleButton(
                 icon = UiIcons.ChevronUp,
-                description = "Perluas pemutar desktop",
+                description = "Perluas kontrol pemutar",
                 onClick = onToggleCollapse,
                 size = 30.dp,
                 iconSize = 16.dp,
@@ -875,7 +866,7 @@ private fun CollapsedFohTransportBody(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable(onClickLabel = "Perluas kontrol desktop") { onToggleCollapse() },
+                    .clickable(onClickLabel = "Perluas kontrol pemutar") { onToggleCollapse() },
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 Row(
@@ -926,7 +917,7 @@ private fun CollapsedFohTransportBody(
                 val primaryPlay = playEnabled && (showPause || hasLoadedTrack)
                 CompactCircleButton(
                     icon = if (showPause) UiIcons.Pause else UiIcons.Play,
-                    description = if (showPause) "Pause desktop" else "Play desktop",
+                    description = if (showPause) "Pause pemutar target" else "Play pemutar target",
                     onClick = onTogglePlayPause,
                     enabled = playEnabled,
                     size = 34.dp,
@@ -938,7 +929,7 @@ private fun CollapsedFohTransportBody(
                 )
                 CompactCircleButton(
                     icon = UiIcons.Stop,
-                    description = "Stop desktop",
+                    description = "Stop pemutar target",
                     onClick = onStop,
                     enabled = stopEnabled,
                     size = 34.dp,
@@ -1038,7 +1029,7 @@ private fun ExpandedFohTransportBody(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable(onClickLabel = "Perkecil pemutar desktop") { onToggleCollapse() },
+                    .clickable(onClickLabel = "Perkecil kontrol pemutar") { onToggleCollapse() },
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Row(
@@ -1046,7 +1037,7 @@ private fun ExpandedFohTransportBody(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = if (percentLabel != null) "PEMUTAR PC · $percentLabel" else "PEMUTAR PC",
+                        text = if (percentLabel != null) "PEMUTAR TARGET · $percentLabel" else "PEMUTAR TARGET",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold,
@@ -1080,7 +1071,7 @@ private fun ExpandedFohTransportBody(
                     StatusPill(badge = badge, compact = true)
                     CompactCircleButton(
                         icon = UiIcons.ChevronDown,
-                        description = "Perkecil pemutar desktop",
+                        description = "Perkecil kontrol pemutar",
                         onClick = onToggleCollapse,
                         size = 26.dp,
                         iconSize = 15.dp,
@@ -1142,7 +1133,7 @@ private fun ExpandedFohTransportBody(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    text = "Mode Pantau Saja · Kontrol transport dinonaktifkan oleh PC.",
+                    text = "Mode Pantau Saja · Kontrol transport dinonaktifkan.",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
@@ -1226,7 +1217,7 @@ private fun ExpandedFohTransportBody(
                 }
             } else if (state.fresh && state.role == "control" && state.playback?.online == true) {
                 Text(
-                    text = "Fade Out 3s belum aktif di server PC (restart Swararia PC).",
+                    text = "Fade Out 3s belum tersedia pada server target ini.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1272,12 +1263,14 @@ internal fun NoticeCard(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
 ) {
-    val container = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
-    val content = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+    val foh = FohTheme.colors
+    val container = if (isError) foh.alertBg else foh.surfaceCard
+    val border = if (isError) foh.alertBorder else foh.borderSubtle
+    val content = if (isError) foh.alertAccent else MaterialTheme.colorScheme.onSurfaceVariant
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = container,
-        border = BorderStroke(1.dp, content.copy(alpha = 0.3f)),
+        border = BorderStroke(1.dp, border),
         modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
     ) {
         Row(
@@ -1306,24 +1299,22 @@ internal fun NoticeCard(
 }
 
 @Composable
-internal fun RemoteHeaderBar(state: DesktopRemoteUiState) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+private fun RemoteScopePill(label: String, highlighted: Boolean = false) {
+    val foh = FohTheme.colors
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = if (highlighted) foh.safeBg else foh.surfaceDeep,
+        border = BorderStroke(1.dp, if (highlighted) foh.safeBorder else foh.borderSubtle),
     ) {
-        BrandLogo(38.dp)
-        Column(modifier = Modifier.weight(1f)) {
-            Text("Desktop Remote", style = MaterialTheme.typography.headlineSmall)
-            Text(
-                text = state.endpoint?.let { "Desktop • $it" } ?: "Kendalikan pemutar PC dari HP",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        resolveConnectionBadge(state)?.let { badge -> StatusPill(badge) }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = if (highlighted) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
     }
 }
 
@@ -1333,75 +1324,147 @@ internal fun DisconnectedPairingSection(
     scanning: Boolean,
     busy: Boolean,
     scanFeedback: String?,
+    manualFeedback: String?,
     errorMessage: String?,
     onInputChange: (String) -> Unit,
     onScanQr: () -> Unit,
+    onPasteManual: () -> Unit,
     onConnectManual: () -> Unit,
 ) {
+    val foh = FohTheme.colors
     val validPreviewEndpoint = remember(input) {
         if (input.isBlank()) null
         else runCatching { DesktopRemotePairing.parse(input).endpoint }.getOrNull()
     }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        RemoteScopePill("HP ↔ HP", highlighted = true)
+        RemoteScopePill("HP ↔ Laptop / PC")
+        RemoteScopePill("Lokal LAN / Hotspot")
+    }
+
     Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+        shape = RoundedCornerShape(18.dp),
+        color = foh.safeBg,
+        border = BorderStroke(1.dp, foh.safeBorder),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(UiIcons.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-                Text("Hubungkan ke Pemutar PC", style = MaterialTheme.typography.titleMedium)
+                Icon(UiIcons.Link, contentDescription = null, tint = foh.safeAccent, modifier = Modifier.size(21.dp))
+                Text(
+                    text = "Hubungkan ke Pemutar FOH",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = foh.safeAccent,
+                )
             }
             Text(
-                "Di PC: buka menu Android Remote → Hubungkan Android → Buat kode pairing, lalu pindai kode QR dari layar PC.",
-                style = MaterialTheme.typography.bodyMedium,
+                text = "Buka Mode Server di perangkat target (HP lain atau menu Android Remote di Swararia Laptop/PC), lalu pindai kode QR-nya.",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Button(
                 onClick = onScanQr,
                 enabled = !busy && !scanning,
                 shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
             ) {
-                Icon(UiIcons.QrScan, contentDescription = null, modifier = Modifier.size(20.dp))
+                Icon(UiIcons.QrScan, contentDescription = null, modifier = Modifier.size(19.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(if (scanning) "Menyiapkan Scanner…" else "Scan QR dari PC")
+                Text(if (scanning) "Menyiapkan Scanner…" else "Pindai QR Perangkat")
             }
             if (scanning || busy) LinearProgressIndicator(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)))
             scanFeedback?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(it, style = MaterialTheme.typography.bodySmall, color = foh.alertAccent)
             }
         }
     }
+
     errorMessage?.let { NoticeCard(it, isError = true) }
+
     Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        shape = RoundedCornerShape(18.dp),
+        color = foh.surfaceCard,
+        border = BorderStroke(1.dp, foh.borderSubtle),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Atau Pairing Manual", style = MaterialTheme.typography.titleSmall)
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("Atau Pairing Manual", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                RemoteScopePill("Tanpa Kamera")
+            }
             Text(
-                "Gunakan hanya jika kamera tidak tersedia. Jangan kirim teks pairing lewat chat.",
+                text = "Tempel kode pairing lokal swararia1|… dari perangkat target. Jangan bagikan kode lewat chat.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedTextField(
                 value = input,
                 onValueChange = onInputChange,
-                label = { Text("Teks pairing swararia1|…") },
+                label = { Text("Kode pairing swararia1|…") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    autoCorrectEnabled = false,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = {
+                        if (input.isNotEmpty() && !busy && !scanning) {
+                            onConnectManual()
+                        }
+                    },
+                ),
+                trailingIcon = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (input.isNotEmpty()) {
+                            IconButton(
+                                onClick = { onInputChange("") },
+                                enabled = !busy && !scanning,
+                            ) {
+                                Icon(
+                                    imageVector = UiIcons.Close,
+                                    contentDescription = "Hapus kode pairing",
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = onPasteManual,
+                            enabled = !busy && !scanning,
+                        ) {
+                            Icon(
+                                imageVector = UiIcons.Paste,
+                                contentDescription = "Tempel kode dari clipboard",
+                                tint = foh.safeAccent,
+                                modifier = Modifier.size(19.dp),
+                            )
+                        }
+                    }
+                },
             )
-            if (validPreviewEndpoint != null) {
+            if (manualFeedback != null) {
                 Text(
-                    text = "Endpoint terdeteksi: $validPreviewEndpoint",
+                    text = manualFeedback,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = foh.alertAccent,
+                )
+            } else if (validPreviewEndpoint != null) {
+                Text(
+                    text = "Target terdeteksi: $validPreviewEndpoint",
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.primary,
+                    color = foh.safeAccent,
                 )
             } else if (input.isNotEmpty()) {
                 Text(
@@ -1410,40 +1473,69 @@ internal fun DisconnectedPairingSection(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            OutlinedButton(
-                onClick = onConnectManual,
-                enabled = input.isNotEmpty() && !busy && !scanning,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
-            ) { Text("Connect") }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onPasteManual,
+                    enabled = !busy && !scanning,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, foh.safeBorder),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = foh.safeBg,
+                        contentColor = foh.safeAccent,
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 46.dp),
+                ) {
+                    Icon(UiIcons.Paste, contentDescription = null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Tempel", maxLines = 1, softWrap = false)
+                }
+                Button(
+                    onClick = onConnectManual,
+                    enabled = input.isNotEmpty() && !busy && !scanning,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1.25f)
+                        .heightIn(min = 46.dp),
+                ) {
+                    Text("Hubungkan", maxLines = 1, softWrap = false)
+                }
+            }
         }
     }
 }
 
 @Composable
 internal fun PendingApprovalCard(state: DesktopRemoteUiState, onRefresh: () -> Unit, onCancel: () -> Unit) {
+    val foh = FohTheme.colors
     Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+        shape = RoundedCornerShape(18.dp),
+        color = foh.warnBg,
+        border = BorderStroke(1.dp, foh.warnBorder),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
-                if (state.remotePhase == RemotePhase.CONNECTING) "Menghubungkan ke PC…" else "Menunggu Persetujuan di PC",
-                style = MaterialTheme.typography.titleLarge,
+                if (state.remotePhase == RemotePhase.CONNECTING) "Menghubungkan ke Target…" else "Menunggu Persetujuan",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = foh.warnAccent,
             )
             LinearProgressIndicator(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)))
             Text(
                 if (state.remotePhase == RemotePhase.CONNECTING) {
                     "Memverifikasi identitas TLS dan mendaftarkan sesi pairing."
                 } else {
-                    "Di jendela Swararia pada PC Anda, klik Izinkan kontrol / Pantau saja untuk menyetujui HP ini."
+                    "Di perangkat target (Mode Server atau jendela Swararia Laptop/PC), ketuk Izinkan Control atau View-Only untuk menyetujui perangkat ini."
                 },
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = foh.alertAccent) }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
                     onClick = onRefresh,
@@ -1455,7 +1547,7 @@ internal fun PendingApprovalCard(state: DesktopRemoteUiState, onRefresh: () -> U
                     onClick = onCancel,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f).heightIn(min = 46.dp),
-                ) { Text("Batalkan") }
+                ) { Text("Batalkan", color = foh.alertAccent) }
             }
         }
     }
@@ -1472,9 +1564,9 @@ internal fun ReplacePlayingTrackDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Ganti Lagu di PC?") },
+        title = { Text("Ganti Lagu Target?") },
         text = {
-            Text("PC sedang aktif pada \"$currentTitle\". Memilih \"${targetTrack.title}\" akan menghentikan lagu tersebut.")
+            Text("Perangkat target sedang aktif pada \"$currentTitle\". Memilih \"${targetTrack.title}\" akan menghentikan lagu tersebut.")
         },
         confirmButton = {
             Button(onClick = if (preferredAutoPlay) onPlayNow else onCueOnly) {
@@ -1503,8 +1595,8 @@ internal fun DisconnectConfirmDialog(
         title = { Text("Putuskan Sesi Remote?") },
         text = {
             Text(
-                "Sesi terenkripsi dengan ${endpoint ?: "PC"} akan dihapus dari HP ini. " +
-                    "Musik yang sedang berjalan di PC tidak akan dihentikan.",
+                "Sesi terenkripsi dengan ${endpoint ?: "perangkat target"} akan dihapus dari perangkat ini. " +
+                    "Audio yang sedang berjalan di perangkat target tetap berlanjut.",
             )
         },
         confirmButton = {
@@ -1532,9 +1624,9 @@ internal fun SessionInfoDialog(
         else -> "-"
     }
     val mediaLabel = if (state.mediaSupported) {
-        "Aktif di PC (ketuk ikon unduh pada baris lagu untuk menyimpan ke Library HP)"
+        "Aktif di target (ketuk ikon unduh pada baris lagu untuk menyimpan ke Library)"
     } else {
-        "Nonaktif (aktifkan di modal Android Remote pada browser PC bila perlu mengunduh)"
+        "Nonaktif (aktifkan izin Transfer & Sync pada server target bila perlu mengunduh)"
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1542,10 +1634,10 @@ internal fun SessionInfoDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Endpoint: ${state.endpoint ?: "-"}", style = MaterialTheme.typography.bodySmall)
-                Text("Peran HP ini: $roleLabel", style = MaterialTheme.typography.bodySmall)
-                Text("Unduh lagu ke HP: $mediaLabel", style = MaterialTheme.typography.bodySmall)
+                Text("Peran perangkat ini: $roleLabel", style = MaterialTheme.typography.bodySmall)
+                Text("Unduh file lagu: $mediaLabel", style = MaterialTheme.typography.bodySmall)
                 Text(
-                    "Menutup aplikasi tidak menghentikan audio PC. Token sesi dienkripsi dengan Android Keystore.",
+                    "Menutup aplikasi tidak menghentikan audio di perangkat target. Token sesi dienkripsi dengan Android Keystore.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

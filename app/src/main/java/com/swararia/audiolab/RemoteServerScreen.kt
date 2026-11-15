@@ -1,8 +1,11 @@
 package com.swararia.audiolab
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -18,8 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -28,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.common.BitMatrix
@@ -35,6 +38,18 @@ import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
+
+internal fun copyPlainTextToClipboard(context: Context, label: String, value: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, value))
+}
+
+internal fun readPlainTextFromClipboard(context: Context): String? = runCatching {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
+    val clip = clipboard.primaryClip ?: return null
+    if (clip.itemCount <= 0) return null
+    clip.getItemAt(0).coerceToText(context)?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+}.getOrNull()
 
 @Composable
 internal fun RemoteTabScreen(
@@ -45,6 +60,9 @@ internal fun RemoteTabScreen(
     localAudioBanner: @Composable () -> Unit = {},
 ) {
     var serverMode by rememberSaveable { mutableStateOf(false) }
+    var showGuideDialog by rememberSaveable { mutableStateOf(false) }
+    var qrScanRequestTick by remember { mutableIntStateOf(0) }
+    val remoteState by desktopRemote.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
     DisposableEffect(lifecycle, serverMode) {
@@ -64,14 +82,35 @@ internal fun RemoteTabScreen(
     }
 
     Column(modifier) {
-        RemoteModeSwitcher(
-            serverMode = serverMode,
-            serverActive = serverState.snapshot.enabled,
-            onSelectMode = { serverMode = it },
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-        )
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            RemoteHeader(
+                serverMode = serverMode,
+                serverState = serverState,
+                remoteState = remoteState,
+                onTriggerScan = { qrScanRequestTick++ },
+                onRefreshRemote = { desktopRemote.refresh() },
+                onRefreshInterfaces = serverActions.onRefreshInterfaces,
+                onOpenGuide = { showGuideDialog = true },
+            )
+            FohSegmentedBar(
+                options = listOf(false, true),
+                selected = serverMode,
+                label = { isSrv ->
+                    when {
+                        !isSrv -> "Kendalikan"
+                        serverState.snapshot.enabled -> "● Server Aktif"
+                        else -> "Mode Server"
+                    }
+                },
+                onSelect = { serverMode = it },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         localAudioBanner()
         if (serverMode) {
             RemoteServerScreen(
@@ -87,76 +126,137 @@ internal fun RemoteTabScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
+                qrScanRequestTick = qrScanRequestTick,
             )
         }
+    }
+
+    if (showGuideDialog) {
+        RemoteGuideDialog(onDismiss = { showGuideDialog = false })
     }
 }
 
 @Composable
-private fun RemoteModeSwitcher(
+private fun RemoteHeader(
     serverMode: Boolean,
-    serverActive: Boolean,
-    onSelectMode: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
+    serverState: RemoteServerUiState,
+    remoteState: DesktopRemoteUiState,
+    onTriggerScan: () -> Unit,
+    onRefreshRemote: () -> Unit,
+    onRefreshInterfaces: () -> Unit,
+    onOpenGuide: () -> Unit,
 ) {
-    val colors = MaterialTheme.colorScheme
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        color = colors.surfaceVariant,
+    val activeBadge = remember(remoteState) { resolveConnectionBadge(remoteState) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            ModeChip(
-                label = "Kendalikan PC",
-                selected = !serverMode,
-                onClick = { onSelectMode(false) },
-                modifier = Modifier.weight(1f),
-            )
-            ModeChip(
-                label = if (serverActive) "Server HP • Aktif" else "Jadikan HP Ini Server",
-                selected = serverMode,
-                onClick = { onSelectMode(true) },
-                modifier = Modifier.weight(1f),
-            )
+        Text(
+            text = "Remote",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (serverMode) {
+            if (serverState.snapshot.enabled) {
+                FohHeaderChipButton(
+                    label = "Server On",
+                    icon = UiIcons.Check,
+                    active = true,
+                    onClick = onOpenGuide,
+                )
+            } else {
+                FohHeaderChipButton(
+                    label = "Segarkan IP",
+                    icon = UiIcons.Refresh,
+                    active = false,
+                    enabled = !serverState.busy,
+                    onClick = onRefreshInterfaces,
+                )
+            }
+        } else {
+            when (remoteState.phase) {
+                "disconnected" -> {
+                    FohHeaderChipButton(
+                        label = "Scan QR",
+                        icon = UiIcons.QrScan,
+                        active = true,
+                        enabled = !remoteState.busy,
+                        onClick = onTriggerScan,
+                    )
+                }
+                "active" -> {
+                    FohHeaderChipButton(
+                        label = activeBadge?.label ?: "FOH Ready",
+                        icon = if (remoteState.playback?.online == true) UiIcons.Check else UiIcons.Info,
+                        active = activeBadge?.highlighted == true,
+                        onClick = onOpenGuide,
+                    )
+                    CompactCircleButton(
+                        icon = UiIcons.Refresh,
+                        description = "Segarkan status target",
+                        onClick = onRefreshRemote,
+                        enabled = !remoteState.busy,
+                        size = 36.dp,
+                        iconSize = 18.dp,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                else -> {
+                    FohHeaderChipButton(
+                        label = "Cek Status",
+                        icon = UiIcons.Refresh,
+                        active = false,
+                        enabled = !remoteState.busy,
+                        onClick = onRefreshRemote,
+                    )
+                }
+            }
         }
+        CompactCircleButton(
+            icon = UiIcons.Info,
+            description = "Panduan Remote FOH",
+            onClick = onOpenGuide,
+            size = 36.dp,
+            iconSize = 18.dp,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 
 @Composable
-private fun ModeChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = MaterialTheme.colorScheme
-    Surface(
-        modifier = modifier
-            .heightIn(min = 44.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        color = if (selected) colors.primary else Color.Transparent,
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                color = if (selected) colors.onPrimary else colors.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
+private fun RemoteGuideDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Panduan Remote FOH") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Remote mendukung kendali lintas perangkat pada jaringan Wi-Fi atau Hotspot lokal yang sama (HP ↔ HP, HP ↔ Laptop/PC, atau Browser Web ↔ HP).",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "• Kendalikan: Pindai QR atau tempel kode swararia1|... untuk memutar, menyiapkan lagu (cue), dan mengunduh file dari perangkat target.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "• Mode Server: Jadikan perangkat ini pemutar panggung agar bisa dikendalikan dari Swararia lain (QR) atau browser HP/Laptop/iPhone (URL HTTPS + PIN).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } },
+    )
 }
 
 @Composable
@@ -167,7 +267,8 @@ internal fun RemoteServerScreen(
 ) {
     val snapshot = state.snapshot
     val colors = MaterialTheme.colorScheme
-    val clipboard = LocalClipboardManager.current
+    val foh = FohTheme.colors
+    val context = LocalContext.current
 
     var selectedIp by rememberSaveable { mutableStateOf("") }
     var portInput by rememberSaveable { mutableStateOf("8443") }
@@ -201,54 +302,37 @@ internal fun RemoteServerScreen(
     val approvedDevices = remember(snapshot.devices) { snapshot.devices.filter { it.status == "active" } }
 
     fun copyText(label: String, value: String) {
-        clipboard.setText(AnnotatedString(value))
-        copiedNotice = "$label disalin"
+        copyPlainTextToClipboard(context, label, value)
+        copiedNotice = "$label disalin ke clipboard"
     }
 
     LazyColumn(
         modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item(key = "header") {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Server FOH (HP)", style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        text = if (snapshot.enabled) {
-                            "Aktif di ${snapshot.bindIp}:${snapshot.port}"
-                        } else {
-                            "HP ini siap menjadi pemutar panggung yang dikendalikan HP/Laptop FOH"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant,
-                    )
-                }
-                StatusPill(
-                    text = if (snapshot.enabled) "AKTIF" else "NONAKTIF",
-                    active = snapshot.enabled,
-                )
-            }
-        }
-
         if (copiedNotice != null) {
             item(key = "copied") {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = colors.primaryContainer,
+                    color = foh.safeBg,
+                    border = BorderStroke(1.dp, foh.safeBorder),
                 ) {
-                    Text(
-                        text = copiedNotice.orEmpty(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onPrimaryContainer,
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 14.dp, vertical = 10.dp),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(UiIcons.Check, null, tint = foh.safeAccent, modifier = Modifier.size(16.dp))
+                        Text(
+                            text = copiedNotice.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = foh.safeAccent,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
             }
         }
@@ -257,23 +341,24 @@ internal fun RemoteServerScreen(
             item(key = "error") {
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = colors.errorContainer,
+                    color = foh.alertBg,
+                    border = BorderStroke(1.dp, foh.alertBorder),
                 ) {
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .padding(14.dp),
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Text(
                             text = err,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = colors.onErrorContainer,
+                            color = foh.alertAccent,
                             modifier = Modifier.weight(1f),
                         )
                         TextButton(onClick = actions.onClearError) {
-                            Text("Tutup")
+                            Text("Tutup", color = foh.alertAccent)
                         }
                     }
                 }
@@ -284,7 +369,8 @@ internal fun RemoteServerScreen(
             item(key = "active-transfers") {
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = colors.secondaryContainer,
+                    color = foh.btBg,
+                    border = BorderStroke(1.dp, foh.btBorder),
                 ) {
                     Column(
                         Modifier
@@ -295,13 +381,13 @@ internal fun RemoteServerScreen(
                         Text(
                             text = "Transfer Media Berjalan (${state.activeTransfers})",
                             style = MaterialTheme.typography.titleSmall,
-                            color = colors.onSecondaryContainer,
+                            color = foh.btAccent,
                         )
                         state.transferStatus?.let {
                             Text(
                                 text = it,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = colors.onSecondaryContainer,
+                                color = colors.onSurfaceVariant,
                             )
                         }
                         LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -320,7 +406,6 @@ internal fun RemoteServerScreen(
                 busy = state.busy,
                 onSelectIp = { selectedIp = it },
                 onPortChange = { value -> portInput = value.filter { it.isDigit() }.take(5) },
-                onRefreshInterfaces = actions.onRefreshInterfaces,
                 onStart = {
                     val port = parsedPort ?: return@ServerNetworkCard
                     if (selectedIp.isNotBlank()) actions.onStartServer(selectedIp, port)
@@ -329,49 +414,14 @@ internal fun RemoteServerScreen(
             )
         }
 
-        item(key = "transfer-policy") {
-            TransferPolicyCard(
-                mediaTransferEnabled = snapshot.mediaTransferEnabled,
-                pauseDuringPlayback = snapshot.pauseTransferDuringPlayback,
-                onSetTransferEnabled = actions.onSetMediaTransferEnabled,
-                onSetPauseDuringPlayback = actions.onSetPauseTransferDuringPlayback,
-            )
-        }
-
-        if (snapshot.enabled && snapshot.nativePairingUri != null) {
-            item(key = "native-qr") {
-                NativePairingCard(
-                    pairingUri = snapshot.nativePairingUri,
-                    expiresAt = snapshot.nativeInviteExpiresAt,
-                    onCopyUri = { copyText("URI Pairing", snapshot.nativePairingUri) },
-                    onRefreshInvite = actions.onRefreshNativeInvite,
-                )
-            }
-        }
-
-        if (snapshot.enabled && snapshot.webUrl != null) {
-            item(key = "web-pin") {
-                WebAccessCard(
-                    webUrl = snapshot.webUrl,
-                    webPin = snapshot.webPin,
-                    expiresAt = snapshot.webPinExpiresAt,
-                    fingerprintHex = snapshot.fingerprintHex,
-                    onCopyUrl = { copyText("URL Web", snapshot.webUrl) },
-                    onCopyPin = { snapshot.webPin?.let { copyText("PIN Web", it) } },
-                    onCopyFingerprint = {
-                        snapshot.fingerprintHex?.let { copyText("Fingerprint TLS", it) }
-                    },
-                    onRefreshPin = actions.onRefreshWebPin,
-                )
-            }
-        }
-
         if (pendingDevices.isNotEmpty()) {
             item(key = "pending-header") {
                 Text(
                     text = "Menunggu Persetujuan (${pendingDevices.size})",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(top = 4.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = foh.warnAccent,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
             }
             items(pendingDevices, key = { "pending-${it.deviceId}" }) { device ->
@@ -389,11 +439,42 @@ internal fun RemoteServerScreen(
             }
         }
 
+        if (snapshot.enabled && (snapshot.nativePairingUri != null || snapshot.webUrl != null)) {
+            item(key = "server-invite") {
+                ServerInviteCard(
+                    pairingUri = snapshot.nativePairingUri,
+                    nativeExpiresAt = snapshot.nativeInviteExpiresAt,
+                    webUrl = snapshot.webUrl,
+                    webPin = snapshot.webPin,
+                    webExpiresAt = snapshot.webPinExpiresAt,
+                    fingerprintHex = snapshot.fingerprintHex,
+                    onCopyUri = { snapshot.nativePairingUri?.let { copyText("Kode pairing", it) } },
+                    onRefreshInvite = actions.onRefreshNativeInvite,
+                    onCopyUrl = { snapshot.webUrl?.let { copyText("URL Web", it) } },
+                    onCopyPin = { snapshot.webPin?.let { copyText("PIN Web", it) } },
+                    onCopyFingerprint = {
+                        snapshot.fingerprintHex?.let { copyText("Fingerprint TLS", it) }
+                    },
+                    onRefreshPin = actions.onRefreshWebPin,
+                )
+            }
+        }
+
+        item(key = "transfer-policy") {
+            TransferPolicyCard(
+                mediaTransferEnabled = snapshot.mediaTransferEnabled,
+                pauseDuringPlayback = snapshot.pauseTransferDuringPlayback,
+                onSetTransferEnabled = actions.onSetMediaTransferEnabled,
+                onSetPauseDuringPlayback = actions.onSetPauseTransferDuringPlayback,
+            )
+        }
+
         item(key = "approved-header") {
             Text(
                 text = "Perangkat Terhubung (${approvedDevices.size})",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(top = 4.dp),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 2.dp),
             )
         }
 
@@ -401,13 +482,14 @@ internal fun RemoteServerScreen(
             item(key = "approved-empty") {
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = colors.surfaceVariant.copy(alpha = 0.55f),
+                    color = foh.surfaceDeep,
+                    border = BorderStroke(1.dp, foh.borderSubtle),
                 ) {
                     Text(
                         text = if (snapshot.enabled) {
-                            "Belum ada remote yang terhubung. Scan QR dari Swararia Android lain atau buka URL HTTPS di browser FOH."
+                            "Belum ada perangkat terhubung. Pindai QR dari tab Kendalikan di perangkat Swararia lain atau buka URL HTTPS di browser FOH."
                         } else {
-                            "Nyalakan Server HP untuk menerima koneksi remote."
+                            "Nyalakan Server FOH agar HP lain, Laptop/PC, atau browser dapat terhubung."
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant,
@@ -444,14 +526,15 @@ private fun ServerNetworkCard(
     busy: Boolean,
     onSelectIp: (String) -> Unit,
     onPortChange: (String) -> Unit,
-    onRefreshInterfaces: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val foh = FohTheme.colors
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = colors.surfaceVariant.copy(alpha = 0.65f),
+        color = if (snapshot.enabled) foh.safeBg else foh.surfaceCard,
+        border = BorderStroke(1.dp, if (snapshot.enabled) foh.safeBorder else foh.borderSubtle),
     ) {
         Column(
             Modifier
@@ -459,13 +542,33 @@ private fun ServerNetworkCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Jaringan & Endpoint", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                if (!snapshot.enabled) {
-                    TextButton(onClick = onRefreshInterfaces, enabled = !busy) {
-                        Text("Segarkan IP")
-                    }
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = if (snapshot.enabled) "Server FOH Berjalan" else "Server Pemutar Lokal",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (snapshot.enabled) foh.safeAccent else colors.onSurface,
+                    )
+                    Text(
+                        text = if (snapshot.enabled) {
+                            snapshot.webUrl ?: "https://${snapshot.bindIp}:${snapshot.port}/"
+                        } else {
+                            "Jadikan perangkat ini pemutar panggung yang dikendalikan HP lain, Laptop, atau browser FOH."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = if (snapshot.enabled) FontFamily.Monospace else FontFamily.Default,
+                        color = if (snapshot.enabled) colors.onSurface else colors.onSurfaceVariant,
+                    )
                 }
+                StatusPill(
+                    text = if (snapshot.enabled) "● AKTIF" else "NONAKTIF",
+                    active = snapshot.enabled,
+                )
             }
 
             if (busy) {
@@ -474,11 +577,6 @@ private fun ServerNetworkCard(
 
             if (snapshot.enabled) {
                 Text(
-                    text = "Endpoint HTTPS aktif di ${snapshot.webUrl ?: "https://${snapshot.bindIp}:${snapshot.port}/"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                )
-                Text(
                     text = "Server berjalan bersama layanan foreground pemutaran audio.",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
@@ -486,32 +584,43 @@ private fun ServerNetworkCard(
                 OutlinedButton(
                     onClick = onStop,
                     enabled = !busy,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, foh.alertBorder),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = foh.alertBg.copy(alpha = 0.65f),
+                        contentColor = foh.alertAccent,
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 48.dp),
+                        .heightIn(min = 46.dp),
                 ) {
+                    Icon(UiIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text("Hentikan Server")
                 }
             } else {
-                if (interfaces.isEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "Tidak ada alamat IP Wi-Fi atau Hotspot lokal ditemukan. Nyalakan Hotspot HP atau hubungkan ke router Wi-Fi FOH, lalu ketuk Segarkan IP.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.error,
+                        text = "Alamat IP Jaringan FOH",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold,
                     )
-                } else {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(interfaces, key = { it.ip }) { candidate ->
-                            FilterChip(
-                                selected = candidate.ip == selectedIp,
-                                onClick = { onSelectIp(candidate.ip) },
-                                label = {
-                                    Text(
-                                        "${candidate.label} • ${candidate.ip}",
-                                        maxLines = 1,
-                                    )
-                                },
-                            )
+                    if (interfaces.isEmpty()) {
+                        Text(
+                            text = "Tidak ada IP Wi-Fi atau Hotspot lokal ditemukan. Nyalakan Hotspot atau hubungkan ke router Wi-Fi FOH, lalu ketuk Segarkan IP.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = foh.alertAccent,
+                        )
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(interfaces, key = { it.ip }) { candidate ->
+                                FohFilterChip(
+                                    label = "${candidate.label} • ${candidate.ip}",
+                                    selected = candidate.ip == selectedIp,
+                                    onClick = { onSelectIp(candidate.ip) },
+                                )
+                            }
                         }
                     }
                 }
@@ -532,11 +641,14 @@ private fun ServerNetworkCard(
                 Button(
                     onClick = onStart,
                     enabled = selectedIp.isNotBlank() && validPort && !busy,
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp),
                 ) {
-                    Text("Nyalakan Server HP")
+                    Icon(UiIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Nyalakan Server FOH")
                 }
             }
         }
@@ -551,9 +663,11 @@ private fun TransferPolicyCard(
     onSetPauseDuringPlayback: (Boolean) -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val foh = FohTheme.colors
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = colors.surfaceVariant.copy(alpha = 0.65f),
+        color = foh.surfaceCard,
+        border = BorderStroke(1.dp, foh.borderSubtle),
     ) {
         Column(
             Modifier
@@ -561,7 +675,7 @@ private fun TransferPolicyCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Keamanan & Sinkronisasi Lagu", style = MaterialTheme.typography.titleMedium)
+            Text("Keamanan & Sinkronisasi Media", style = MaterialTheme.typography.titleMedium)
 
             Row(
                 Modifier.fillMaxWidth(),
@@ -571,7 +685,7 @@ private fun TransferPolicyCard(
                 Column(Modifier.weight(1f)) {
                     Text("Izinkan Transfer & Sync File", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        text = "Default MATI. Memungkinkan perangkat berizin Control mengunduh & mengunggah lagu ke perpustakaan HP ini (cek duplikat SHA-256).",
+                        text = "Default MATI. Memungkinkan perangkat berizin Control mengunduh & mengirim lagu ke perpustakaan perangkat ini (cek hash SHA-256).",
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSurfaceVariant,
                     )
@@ -582,7 +696,7 @@ private fun TransferPolicyCard(
                 )
             }
 
-            HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.5f))
+            HorizontalDivider(color = foh.borderSubtle.copy(alpha = 0.6f))
 
             Row(
                 Modifier.fillMaxWidth(),
@@ -592,7 +706,7 @@ private fun TransferPolicyCard(
                 Column(Modifier.weight(1f)) {
                     Text("Tahan Transfer Saat Audio Diputar", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        text = "Menjaga pemutaran panggung tetap mulus dengan memblokir upload/download sementara saat lagu berstatus PLAYING.",
+                        text = "Menjaga pemutaran panggung tetap mulus dengan menahan upload/download sementara saat lagu berstatus PLAYING.",
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSurfaceVariant,
                     )
@@ -608,18 +722,35 @@ private fun TransferPolicyCard(
 }
 
 @Composable
-private fun NativePairingCard(
-    pairingUri: String,
-    expiresAt: Double?,
+private fun ServerInviteCard(
+    pairingUri: String?,
+    nativeExpiresAt: Double?,
+    webUrl: String?,
+    webPin: String?,
+    webExpiresAt: Double?,
+    fingerprintHex: String?,
     onCopyUri: () -> Unit,
     onRefreshInvite: () -> Unit,
+    onCopyUrl: () -> Unit,
+    onCopyPin: () -> Unit,
+    onCopyFingerprint: () -> Unit,
+    onRefreshPin: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    val remainingSec = rememberRemainingSeconds(expiresAt)
+    val foh = FohTheme.colors
+    var inviteTab by rememberSaveable { mutableIntStateOf(0) }
+    val showBothTabs = pairingUri != null && webUrl != null
+    val effectiveTab = when {
+        showBothTabs -> inviteTab
+        pairingUri != null -> 0
+        else -> 1
+    }
+    val remainingSec = rememberRemainingSeconds(if (effectiveTab == 0) nativeExpiresAt else webExpiresAt)
 
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = colors.surfaceVariant.copy(alpha = 0.65f),
+        color = foh.surfaceCard,
+        border = BorderStroke(1.dp, foh.borderSubtle),
     ) {
         Column(
             Modifier
@@ -629,174 +760,196 @@ private fun NativePairingCard(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Pairing Swararia Android (QR)", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = if (remainingSec > 0) {
-                            "Berlaku ${remainingSec}s • Pindai di tab Remote → Kendalikan PC"
-                        } else {
-                            "Undangan QR kedaluwarsa — ketuk QR Baru"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (remainingSec > 0) colors.onSurfaceVariant else colors.error,
-                    )
-                }
-            }
-
-            QrCodeBox(
-                payload = pairingUri,
-                modifier = Modifier
-                    .size(210.dp)
-                    .clip(RoundedCornerShape(14.dp)),
-            )
-
-            Text(
-                text = pairingUri,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = colors.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton(
-                    onClick = onCopyUri,
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp),
-                ) {
-                    Text("Salin URI")
-                }
-                Button(
-                    onClick = onRefreshInvite,
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp),
-                ) {
-                    Text("QR Baru")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun WebAccessCard(
-    webUrl: String,
-    webPin: String?,
-    expiresAt: Double?,
-    fingerprintHex: String?,
-    onCopyUrl: () -> Unit,
-    onCopyPin: () -> Unit,
-    onCopyFingerprint: () -> Unit,
-    onRefreshPin: () -> Unit,
-) {
-    val colors = MaterialTheme.colorScheme
-    val remainingSec = rememberRemainingSeconds(expiresAt)
-
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = colors.surfaceVariant.copy(alpha = 0.65f),
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("Akses Browser HP / iPhone / Laptop", style = MaterialTheme.typography.titleMedium)
-            Text(
-                text = "Buka URL di bawah pada browser FOH, lanjutkan peringatan sertifikat lokal sekali, lalu masukkan PIN 8 karakter.",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-            )
-
-            Text(
-                text = webUrl,
-                style = MaterialTheme.typography.titleSmall,
-                fontFamily = FontFamily.Monospace,
-                color = colors.primary,
-            )
-
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = colors.surface,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                        Text(
-                            text = if (remainingSec > 0) "PIN WEB (${remainingSec}s)" else "PIN KEDALUWARSA",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (remainingSec > 0) colors.onSurfaceVariant else colors.error,
-                        )
-                        Text(
-                            text = webPin ?: "--------",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-                OutlinedButton(
-                    onClick = onRefreshPin,
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) {
-                    Text("PIN Baru")
-                }
-            }
-
-            if (fingerprintHex != null) {
                 Text(
-                    text = "SHA-256 TLS: $fingerprintHex",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = colors.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    text = "Undang Perangkat FOH",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                StatusPill(
+                    text = if (remainingSec > 0) {
+                        if (effectiveTab == 0) "${remainingSec}s" else "PIN ${remainingSec}s"
+                    } else {
+                        "Kedaluwarsa"
+                    },
+                    active = remainingSec > 0,
+                    warn = remainingSec <= 0,
                 )
             }
 
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton(
-                    onClick = onCopyUrl,
-                    contentPadding = PaddingValues(horizontal = 10.dp),
+            if (showBothTabs) {
+                FohSegmentedBar(
+                    options = listOf(0, 1),
+                    selected = inviteTab,
+                    label = { if (it == 0) "QR Aplikasi" else "Browser (URL & PIN)" },
+                    onSelect = { inviteTab = it },
+                )
+            }
+
+            if (effectiveTab == 0 && pairingUri != null) {
+                QrCodeBox(
+                    payload = pairingUri,
                     modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp),
+                        .size(200.dp)
+                        .clip(RoundedCornerShape(14.dp)),
+                )
+
+                Text(
+                    text = if (remainingSec > 0) {
+                        "Pindai dari tab Remote → Kendalikan di HP Android lain."
+                    } else {
+                        "Undangan QR kedaluwarsa — ketuk QR Baru"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (remainingSec > 0) colors.onSurfaceVariant else foh.alertAccent,
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = foh.surfaceDeep,
+                    border = BorderStroke(1.dp, foh.borderSubtle),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Salin URL", maxLines = 1, softWrap = false)
+                    Text(
+                        text = pairingUri,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    )
                 }
-                OutlinedButton(
-                    onClick = onCopyPin,
-                    enabled = webPin != null,
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp),
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Salin PIN", maxLines = 1, softWrap = false)
-                }
-                if (fingerprintHex != null) {
                     OutlinedButton(
-                        onClick = onCopyFingerprint,
-                        contentPadding = PaddingValues(horizontal = 10.dp),
+                        onClick = onCopyUri,
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 48.dp),
+                            .heightIn(min = 44.dp),
                     ) {
-                        Text("Salin TLS", maxLines = 1, softWrap = false)
+                        Text("Salin Kode", maxLines = 1, softWrap = false)
+                    }
+                    Button(
+                        onClick = onRefreshInvite,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp),
+                    ) {
+                        Text("QR Baru", maxLines = 1, softWrap = false)
+                    }
+                }
+            } else if (webUrl != null) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = foh.surfaceDeep,
+                    border = BorderStroke(1.dp, foh.borderSubtle),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = webUrl,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = foh.safeAccent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    )
+                }
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = foh.surfaceDeep,
+                        border = BorderStroke(1.dp, foh.borderSubtle),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Column(Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
+                            Text(
+                                text = if (remainingSec > 0) "PIN WEB (${remainingSec}s)" else "PIN KEDALUWARSA",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (remainingSec > 0) colors.onSurfaceVariant else foh.alertAccent,
+                            )
+                            Text(
+                                text = webPin ?: "--------",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = onRefreshPin,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.heightIn(min = 46.dp),
+                    ) {
+                        Text("PIN Baru")
+                    }
+                }
+
+                Text(
+                    text = "Buka URL di browser Laptop/iPhone FOH, lanjutkan peringatan sertifikat lokal sekali, lalu masukkan PIN.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                if (fingerprintHex != null) {
+                    Text(
+                        text = "SHA-256 TLS: $fingerprintHex",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = onCopyUrl,
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp),
+                    ) {
+                        Text("Salin URL", maxLines = 1, softWrap = false)
+                    }
+                    OutlinedButton(
+                        onClick = onCopyPin,
+                        enabled = webPin != null,
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp),
+                    ) {
+                        Text("Salin PIN", maxLines = 1, softWrap = false)
+                    }
+                    if (fingerprintHex != null) {
+                        OutlinedButton(
+                            onClick = onCopyFingerprint,
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 44.dp),
+                        ) {
+                            Text("Salin TLS", maxLines = 1, softWrap = false)
+                        }
                     }
                 }
             }
@@ -813,11 +966,13 @@ private fun PendingDeviceCard(
     onDeny: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val foh = FohTheme.colors
     var grantTransfer by remember(device.deviceId, transferToggleEnabled) { mutableStateOf(false) }
 
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = colors.tertiaryContainer.copy(alpha = 0.5f),
+        color = foh.warnBg,
+        border = BorderStroke(1.dp, foh.warnBorder),
     ) {
         Column(
             Modifier
@@ -827,7 +982,7 @@ private fun PendingDeviceCard(
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(device.label, style = MaterialTheme.typography.titleSmall)
+                    Text(device.label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Text(
                         text = if (device.kind == RemoteClientKind.WEB) "Browser Web • ${device.deviceId.take(8)}"
                         else "Aplikasi Swararia • ${device.deviceId.take(8)}",
@@ -835,7 +990,7 @@ private fun PendingDeviceCard(
                         color = colors.onSurfaceVariant,
                     )
                 }
-                StatusPill(text = device.kind.name, active = true)
+                StatusPill(text = device.kind.name, active = false, warn = true)
             }
 
             if (transferToggleEnabled) {
@@ -855,25 +1010,27 @@ private fun PendingDeviceCard(
             ) {
                 Button(
                     onClick = { onApproveControl(transferToggleEnabled && grantTransfer) },
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .heightIn(min = 48.dp),
+                        .heightIn(min = 44.dp),
                 ) {
-                    Text("Control")
+                    Text("Control", maxLines = 1, softWrap = false)
                 }
                 OutlinedButton(
                     onClick = onApproveViewOnly,
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .heightIn(min = 48.dp),
+                        .heightIn(min = 44.dp),
                 ) {
-                    Text("View-Only")
+                    Text("View-Only", maxLines = 1, softWrap = false)
                 }
                 TextButton(
                     onClick = onDeny,
-                    modifier = Modifier.heightIn(min = 48.dp),
+                    modifier = Modifier.heightIn(min = 44.dp),
                 ) {
-                    Text("Tolak", color = colors.error)
+                    Text("Tolak", color = foh.alertAccent)
                 }
             }
         }
@@ -888,9 +1045,11 @@ private fun ConnectedDeviceCard(
     onRevoke: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val foh = FohTheme.colors
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = colors.surfaceVariant.copy(alpha = 0.65f),
+        color = foh.surfaceCard,
+        border = BorderStroke(1.dp, foh.borderSubtle),
     ) {
         Column(
             Modifier
@@ -902,7 +1061,7 @@ private fun ConnectedDeviceCard(
                 Column(Modifier.weight(1f)) {
                     Text(device.label, style = MaterialTheme.typography.titleSmall)
                     val roleLabel = if (device.role == "control") "Kendali Penuh (Control)" else "Pantau Saja (View-Only)"
-                    val kindLabel = if (device.kind == RemoteClientKind.WEB) "Browser Web" else "Aplikasi Android"
+                    val kindLabel = if (device.kind == RemoteClientKind.WEB) "Browser Web" else "Aplikasi Swararia"
                     Text(
                         text = "$kindLabel • $roleLabel",
                         style = MaterialTheme.typography.bodySmall,
@@ -910,7 +1069,7 @@ private fun ConnectedDeviceCard(
                     )
                 }
                 TextButton(onClick = onRevoke) {
-                    Text("Putuskan", color = colors.error)
+                    Text("Putuskan", color = foh.alertAccent)
                 }
             }
 
@@ -936,18 +1095,37 @@ private fun ConnectedDeviceCard(
 }
 
 @Composable
-private fun StatusPill(text: String, active: Boolean) {
+private fun StatusPill(text: String, active: Boolean, warn: Boolean = false) {
     val colors = MaterialTheme.colorScheme
+    val foh = FohTheme.colors
+    val container = when {
+        warn -> foh.warnBg
+        active -> foh.safeBg
+        else -> foh.surfaceDeep
+    }
+    val border = when {
+        warn -> foh.warnBorder
+        active -> foh.safeBorder
+        else -> foh.borderSubtle
+    }
+    val content = when {
+        warn -> foh.warnAccent
+        active -> foh.safeAccent
+        else -> colors.onSurfaceVariant
+    }
     Surface(
         shape = RoundedCornerShape(999.dp),
-        color = if (active) colors.primaryContainer else colors.surfaceVariant,
+        color = container,
+        border = BorderStroke(1.dp, border),
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = if (active) colors.onPrimaryContainer else colors.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            fontWeight = FontWeight.Bold,
+            color = content,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         )
     }
 }

@@ -131,7 +131,7 @@ class DesktopRemoteSession(
             mutable.value = DesktopRemoteUiState(
                 endpoint = savedPairing.endpoint,
                 phase = "active",
-                message = "Menyambung ulang ke Desktop…",
+                message = "Menyambung ulang ke perangkat target…",
             )
             startPolling()
         }
@@ -173,10 +173,10 @@ class DesktopRemoteSession(
                     parsed.forgetInvitation()
                     pairing = parsed; grant = issued
                     mutable.value = DesktopRemoteUiState(endpoint = parsed.endpoint, phase = "pending",
-                        message = "Setujui perangkat ini di PC.")
+                        message = "Setujui perangkat ini di perangkat target.")
                 }
             } catch (cancel: CancellationException) { throw cancel }
-              catch (_: Exception) { if (generation == ticket) disconnectWith("Pairing gagal atau hasil tidak diketahui. Buat invite baru di PC; tidak dicoba ulang.") }
+              catch (_: Exception) { if (generation == ticket) disconnectWith("Pairing gagal atau hasil tidak diketahui. Buat kode baru di perangkat target; tidak dicoba ulang.") }
             finally {
                 parsed.forgetInvitation()
                 if (generation == ticket) {
@@ -222,14 +222,14 @@ class DesktopRemoteSession(
         val g = grant ?: return
         if (poll != null) return
         if (expiresAt > 0.0 && expiresAt <= now()) {
-            disconnectWith("Sesi kedaluwarsa. Pair ulang di PC.")
+            disconnectWith("Sesi kedaluwarsa. Pair ulang dengan perangkat target.")
             return
         }
         val ticket = generation
         poll = scope.launch {
             while (isActive && visibility === owner && generation == ticket) {
                 if (expiresAt > 0.0 && expiresAt <= now()) {
-                    disconnectWith("Sesi kedaluwarsa. Pair ulang di PC.")
+                    disconnectWith("Sesi kedaluwarsa. Pair ulang dengan perangkat target.")
                     break
                 }
                 serial.withLock { read(p, g, ticket, owner) }
@@ -264,7 +264,7 @@ class DesktopRemoteSession(
                         commands = emptySet(), mediaSupported = false, mediaMaxBytes = 0L,
                         playlist = null, activeGroupId = null, totalTracks = 0,
                         groups = emptyList(), currentTrackId = null, tracks = emptyList(),
-                        downloads = emptyMap(), fresh = false, message = "Setujui perangkat ini di PC.",
+                        downloads = emptyMap(), fresh = false, message = "Setujui perangkat ini di perangkat target.",
                     )
                 }
                 return
@@ -456,20 +456,20 @@ class DesktopRemoteSession(
 
     private fun downloadFailureMessage(failure: Exception): String = when (failure) {
         is DesktopRemoteFailure -> when (failure.reason) {
-            DesktopRemoteFailure.Reason.MEDIA_DISABLED -> "Fitur unduh dimatikan di PC."
+            DesktopRemoteFailure.Reason.MEDIA_DISABLED -> "Fitur unduh dimatikan di perangkat target."
             DesktopRemoteFailure.Reason.MEDIA_VIEW_ONLY -> "Mode Pantau Saja tidak bisa mengunduh."
-            DesktopRemoteFailure.Reason.MEDIA_BUSY -> "Antrean unduh PC penuh. Coba sebentar lagi."
+            DesktopRemoteFailure.Reason.MEDIA_BUSY -> "Antrean unduh perangkat target penuh. Coba sebentar lagi."
             DesktopRemoteFailure.Reason.MEDIA_TOO_LARGE -> "Ukuran file melebihi batas 150 MB."
-            DesktopRemoteFailure.Reason.MEDIA_UNSUPPORTED -> "Format audio tidak didukung HP."
-            DesktopRemoteFailure.Reason.MEDIA_UNAVAILABLE -> "File tidak tersedia di PC."
+            DesktopRemoteFailure.Reason.MEDIA_UNSUPPORTED -> "Format audio tidak didukung di perangkat ini."
+            DesktopRemoteFailure.Reason.MEDIA_UNAVAILABLE -> "File tidak tersedia di perangkat target."
             DesktopRemoteFailure.Reason.NONE -> when (failure.kind) {
-                DesktopRemoteFailure.Kind.AUTH -> "Akses unduh ditolak PC."
-                DesktopRemoteFailure.Kind.TRUST -> "Identitas TLS PC tidak cocok."
+                DesktopRemoteFailure.Kind.AUTH -> "Akses unduh ditolak perangkat target."
+                DesktopRemoteFailure.Kind.TRUST -> "Identitas TLS perangkat target tidak cocok."
                 DesktopRemoteFailure.Kind.UNAVAILABLE -> "Koneksi terputus saat mengunduh."
                 else -> "Unduhan gagal diverifikasi."
             }
         }
-        else -> "Gagal menyimpan ke Library HP."
+        else -> "Gagal menyimpan ke Library."
     }
 
     private fun dispatchControlAction(
@@ -512,7 +512,7 @@ class DesktopRemoteSession(
                     }
                     if (failure is DesktopRemoteFailure && failure.kind in setOf(DesktopRemoteFailure.Kind.AUTH, DesktopRemoteFailure.Kind.TRUST, DesktopRemoteFailure.Kind.PROTOCOL)) {
                         val outcome = mutable.value.outcome
-                        disconnectWith("Sesi/perintah ditolak. Pair ulang di PC.")
+                        disconnectWith("Sesi/perintah ditolak. Pair ulang dengan perangkat target.")
                         mutable.update { it.copy(outcome = outcome) }
                     }
                 }

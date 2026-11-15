@@ -22,13 +22,18 @@ import kotlinx.coroutines.launch
 
 private data class PendingTrackChoice(val track: DesktopRemoteTrack, val preferredAutoPlay: Boolean)
 
-/** No saved state, clipboard reads, camera permission, discovery, or playback ownership. */
+/** No saved state, automatic clipboard reads, camera permission, discovery, or playback ownership. */
 @Composable
-fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modifier) {
+fun DesktopRemoteScreen(
+    session: DesktopRemoteSession,
+    modifier: Modifier = Modifier,
+    qrScanRequestTick: Int = 0,
+) {
     val state by session.state.collectAsStateWithLifecycle()
     var input by rememberSaveable { mutableStateOf("") }
     var scanning by remember { mutableStateOf(false) }
     var scanFeedback by remember { mutableStateOf<String?>(null) }
+    var manualFeedback by remember { mutableStateOf<String?>(null) }
     var pendingScanned by remember { mutableStateOf<String?>(null) }
     var trackQuery by rememberSaveable { mutableStateOf("") }
     var selectedGroupId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -87,6 +92,7 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
         if (state.phase == "pending" || state.phase == "active") {
             input = ""
             scanFeedback = null
+            manualFeedback = null
             pendingScanned = null
         } else if (state.phase == "disconnected") {
             trackQuery = ""
@@ -101,55 +107,80 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
         }
     }
 
+    fun startQrScan() {
+        if (scanning || state.busy) return
+        scanning = true
+        scanFeedback = null
+        manualFeedback = null
+        pendingScanned = null
+        coroutineScope.launch {
+            try {
+                when (val res = DesktopRemoteQrScanner.scan(context) { scanFeedback = it }) {
+                    is DesktopRemoteScanResult.Scanned -> {
+                        scanFeedback = null
+                        manualFeedback = null
+                        input = ""
+                        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                            pendingScanned = null
+                            session.connect(res.rawText)
+                        } else {
+                            // Scanner overlay may briefly pause the Activity; deliver right after ON_RESUME restores visibility.
+                            pendingScanned = res.rawText
+                        }
+                    }
+                    DesktopRemoteScanResult.Canceled -> scanFeedback = null
+                    is DesktopRemoteScanResult.Failed -> scanFeedback = res.message
+                }
+            } finally {
+                scanning = false
+            }
+        }
+    }
+
+    LaunchedEffect(qrScanRequestTick) {
+        if (qrScanRequestTick > 0 && state.phase == "disconnected") {
+            startQrScan()
+        }
+    }
+
     if (state.phase != "active") {
         Column(
-            modifier.verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier
+                .verticalScroll(rememberScrollState())
+                .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            RemoteHeaderBar(state)
             if (state.phase == "disconnected") {
                 DisconnectedPairingSection(
                     input = input,
                     scanning = scanning,
                     busy = state.busy,
                     scanFeedback = scanFeedback,
+                    manualFeedback = manualFeedback,
                     errorMessage = state.message,
                     onInputChange = {
                         if (it.length <= 256) {
                             input = it
                             scanFeedback = null
+                            manualFeedback = null
                             pendingScanned = null
                         }
                     },
-                    onScanQr = {
-                        if (scanning || state.busy) return@DisconnectedPairingSection
-                        scanning = true
-                        scanFeedback = null
-                        pendingScanned = null
-                        coroutineScope.launch {
-                            try {
-                                when (val res = DesktopRemoteQrScanner.scan(context) { scanFeedback = it }) {
-                                    is DesktopRemoteScanResult.Scanned -> {
-                                        scanFeedback = null
-                                        input = ""
-                                        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                                            pendingScanned = null
-                                            session.connect(res.rawText)
-                                        } else {
-                                            // Scanner overlay may briefly pause the Activity; deliver right after ON_RESUME restores visibility.
-                                            pendingScanned = res.rawText
-                                        }
-                                    }
-                                    DesktopRemoteScanResult.Canceled -> scanFeedback = null
-                                    is DesktopRemoteScanResult.Failed -> scanFeedback = res.message
-                                }
-                            } finally {
-                                scanning = false
-                            }
+                    onScanQr = ::startQrScan,
+                    onPasteManual = {
+                        val pasted = readPlainTextFromClipboard(context)
+                        if (pasted != null) {
+                            input = pasted.take(256)
+                            scanFeedback = null
+                            manualFeedback = null
+                            pendingScanned = null
+                        } else {
+                            manualFeedback = "Clipboard kosong atau tidak berisi teks."
                         }
                     },
                     onConnectManual = {
                         scanFeedback = null
+                        manualFeedback = null
                         pendingScanned = null
                         session.connect(input)
                     },
@@ -343,7 +374,7 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
                     !state.fresh && state.role == null -> {
                         item(key = "remote_offline_catalog_hint") {
                             NoticeCard(
-                                text = "Daftar lagu akan muncul otomatis setelah koneksi ke Swararia PC tersambung.",
+                                text = "Daftar lagu muncul otomatis setelah koneksi ke perangkat target tersambung.",
                                 actionLabel = if (state.busy) null else "Coba Lagi",
                                 onAction = { session.refresh() },
                             )
@@ -351,12 +382,12 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
                     }
                     state.fresh && state.playback?.online != true -> {
                         item(key = "remote_player_offline_catalog_hint") {
-                            NoticeCard("Pemutar musik Swararia PC belum aktif atau sedang preview. Buka pemutar di PC untuk melihat daftar lagu.")
+                            NoticeCard("Pemutar di perangkat target belum aktif. Buka pemutar pada perangkat target untuk melihat daftar lagu.")
                         }
                     }
                     state.role == "control" -> {
                         item(key = "library_upgrade_hint") {
-                            NoticeCard("Fitur pilih lagu belum aktif di server PC saat ini (restart server Swararia di PC).")
+                            NoticeCard("Fitur pilih lagu belum aktif pada server target ini.")
                         }
                     }
                     else -> {
@@ -368,8 +399,8 @@ fun DesktopRemoteScreen(session: DesktopRemoteSession, modifier: Modifier = Modi
             } else if (state.tracks.isEmpty()) {
                 item(key = "library_empty") {
                     NoticeCard(
-                        if (playback?.online == true) "Daftar lagu PC masih kosong atau belum tersinkron."
-                        else "Menunggu pemutar PC online untuk memuat daftar lagu.",
+                        if (playback?.online == true) "Daftar lagu perangkat target masih kosong atau belum tersinkron."
+                        else "Menunggu pemutar target online untuk memuat daftar lagu.",
                     )
                 }
             } else if (filteredTracks.isEmpty()) {
