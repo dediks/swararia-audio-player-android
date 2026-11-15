@@ -391,7 +391,9 @@ class YoutubeMusicAccountManager(
 
     suspend fun connectFromWebView(wwwCookies: String?, musicCookies: String?): YoutubeMusicAccountState {
         val netscape = YoutubeMusicCookieRules.fromWebViewCookieStrings(wwwCookies, musicCookies)
-        return saveValidatedSession(netscape, YoutubeMusicAuthSource.WEBVIEW, verifyNow = true)
+        val saved = saveValidatedSession(netscape, YoutubeMusicAuthSource.WEBVIEW, verifyNow = true)
+        runCatching { onPlatformCookiesCleared() }
+        return saved
     }
 
     suspend fun connectFromNetscapeText(rawText: String, source: YoutubeMusicAuthSource = YoutubeMusicAuthSource.COOKIES_TXT): YoutubeMusicAccountState {

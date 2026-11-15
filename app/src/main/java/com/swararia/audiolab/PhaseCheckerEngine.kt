@@ -110,14 +110,17 @@ internal class PhaseCheckerEngine(context: Context) {
         val next = !invertMicPolarity
         invertMicPolarity = next
         rxState.update { current ->
-            val effective = PhaseCheckerRules.effectivePolarity(current.heldRawVerdict, next)
-            val updatedRef = current.referencePolarity?.let { PhaseCheckerRules.effectivePolarity(it, true) }
+            val flipped = PhaseCheckerRules.toggleHoldInversion(
+                heldRawVerdict = current.heldRawVerdict,
+                currentAsymmetry = current.asymmetry,
+                currentWaveform = current.waveformPreview,
+                nextMicInverted = next,
+            )
             current.copy(
-                micInverted = next,
-                heldEffectiveVerdict = effective,
-                asymmetry = -current.asymmetry,
-                waveformPreview = current.waveformPreview.map { -it },
-                referencePolarity = updatedRef,
+                micInverted = flipped.micInverted,
+                heldEffectiveVerdict = flipped.heldEffectiveVerdict,
+                asymmetry = flipped.asymmetry,
+                waveformPreview = flipped.waveformPreview,
             )
         }
     }
@@ -191,6 +194,13 @@ internal class PhaseCheckerEngine(context: Context) {
             gain = state.value.generatorGain,
         )
 
+    suspend fun shareCurrentSignalWavAsync(): Result<Unit> =
+        PhaseWavExporter.sharePhaseTestWavAsync(
+            context = appContext,
+            mode = state.value.mode,
+            gain = state.value.generatorGain,
+        )
+
     fun hasMicPermission(): Boolean =
         ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
@@ -245,11 +255,22 @@ internal class PhaseCheckerEngine(context: Context) {
     @SuppressLint("MissingPermission")
     private fun runMicLoop() {
         val sampleRate = PhaseCheckerRules.SAMPLE_RATE
-        val minBuf = AudioRecord.getMinBufferSize(
+        val rawMinBuf = AudioRecord.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
-        ).coerceAtLeast(8192)
+        )
+        if (rawMinBuf <= 0) {
+            rxState.update {
+                it.copy(
+                    micListening = false,
+                    micSourceLabel = "",
+                    errorMessage = "Format mikrofon 48 kHz tidak didukung perangkat (kode $rawMinBuf).",
+                )
+            }
+            return
+        }
+        val minBuf = rawMinBuf.coerceAtLeast(8192)
         val openResult = openMicRecord(sampleRate, maxOf(minBuf * 2, sampleRate / 2 * 2))
         if (openResult == null) {
             rxState.update {
@@ -275,6 +296,16 @@ internal class PhaseCheckerEngine(context: Context) {
 
         try {
             record.startRecording()
+            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                rxState.update {
+                    it.copy(
+                        micListening = false,
+                        micSourceLabel = "",
+                        errorMessage = "Mikrofon gagal mulai merekam. Tutup aplikasi lain yang memakai mikrofon.",
+                    )
+                }
+                return
+            }
             while (scope.isActive && micJob?.isActive == true) {
                 val read = record.read(readChunk, 0, readChunk.size, AudioRecord.READ_BLOCKING)
                 if (read < 0) {
@@ -300,6 +331,7 @@ internal class PhaseCheckerEngine(context: Context) {
                     sampleRate = sampleRate,
                     micInverted = invertMicPolarity,
                     sensitivity = activeSensitivity,
+                    mode = state.value.mode,
                 )
                 val nowMs = SystemClock.elapsedRealtime()
                 val validPulse = analysis.effectiveVerdict == PolarityVerdict.POSITIVE ||
@@ -374,8 +406,8 @@ internal class PhaseCheckerEngine(context: Context) {
     private fun openMicRecord(sampleRate: Int, bufferBytes: Int): Pair<AudioRecord, String>? {
         val candidates = listOf(
             MediaRecorder.AudioSource.UNPROCESSED to "Mic Raw (Unprocessed)",
-            MediaRecorder.AudioSource.VOICE_RECOGNITION to "Mic Voice Recognition",
-            MediaRecorder.AudioSource.MIC to "Mic Standard",
+            MediaRecorder.AudioSource.VOICE_RECOGNITION to "Mic Voice Recognition (Non-raw DSP)",
+            MediaRecorder.AudioSource.MIC to "Mic Standard (Non-raw DSP)",
         )
         for ((source, label) in candidates) {
             val record = runCatching {

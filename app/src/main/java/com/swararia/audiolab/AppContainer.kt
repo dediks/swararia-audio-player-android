@@ -2,15 +2,32 @@ package com.swararia.audiolab
 
 import android.app.Application
 import android.content.Context
+import android.os.StatFs
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.room.Room
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
 
 /** Manual composition root. Platform dependencies are built here, never inside a screen/ViewModel. */
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
+    init {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching {
+                File(appContext.cacheDir, "desktop_remote_downloads").listFiles()?.forEach { file ->
+                    if (file.isFile && file.name.endsWith(".part")) file.delete()
+                }
+                File(appContext.cacheDir, "phase_export").listFiles()?.forEach { file ->
+                    if (file.isFile) file.delete()
+                }
+            }
+        }
+    }
     val ingestState = IngestStatus.state // Adapter to the existing foreground service; process-local, not a durable queue.
     val database: AudioDatabase by lazy {
         Room.databaseBuilder(appContext, AudioDatabase::class.java, "audio-library-spike.db")
@@ -42,6 +59,12 @@ class AppContainer(context: Context) {
     fun desktopRemoteMediaImporter(): DesktopRemoteMediaImporter = object : DesktopRemoteMediaImporter {
         override suspend fun hasTrack(sha256: String, sizeBytes: Long): Boolean =
             library.findTrackBySha256AndSize(sha256, sizeBytes) != null
+        override fun hasEnoughStorage(requiredBytes: Long): Boolean {
+            val needed = requiredBytes.coerceAtLeast(0L) + 32L * 1024L * 1024L
+            val cacheAvail = runCatching { StatFs(appContext.cacheDir.absolutePath).availableBytes }.getOrNull()
+            val filesAvail = runCatching { StatFs(appContext.filesDir.absolutePath).availableBytes }.getOrNull()
+            return (cacheAvail == null || cacheAvail >= needed) && (filesAvail == null || filesAvail >= needed)
+        }
         override fun createTempDownloadFile(): File {
             desktopRemoteDownloadStagingDir.mkdirs()
             return File(desktopRemoteDownloadStagingDir, "remote-${UUID.randomUUID()}.part")

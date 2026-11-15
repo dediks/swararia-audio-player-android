@@ -117,6 +117,7 @@ class YoutubeMusicAccountTest {
             musicCookies = null,
         )
         assertTrue(state.connected)
+        assertEquals(1, platformCleared)
         assertTrue(state.enabledForDownloads)
         assertEquals(YoutubeMusicPremiumTier.PREMIUM, state.tier)
         assertFalse(state.needsReauth)
@@ -142,6 +143,6 @@ class YoutubeMusicAccountTest {
         assertFalse(disconnected.connected)
         assertNull(store.stored)
         assertNull(manager.activeNetscapeCookiesForDownload())
-        assertEquals(1, platformCleared)
+        assertEquals(2, platformCleared)
     }
 }

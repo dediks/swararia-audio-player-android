@@ -153,6 +153,7 @@ sealed interface DesktopRemoteMediaImportOutcome {
 
 interface DesktopRemoteMediaImporter {
     suspend fun hasTrack(sha256: String, sizeBytes: Long): Boolean
+    fun hasEnoughStorage(requiredBytes: Long): Boolean = true
     fun createTempDownloadFile(): File
     suspend fun importDownloadedAudio(
         stagedFile: File,

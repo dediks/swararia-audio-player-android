@@ -132,12 +132,25 @@ class MediaLibrary(private val context: Context, private val database: AudioData
     }
 
     override suspend fun attachArtwork(trackId: Long, thumbnailUrl: String?): AudioTrack? = withContext(Dispatchers.IO) {
+        val snapshot = database.tracks().find(trackId) ?: return@withContext null
+        if (ArtworkStore.resolve(context, snapshot.artworkKey) != null) return@withContext snapshot
+        val key = embeddedArtwork(Uri.parse(snapshot.uri))
+            ?: artwork.cacheThumbnail(thumbnailUrl)
+            ?: return@withContext snapshot
         mutationMutex.withLock {
-            val track = database.tracks().find(trackId) ?: return@withLock null
-            if (ArtworkStore.resolve(context, track.artworkKey) != null) return@withLock track
-            val key = embeddedArtwork(Uri.parse(track.uri)) ?: artwork.cacheThumbnail(thumbnailUrl) ?: return@withLock track
-            database.tracks().setArtwork(track.id, key)
-            database.tracks().find(track.id)
+            val latest = database.tracks().find(trackId)
+            if (latest == null) {
+                if (database.tracks().artworkReferences(key) == 0) artwork.remove(key)
+                return@withLock null
+            }
+            if (ArtworkStore.resolve(context, latest.artworkKey) != null) {
+                if (latest.artworkKey != key && database.tracks().artworkReferences(key) == 0) {
+                    artwork.remove(key)
+                }
+                return@withLock latest
+            }
+            database.tracks().setArtwork(latest.id, key)
+            database.tracks().find(latest.id)
         }
     }
 
@@ -379,6 +392,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             put(MediaStore.Audio.Media.IS_PENDING, 1)
         }
         val uri = resolver.insert(collection, values) ?: error("HP menolak pembuatan file audio.")
+        var createdArtworkKey: String? = null
         try {
             var copied = 0L
             val digest = MessageDigest.getInstance("SHA-256")
@@ -409,15 +423,22 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                 if (cursor.moveToFirst()) actualName = cursor.getString(0)
             }
             val meta = inspectAudioMetadata(uri)
+            val embeddedKey = embeddedArtwork(uri)
+            createdArtworkKey = embeddedKey
             val track = AudioTrack(
                 uri = uri.toString(), displayName = actualName, sizeBytes = copied, durationMs = meta.durationMs,
-                artworkKey = embeddedArtwork(uri), artist = meta.artist, album = meta.album, genre = meta.genre,
+                artworkKey = embeddedKey, artist = meta.artist, album = meta.album, genre = meta.genre,
                 metadataCheckedAt = System.currentTimeMillis(), sha256 = actualSha256,
             )
             val id = database.tracks().insert(track)
             return track.copy(id = id)
         } catch (failure: Throwable) {
-            withContext(NonCancellable + Dispatchers.IO) { runCatching { resolver.delete(uri, null, null) } }
+            withContext(NonCancellable + Dispatchers.IO) {
+                runCatching { resolver.delete(uri, null, null) }
+                createdArtworkKey?.let { key ->
+                    runCatching { if (database.tracks().artworkReferences(key) == 0) artwork.remove(key) }
+                }
+            }
             throw failure
         }
     }

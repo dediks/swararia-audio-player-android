@@ -90,4 +90,19 @@ object FadeRules {
 
     fun shouldBypassFade(previewActive: Boolean, immediate: Boolean = false): Boolean =
         previewActive || immediate
+
+    /** Prevents accidental auto-play when switching/cueing while an active fade-out is already stopping playback. */
+    fun shouldAutoPlayOnSwitch(
+        playWhenReady: Boolean,
+        isPlaying: Boolean,
+        fadingOutToStopOrPause: Boolean,
+    ): Boolean = (playWhenReady || isPlaying) && !fadingOutToStopOrPause
+
+    /** Enables tapping the Fade button both to start a fade-out and to hard-cut an in-progress fade-out. */
+    fun canTapFadeControl(
+        fadeSupported: Boolean,
+        playing: Boolean,
+        fadeBusy: Boolean,
+        pending: Boolean,
+    ): Boolean = fadeSupported && (playing || fadeBusy) && !pending
 }

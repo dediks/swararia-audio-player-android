@@ -45,24 +45,41 @@ class PlaybackService : MediaSessionService() {
     private enum class FadePhase { NONE, FADE_IN, FADE_OUT }
 
     private sealed interface PendingFadeOutAction {
-        data object Pause : PendingFadeOutAction
-        data object StopPlayer : PendingFadeOutAction
-        data object StopAndReset : PendingFadeOutAction
-        data class SeekNext(val autoPlay: Boolean) : PendingFadeOutAction
-        data class SeekPrevious(val autoPlay: Boolean) : PendingFadeOutAction
-        data class SeekQueueItem(val index: Int, val positionMs: Long, val autoPlay: Boolean) : PendingFadeOutAction
+        fun preservesPausedIntent(): Boolean = false
+
+        data object Pause : PendingFadeOutAction {
+            override fun preservesPausedIntent(): Boolean = true
+        }
+        data object StopPlayer : PendingFadeOutAction {
+            override fun preservesPausedIntent(): Boolean = true
+        }
+        data object StopAndReset : PendingFadeOutAction {
+            override fun preservesPausedIntent(): Boolean = true
+        }
+        data class SeekNext(val autoPlay: Boolean) : PendingFadeOutAction {
+            override fun preservesPausedIntent(): Boolean = !autoPlay
+        }
+        data class SeekPrevious(val autoPlay: Boolean) : PendingFadeOutAction {
+            override fun preservesPausedIntent(): Boolean = !autoPlay
+        }
+        data class SeekQueueItem(val index: Int, val positionMs: Long, val autoPlay: Boolean) : PendingFadeOutAction {
+            override fun preservesPausedIntent(): Boolean = !autoPlay
+        }
         data class ReplaceQueue(
             val items: List<MediaItem>,
             val startIndex: Int,
             val startPositionMs: Long,
             val autoPlay: Boolean,
-        ) : PendingFadeOutAction
+        ) : PendingFadeOutAction {
+            override fun preservesPausedIntent(): Boolean = !autoPlay
+        }
     }
 
     private var session: MediaSession? = null
     private var appPlayer: ExoPlayer? = null
     private val handler = Handler(Looper.getMainLooper())
     private var fadeTick: Runnable? = null
+    private var postFadeRestoreTick: Runnable? = null
     private var fadePhase = FadePhase.NONE
     private var faderState = FaderState()
     private var nominalVolume: Float = faderState.effectiveGain
@@ -81,6 +98,7 @@ class PlaybackService : MediaSessionService() {
     private lateinit var previewOwner: PreviewSession
     private val lease = PreviewLease()
     private var savedLocal: PreviewLocalQueue<MediaItem>? = null
+    private var savedExplicitlyStopped = false
     private var changing = false
     private var previewPrepared = false
     private var previewPhase = ""
@@ -305,10 +323,21 @@ class PlaybackService : MediaSessionService() {
                         SessionResult.RESULT_SUCCESS
                     }
                 }
-                PlaybackCommands.ACTION_FADE -> if (startFade()) SessionResult.RESULT_SUCCESS else SessionError.ERROR_INVALID_STATE
+                PlaybackCommands.ACTION_FADE -> if (fadePhase == FadePhase.FADE_OUT) {
+                    val finish = pendingFadeAction ?: PendingFadeOutAction.Pause
+                    cancelFade(restoreVolume = false)
+                    executePendingFadeOutAction(finish)
+                    SessionResult.RESULT_SUCCESS
+                } else if (startFade()) {
+                    SessionResult.RESULT_SUCCESS
+                } else {
+                    SessionError.ERROR_INVALID_STATE
+                }
                 PlaybackCommands.ACTION_IMMEDIATE_PAUSE -> {
-                    cancelFade()
-                    appPlayer?.pause()
+                    val player = appPlayer
+                    cancelFade(restoreVolume = false)
+                    withInternalGuard { player?.pause() }
+                    player?.let { schedulePostFadeVolumeRestore(it, nominalVolume) }
                     publishState()
                     SessionResult.RESULT_SUCCESS
                 }
@@ -399,6 +428,7 @@ class PlaybackService : MediaSessionService() {
         android.util.Log.d("SwarariaTiming", "preview_dispatch_to_service_ms=${((SystemClock.elapsedRealtimeNanos() - requestDispatched) / 1_000_000L).coerceAtLeast(0)}")
         savedLocal = PreviewLocalQueue((0 until player.mediaItemCount).map(player::getMediaItemAt), player.currentMediaItem?.mediaId,
             player.currentMediaItemIndex.coerceAtLeast(0), player.currentPosition.coerceAtLeast(0)) { it.mediaId }
+        savedExplicitlyStopped = explicitlyStopped
         changing = true
         cancelFade(); player.pause(); player.stop(); player.clearMediaItems()
         changing = false
@@ -414,9 +444,10 @@ class PlaybackService : MediaSessionService() {
                 .setData(Uri.parse("swararia-preview://cancel/${lease.token}/${lease.generation}"))
                 .putExtra(PreviewProtocol.TOKEN, lease.token).putExtra(PreviewProtocol.GENERATION, lease.generation),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT)
-            startForeground(2102, NotificationCompat.Builder(this, "preview_resolving").setSmallIcon(R.drawable.ic_audio)
+            val previewNotification = NotificationCompat.Builder(this, "preview_resolving").setSmallIcon(R.drawable.ic_audio)
                 .setContentTitle(title).setContentText("Resolving Preview…").setContentIntent(open)
-                .addAction(R.drawable.ic_audio, "Cancel Preview", cancel).setOngoing(true).build())
+                .addAction(R.drawable.ic_audio, "Cancel Preview", cancel).setOngoing(true).build()
+            startPlaybackForeground(2102, previewNotification)
             resolvingForeground = true
             previewOwner.preview(SearchHit(id, title, null, null, null, "https://www.youtube.com/watch?v=$id"))
         } catch (_: Exception) { finishPreview(); return SessionResult(SessionError.ERROR_INVALID_STATE, stateExtras()) }
@@ -445,7 +476,8 @@ class PlaybackService : MediaSessionService() {
             .setEndPositionMs(OnlinePreviewRules.PREVIEW_MS).build())
         prepareStarted = System.nanoTime(); previewPrepared = true; previewPhase = "connecting"
         changing = false
-        withInternalGuard { player.volume = 1f }
+        // Preview bypasses fade ramps but always honors operator master fader and mute.
+        withInternalGuard { player.volume = captureNominalVolume(player) }
         player.prepare(); player.play(); publishState()
         // The real media notification replaces the resolving notification using the SAME ID.
     }
@@ -461,7 +493,9 @@ class PlaybackService : MediaSessionService() {
     }
     private fun finishPreview(keepError: Boolean = false) {
         val local = savedLocal
+        val restoredExplicitStop = savedExplicitlyStopped
         savedLocal = null // Clear before synchronous Player callbacks / owner callbacks.
+        savedExplicitlyStopped = false
         if (!keepError && ::previewOwner.isInitialized) previewOwner.cancelPreview()
         previewPrepared = false; previewPhase = if (keepError) "error" else ""
         nominalVolume = faderState.effectiveGain
@@ -474,6 +508,7 @@ class PlaybackService : MediaSessionService() {
                 player.prepare() // Ready for an explicit future Play, still playWhenReady=false.
             }
             applyMode(mode)
+            explicitlyStopped = restoredExplicitStop
             withInternalGuard { player.volume = nominalVolume }
             // No play(): STOP/end/error must never resume the saved local queue.
             changing = false
@@ -481,9 +516,13 @@ class PlaybackService : MediaSessionService() {
             withInternalGuard { player.volume = nominalVolume }
         }
         if (resolvingForeground) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            getSystemService(NotificationManager::class.java).cancel(2102)
             resolvingForeground = false
+            getSystemService(NotificationManager::class.java).cancel(2102)
+            if (remoteServerForegroundActive) {
+                ensureRemoteServerForeground()
+            } else {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            }
         }
         publishState()
     }
@@ -592,10 +631,14 @@ class PlaybackService : MediaSessionService() {
             .setOngoing(true)
             .setSilent(true)
             .build()
+        startPlaybackForeground(REMOTE_SERVER_NOTIFICATION_ID, notification)
+    }
+
+    private fun startPlaybackForeground(notificationId: Int, notification: android.app.Notification) {
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(REMOTE_SERVER_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            startForeground(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         } else {
-            startForeground(REMOTE_SERVER_NOTIFICATION_ID, notification)
+            startForeground(notificationId, notification)
         }
     }
     private var pendingSwitchArmedAtUptimeMs = 0L
@@ -612,19 +655,18 @@ class PlaybackService : MediaSessionService() {
      * manual console moves never fight Fade In/Out transitions.
      */
     private fun applyFaderState(next: FaderState) {
+        cancelPostFadeVolumeRestore()
         faderState = next
         nominalVolume = next.effectiveGain
         if (fadePhase != FadePhase.NONE || originalVolume != null) {
             cancelFade(restoreVolume = false)
         }
-        if (savedLocal == null) {
-            appPlayer?.volume = nominalVolume
-        }
+        appPlayer?.volume = nominalVolume
         publishState()
     }
 
     private fun captureNominalVolume(player: ExoPlayer): Float {
-        nominalVolume = if (savedLocal != null) 1f else faderState.effectiveGain
+        nominalVolume = faderState.effectiveGain
         return nominalVolume
     }
 
@@ -638,6 +680,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun clearFadeTickerOnly() {
+        cancelPostFadeVolumeRestore()
         fadeTick?.let { handler.removeCallbacks(it) }
         fadeTick = null
         originalVolume = null
@@ -655,6 +698,7 @@ class PlaybackService : MediaSessionService() {
         actionAfterOut: PendingFadeOutAction? = null,
     ) {
         val player = appPlayer ?: return
+        cancelPostFadeVolumeRestore()
         fadeTick?.let { handler.removeCallbacks(it) }
         fadeTick = null
         val clampedDuration = FadeRules.clampDurationMs(durationMs)
@@ -751,8 +795,28 @@ class PlaybackService : MediaSessionService() {
         handler.post(tick)
     }
 
+    private fun cancelPostFadeVolumeRestore() {
+        postFadeRestoreTick?.let { handler.removeCallbacks(it) }
+        postFadeRestoreTick = null
+    }
+
+    private fun schedulePostFadeVolumeRestore(player: ExoPlayer, targetVolume: Float) {
+        cancelPostFadeVolumeRestore()
+        val target = targetVolume.coerceIn(0f, 1f)
+        val restore = Runnable {
+            postFadeRestoreTick = null
+            if (fadePhase == FadePhase.NONE && !player.playWhenReady) {
+                player.volume = target
+            }
+        }
+        postFadeRestoreTick = restore
+        // Wait briefly so AudioSink finishes draining before nominal gain is restored for next cue.
+        handler.postDelayed(restore, POST_FADE_VOLUME_RESTORE_DELAY_MS)
+    }
+
     private fun requestPlayWithFade(immediate: Boolean = false) {
         val player = appPlayer ?: return
+        cancelPostFadeVolumeRestore()
         explicitlyStopped = false
         if (FadeRules.shouldBypassFade(savedLocal != null, immediate)) {
             cancelFade()
@@ -791,33 +855,29 @@ class PlaybackService : MediaSessionService() {
         startFadeRamp(FadePhase.FADE_IN, 0f, targetNominal, fadeInMs)
     }
 
-    private fun requestPauseWithFade(immediate: Boolean = false) {
+    private inline fun launchFadeOutOrRun(
+        action: PendingFadeOutAction,
+        immediate: Boolean,
+        runNow: () -> Unit,
+    ) {
         val player = appPlayer ?: return
-        explicitlyStopped = false
-        if (FadeRules.shouldBypassFade(savedLocal != null, immediate)) {
-            cancelFade()
-            withInternalGuard { player.pause() }
-            publishState()
-            return
-        }
-        if (fadePhase == FadePhase.FADE_OUT) {
+        if (FadeRules.shouldBypassFade(savedLocal != null, immediate) || fadePhase == FadePhase.FADE_OUT) {
             cancelFade(restoreVolume = false)
-            executePendingFadeOutAction(PendingFadeOutAction.Pause)
+            runNow()
             return
         }
         val fadeOutMs = fadeSettings.fadeOutMs
         val shouldFade = (player.isPlaying || fadePhase == FadePhase.FADE_IN) && fadeOutMs > 0L
         if (!shouldFade) {
-            cancelFade()
-            withInternalGuard { player.pause() }
-            publishState()
+            cancelFade(restoreVolume = false)
+            runNow()
             return
         }
         val targetNominal = captureNominalVolume(player)
         val startVol = if (fadePhase == FadePhase.FADE_IN) player.volume.coerceIn(0f, targetNominal) else targetNominal
         if (startVol <= 0.001f) {
             cancelFade(restoreVolume = false)
-            executePendingFadeOutAction(PendingFadeOutAction.Pause)
+            runNow()
             return
         }
         val duration = if (fadePhase == FadePhase.FADE_IN) {
@@ -826,79 +886,33 @@ class PlaybackService : MediaSessionService() {
             fadeOutMs
         }
         clearFadeTickerOnly()
-        startFadeRamp(FadePhase.FADE_OUT, startVol, 0f, duration, PendingFadeOutAction.Pause)
+        startFadeRamp(FadePhase.FADE_OUT, startVol, 0f, duration, action)
+    }
+
+    private fun requestPauseWithFade(immediate: Boolean = false) {
+        val player = appPlayer ?: return
+        explicitlyStopped = false
+        launchFadeOutOrRun(PendingFadeOutAction.Pause, immediate) {
+            withInternalGuard { player.pause() }
+            player.volume = captureNominalVolume(player)
+            publishState()
+        }
     }
 
     private fun requestStopWithFade(resetToCue: Boolean, immediate: Boolean = false) {
         val player = appPlayer ?: return
         val action = if (resetToCue) PendingFadeOutAction.StopAndReset else PendingFadeOutAction.StopPlayer
-        if (FadeRules.shouldBypassFade(savedLocal != null, immediate)) {
-            cancelFade(restoreVolume = false)
+        val stopImmediate = immediate || (!player.isPlaying && !player.playWhenReady && fadePhase != FadePhase.FADE_IN)
+        launchFadeOutOrRun(action, stopImmediate) {
             executePendingFadeOutAction(action)
-            return
         }
-        if (fadePhase == FadePhase.FADE_OUT) {
-            cancelFade(restoreVolume = false)
-            executePendingFadeOutAction(action)
-            return
-        }
-        val fadeOutMs = fadeSettings.fadeOutMs
-        val shouldFade = (player.isPlaying || fadePhase == FadePhase.FADE_IN) && fadeOutMs > 0L
-        if (!shouldFade) {
-            cancelFade(restoreVolume = false)
-            executePendingFadeOutAction(action)
-            return
-        }
-        val targetNominal = captureNominalVolume(player)
-        val startVol = if (fadePhase == FadePhase.FADE_IN) player.volume.coerceIn(0f, targetNominal) else targetNominal
-        if (startVol <= 0.001f) {
-            cancelFade(restoreVolume = false)
-            executePendingFadeOutAction(action)
-            return
-        }
-        val duration = if (fadePhase == FadePhase.FADE_IN) {
-            FadeRules.proportionalDurationMs(fadeOutMs, startVol, 0f, targetNominal)
-        } else {
-            fadeOutMs
-        }
-        clearFadeTickerOnly()
-        startFadeRamp(FadePhase.FADE_OUT, startVol, 0f, duration, action)
     }
 
     private fun requestSwitchTrackWithFade(action: PendingFadeOutAction, immediate: Boolean = false) {
-        val player = appPlayer ?: return
         explicitlyStopped = false
-        if (FadeRules.shouldBypassFade(savedLocal != null, immediate)) {
-            cancelFade(restoreVolume = false)
+        launchFadeOutOrRun(action, immediate) {
             executeSwitchActionNow(action)
-            return
         }
-        if (fadePhase == FadePhase.FADE_OUT) {
-            cancelFade(restoreVolume = false)
-            executePendingFadeOutAction(action)
-            return
-        }
-        val fadeOutMs = fadeSettings.fadeOutMs
-        val shouldFadeOut = (player.isPlaying || fadePhase == FadePhase.FADE_IN) && fadeOutMs > 0L
-        if (!shouldFadeOut) {
-            cancelFade(restoreVolume = false)
-            executeSwitchActionNow(action)
-            return
-        }
-        val targetNominal = captureNominalVolume(player)
-        val startVol = if (fadePhase == FadePhase.FADE_IN) player.volume.coerceIn(0f, targetNominal) else targetNominal
-        if (startVol <= 0.001f) {
-            cancelFade(restoreVolume = false)
-            executeSwitchActionNow(action)
-            return
-        }
-        val duration = if (fadePhase == FadePhase.FADE_IN) {
-            FadeRules.proportionalDurationMs(fadeOutMs, startVol, 0f, targetNominal)
-        } else {
-            fadeOutMs
-        }
-        clearFadeTickerOnly()
-        startFadeRamp(FadePhase.FADE_OUT, startVol, 0f, duration, action)
     }
 
     private fun executePendingFadeOutAction(action: PendingFadeOutAction) {
@@ -906,11 +920,13 @@ class PlaybackService : MediaSessionService() {
         when (action) {
             PendingFadeOutAction.Pause -> {
                 withInternalGuard { player.pause() }
-                player.volume = nominalVolume
+                player.volume = 0f
+                schedulePostFadeVolumeRestore(player, nominalVolume)
             }
             PendingFadeOutAction.StopPlayer -> {
                 withInternalGuard { player.stop() }
-                player.volume = nominalVolume
+                player.volume = 0f
+                schedulePostFadeVolumeRestore(player, nominalVolume)
             }
             PendingFadeOutAction.StopAndReset -> {
                 withInternalGuard {
@@ -918,7 +934,8 @@ class PlaybackService : MediaSessionService() {
                     player.seekTo(0L)
                     explicitlyStopped = true
                 }
-                player.volume = nominalVolume
+                player.volume = 0f
+                schedulePostFadeVolumeRestore(player, nominalVolume)
             }
             is PendingFadeOutAction.SeekNext,
             is PendingFadeOutAction.SeekPrevious,
@@ -933,6 +950,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun executeSwitchActionNow(action: PendingFadeOutAction) {
         val player = appPlayer ?: return
+        cancelPostFadeVolumeRestore()
         val fadeInMs = if (savedLocal == null) fadeSettings.fadeInMs else 0L
         val targetNominal = captureNominalVolume(player)
         var shouldAutoPlay = false
@@ -1002,6 +1020,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun cancelFade(restoreVolume: Boolean = true) {
+        cancelPostFadeVolumeRestore()
         val wasBusy = fadePhase == FadePhase.FADE_OUT || originalVolume != null
         fadeTick?.let { handler.removeCallbacks(it) }
         fadeTick = null
@@ -1020,7 +1039,10 @@ class PlaybackService : MediaSessionService() {
 
     private inner class FadingSessionPlayer(private val exo: ExoPlayer) : ForwardingPlayer(exo) {
         override fun setVolume(volume: Float) {
-            if (savedLocal == null && fadePhase == FadePhase.NONE) {
+            if (fadePhase != FadePhase.NONE) {
+                return
+            }
+            if (savedLocal == null) {
                 val clamped = volume.coerceIn(0f, 1f)
                 faderState = FaderRules.withPosition(faderState, FaderRules.positionFromGain(clamped))
                     .copy(muted = clamped <= 0f)
@@ -1029,7 +1051,7 @@ class PlaybackService : MediaSessionService() {
                 publishState()
                 return
             }
-            super.setVolume(volume)
+            super.setVolume(volume.coerceIn(0f, 1f).coerceAtMost(faderState.effectiveGain))
         }
 
         override fun play() {
@@ -1040,7 +1062,7 @@ class PlaybackService : MediaSessionService() {
             val currentPending = pendingFadeAction
             if (fadePhase == FadePhase.FADE_OUT &&
                 (currentPending is PendingFadeOutAction.ReplaceQueue || currentPending is PendingFadeOutAction.SeekQueueItem) &&
-                SystemClock.uptimeMillis() - pendingSwitchArmedAtUptimeMs <= 150L
+                SystemClock.uptimeMillis() - pendingSwitchArmedAtUptimeMs <= SWITCH_MERGE_WINDOW_MS
             ) {
                 pendingFadeAction = when (currentPending) {
                     is PendingFadeOutAction.ReplaceQueue -> currentPending.copy(autoPlay = true)
@@ -1080,7 +1102,7 @@ class PlaybackService : MediaSessionService() {
             if (savedLocal == null && fadePhase == FadePhase.FADE_OUT && (
                     pendingFadeAction is PendingFadeOutAction.ReplaceQueue ||
                         pendingFadeAction is PendingFadeOutAction.SeekQueueItem
-                    ) && SystemClock.uptimeMillis() - pendingSwitchArmedAtUptimeMs <= 150L
+                    ) && SystemClock.uptimeMillis() - pendingSwitchArmedAtUptimeMs <= SWITCH_MERGE_WINDOW_MS
             ) {
                 return
             }
@@ -1122,7 +1144,7 @@ class PlaybackService : MediaSessionService() {
         override fun seekTo(positionMs: Long) {
             if (savedLocal == null && positionMs == 0L && fadePhase == FadePhase.FADE_OUT) {
                 if (pendingFadeAction == PendingFadeOutAction.Pause &&
-                    SystemClock.uptimeMillis() - pendingPauseArmedAtUptimeMs <= 150L
+                    SystemClock.uptimeMillis() - pendingPauseArmedAtUptimeMs <= SWITCH_MERGE_WINDOW_MS
                 ) {
                     // Upgrade Pause -> StopAndReset when Cue 00:00 calls pause(); seekTo(0L) together.
                     pendingPauseArmedAtUptimeMs = 0L
@@ -1144,7 +1166,7 @@ class PlaybackService : MediaSessionService() {
                 mediaItemIndex == exo.currentMediaItemIndex && positionMs == 0L
             ) {
                 if (pendingFadeAction == PendingFadeOutAction.Pause &&
-                    SystemClock.uptimeMillis() - pendingPauseArmedAtUptimeMs <= 150L
+                    SystemClock.uptimeMillis() - pendingPauseArmedAtUptimeMs <= SWITCH_MERGE_WINDOW_MS
                 ) {
                     pendingPauseArmedAtUptimeMs = 0L
                     pendingFadeAction = PendingFadeOutAction.StopAndReset
@@ -1158,18 +1180,24 @@ class PlaybackService : MediaSessionService() {
             }
             if (savedLocal == null && fadePhase == FadePhase.FADE_OUT &&
                 pendingFadeAction == PendingFadeOutAction.Pause &&
-                SystemClock.uptimeMillis() - pendingPauseArmedAtUptimeMs <= 150L &&
+                SystemClock.uptimeMillis() - pendingPauseArmedAtUptimeMs <= SWITCH_MERGE_WINDOW_MS &&
                 mediaItemIndex in 0 until exo.mediaItemCount
             ) {
                 // Queue Cue-only called pause(); seekTo(otherIndex, 0L) synchronously.
                 pendingPauseArmedAtUptimeMs = 0L
+                pendingSwitchArmedAtUptimeMs = SystemClock.uptimeMillis()
                 pendingFadeAction = PendingFadeOutAction.SeekQueueItem(mediaItemIndex, positionMs, autoPlay = false)
                 return
             }
             if (savedLocal == null && mediaItemIndex != exo.currentMediaItemIndex &&
                 mediaItemIndex in 0 until exo.mediaItemCount
             ) {
-                val autoPlay = exo.playWhenReady || exo.isPlaying
+                val autoPlay = FadeRules.shouldAutoPlayOnSwitch(
+                    playWhenReady = exo.playWhenReady,
+                    isPlaying = exo.isPlaying,
+                    fadingOutToStopOrPause = fadePhase == FadePhase.FADE_OUT &&
+                        pendingFadeAction?.preservesPausedIntent() == true,
+                )
                 requestSwitchTrackWithFade(
                     PendingFadeOutAction.SeekQueueItem(mediaItemIndex, positionMs, autoPlay = autoPlay),
                     immediate = !(exo.isPlaying || fadePhase == FadePhase.FADE_IN),
@@ -1187,15 +1215,21 @@ class PlaybackService : MediaSessionService() {
         ) {
             if (savedLocal == null && fadePhase == FadePhase.FADE_OUT &&
                 pendingFadeAction == PendingFadeOutAction.Pause &&
-                SystemClock.uptimeMillis() - pendingPauseArmedAtUptimeMs <= 150L
+                SystemClock.uptimeMillis() - pendingPauseArmedAtUptimeMs <= SWITCH_MERGE_WINDOW_MS
             ) {
                 // Library/Downloads Cue-only called pause(); setMediaItems(..., 0).
                 pendingPauseArmedAtUptimeMs = 0L
+                pendingSwitchArmedAtUptimeMs = SystemClock.uptimeMillis()
                 pendingFadeAction = PendingFadeOutAction.ReplaceQueue(items, startIndex, startPositionMs, autoPlay = false)
                 return
             }
             if (savedLocal == null && (exo.isPlaying || fadePhase == FadePhase.FADE_IN || fadePhase == FadePhase.FADE_OUT)) {
-                val autoPlay = exo.playWhenReady || exo.isPlaying
+                val autoPlay = FadeRules.shouldAutoPlayOnSwitch(
+                    playWhenReady = exo.playWhenReady,
+                    isPlaying = exo.isPlaying,
+                    fadingOutToStopOrPause = fadePhase == FadePhase.FADE_OUT &&
+                        pendingFadeAction?.preservesPausedIntent() == true,
+                )
                 requestSwitchTrackWithFade(
                     PendingFadeOutAction.ReplaceQueue(items, startIndex, startPositionMs, autoPlay = autoPlay),
                     immediate = !(exo.isPlaying || fadePhase == FadePhase.FADE_IN),
@@ -1250,7 +1284,10 @@ class PlaybackService : MediaSessionService() {
             ACTION_REMOTE_SERVER_STOP -> {
                 remoteServerForegroundActive = false
                 getSystemService(NotificationManager::class.java).cancel(REMOTE_SERVER_NOTIFICATION_ID)
-                if (appPlayer?.isPlaying != true && savedLocal == null) {
+                val playerActive = appPlayer?.let {
+                    it.isPlaying || it.playWhenReady || it.playbackState == Player.STATE_BUFFERING
+                } == true
+                if (!playerActive && savedLocal == null) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                 }
                 return START_NOT_STICKY
@@ -1276,6 +1313,7 @@ class PlaybackService : MediaSessionService() {
         signalTickRunning = false
         handler.removeCallbacks(signalTick)
         LocalAudioSignalBus.reset()
+        cancelPostFadeVolumeRestore()
         cancelFade(); handler.removeCallbacksAndMessages(null)
         appPlayer?.removeListener(playerListener); session?.release(); session = null
         appPlayer?.release(); appPlayer = null
@@ -1284,6 +1322,8 @@ class PlaybackService : MediaSessionService() {
     companion object {
         private const val PREFERENCES = "native_playback"
         private const val SIGNAL_TICK_MS = 33L
+        private const val SWITCH_MERGE_WINDOW_MS = 600L
+        private const val POST_FADE_VOLUME_RESTORE_DELAY_MS = 80L
         private const val ACTION_CANCEL_PREVIEW = "com.swararia.audiolab.CANCEL_PREVIEW"
         private const val REMOTE_SERVER_CHANNEL = "remote_server"
         private const val REMOTE_SERVER_NOTIFICATION_ID = 2103

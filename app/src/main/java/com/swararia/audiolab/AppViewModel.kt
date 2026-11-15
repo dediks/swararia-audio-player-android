@@ -200,7 +200,7 @@ class AppViewModel(
         }
     }
     fun retryDownloads(batchId: String, start: (String) -> Unit) {
-        if (!canDispatchOrAppendDownload()) return
+        if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
         cancelPreview()
         if (ingest.value.busy && ingest.value.batchId != null) {
             operations.retry(batchId) { start(it) }
@@ -212,7 +212,7 @@ class AppViewModel(
         }
     }
     fun retryDownloadJob(jobId: Long, start: (String) -> Unit) {
-        if (!canDispatchOrAppendDownload()) return
+        if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
         cancelPreview()
         operations.requeueJob(jobId, allowAppend = true) { batch ->
             if (canDownloadOnNetworkNow()) start(batch)
@@ -220,7 +220,7 @@ class AppViewModel(
         }
     }
     fun requeueDownloadJobs(jobIds: List<Long>, start: (String) -> Unit) {
-        if (!canDispatchOrAppendDownload()) return
+        if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
         cancelPreview()
         operations.requeueJobs(jobIds) { batch ->
             if (canDownloadOnNetworkNow()) start(batch)
@@ -228,7 +228,7 @@ class AppViewModel(
         }
     }
     fun retryAllFailedDownloads(start: (String) -> Unit) {
-        if (!canDispatchOrAppendDownload()) return
+        if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
         cancelPreview()
         operations.retryAllFailed { batch ->
             if (canDownloadOnNetworkNow()) start(batch)

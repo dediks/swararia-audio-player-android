@@ -41,7 +41,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -395,7 +394,11 @@ internal fun LocalFohTrackSummaryCard(
             )
 
             if (playback.buffering) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                FohIndeterminateBar(
+                    color = FohTheme.colors.safeAccent,
+                    trackColor = FohTheme.colors.surfaceDeep,
+                    height = 4.dp,
+                )
             }
             if (!playback.connected) {
                 Text(
@@ -915,11 +918,16 @@ internal fun LocalFohBottomDeck(
                     )
                     OutlinedButton(
                         onClick = controlUi.onFadeOut,
-                        enabled = controlUi.fadeSupported && controlUi.playing && !controlUi.fadeBusy && !controlUi.pending,
+                        enabled = FadeRules.canTapFadeControl(
+                            fadeSupported = controlUi.fadeSupported,
+                            playing = controlUi.playing,
+                            fadeBusy = controlUi.fadeBusy,
+                            pending = controlUi.pending,
+                        ),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                         modifier = Modifier.height(32.dp),
                     ) {
-                        Text(if (controlUi.fadeBusy) "Fade…" else "Fade", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+                        Text(if (controlUi.fadeBusy) "Tap: Cut" else "Fade", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
                     }
                     CompactCircleButton(
                         icon = UiIcons.ChevronUp,
@@ -1038,11 +1046,16 @@ internal fun LocalFohBottomDeck(
 
                     OutlinedButton(
                         onClick = controlUi.onFadeOut,
-                        enabled = controlUi.fadeSupported && controlUi.playing && !controlUi.fadeBusy && !controlUi.pending,
+                        enabled = FadeRules.canTapFadeControl(
+                            fadeSupported = controlUi.fadeSupported,
+                            playing = controlUi.playing,
+                            fadeBusy = controlUi.fadeBusy,
+                            pending = controlUi.pending,
+                        ),
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(
                             1.dp,
-                            if (controlUi.fadeSupported && controlUi.playing) foh.safeBorder else foh.borderSubtle,
+                            if (controlUi.fadeBusy) foh.alertBorder else if (controlUi.fadeSupported && controlUi.playing) foh.safeBorder else foh.borderSubtle,
                         ),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                         modifier = Modifier
@@ -1052,7 +1065,7 @@ internal fun LocalFohBottomDeck(
                         Icon(UiIcons.Fade, contentDescription = null, modifier = Modifier.size(17.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            if (controlUi.fadeBusy) "Fading…" else "Fade Out ${FadeRules.shortLabel(controlUi.manualFadeOutMs)}",
+                            if (controlUi.fadeBusy) "Potong Instan" else "Fade Out ${FadeRules.shortLabel(controlUi.manualFadeOutMs)}",
                             style = MaterialTheme.typography.labelLarge,
                             maxLines = 1,
                             softWrap = false,
@@ -1061,9 +1074,10 @@ internal fun LocalFohBottomDeck(
                 }
 
                 if (controlUi.fadeBusy) {
-                    LinearProgressIndicator(
+                    FohIndeterminateBar(
                         color = foh.safeAccent,
-                        modifier = Modifier.fillMaxWidth(),
+                        trackColor = foh.surfaceDeep,
+                        height = 4.dp,
                     )
                 }
             }

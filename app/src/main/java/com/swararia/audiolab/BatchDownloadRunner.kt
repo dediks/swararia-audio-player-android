@@ -71,12 +71,14 @@ class BatchDownloadRunner(
                     }
                     if (isPaused() && !canceled.get()) return
                     throw cancel
-                } catch (_: Exception) {
+                } catch (failure: Exception) {
                     if (!control.committed) withContext(NonCancellable) {
                         when {
                             canceled.get() -> queue.cancel(job.id)
                             isPaused() -> queue.pauseRunningJob(job.id)
-                            else -> queue.fail(job.id, "Unduhan gagal. Coba ulang atau periksa sumber dan koneksi.")
+                            failure is IngestUserMessageException ->
+                                queue.fail(job.id, IngestFailureMessages.sanitize(failure.userMessage))
+                            else -> queue.fail(job.id, IngestFailureMessages.GENERIC)
                         }
                     }
                     if (isPaused() && !canceled.get()) return

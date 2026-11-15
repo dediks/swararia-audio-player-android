@@ -55,6 +55,24 @@ class MainActivity : ComponentActivity() {
         action()
     }
 
+    private fun syncControllerTrackTitles(player: MediaController?, tracks: List<AudioTrack>) {
+        if (player == null || !player.isConnected || tracks.isEmpty()) return
+        val titles = tracks.associateBy { it.id.toString() }
+        for (index in 0 until player.mediaItemCount) {
+            val item = player.getMediaItemAt(index)
+            val updated = titles[item.mediaId] ?: continue
+            val title = UiPresentation.title(updated.displayName)
+            if (item.mediaMetadata.title?.toString() != title) {
+                player.replaceMediaItem(
+                    index,
+                    item.buildUpon().setMediaMetadata(
+                        item.mediaMetadata.buildUpon().setTitle(title).build(),
+                    ).build(),
+                )
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -78,18 +96,12 @@ class MainActivity : ComponentActivity() {
                 val snackbars = remember { SnackbarHostState() }
                 LaunchedEffect(model) { model.messages.collect { snackbars.showSnackbar(it) } }
                 LaunchedEffect(tracks, controller) {
-                    val player = controller
-                    if (player != null && player.isConnected) {
-                        val titles = tracks.associateBy { it.id.toString() }
-                        for (index in 0 until player.mediaItemCount) {
-                            val item = player.getMediaItemAt(index)
-                            val updated = titles[item.mediaId] ?: continue
-                            val title = UiPresentation.title(updated.displayName)
-                            if (item.mediaMetadata.title?.toString() != title) {
-                                player.replaceMediaItem(index, item.buildUpon().setMediaMetadata(
-                                    item.mediaMetadata.buildUpon().setTitle(title).build()).build())
-                            }
-                        }
+                    syncControllerTrackTitles(controller, tracks)
+                }
+                LaunchedEffect(preview.hit, preview.loading, preview.error, tracks, controller) {
+                    if (preview.hit == null && !preview.loading && preview.error == null) {
+                        kotlinx.coroutines.delay(160L)
+                        syncControllerTrackTitles(controller, tracks)
                     }
                 }
                 SwarariaUi(
@@ -295,11 +307,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun pausePlaybackImmediately(player: MediaController) {
-        if (player.isSessionCommandAvailable(PlaybackCommands.immediatePause)) {
-            player.sendCustomCommand(PlaybackCommands.immediatePause, Bundle.EMPTY)
-        } else {
-            player.pause()
-        }
+        pauseSwarariaPlaybackImmediately(player)
     }
 
     private fun syncFadeSettingsToService(settings: PlaybackSettingsState) {

@@ -33,3 +33,21 @@ interface DownloadQueueRepository {
     /** Invoke once at service/process startup, never during a live worker. */
     suspend fun recoverInterrupted()
 }
+
+internal object IngestFailureMessages {
+    const val GENERIC = "Unduhan gagal. Coba ulang atau periksa sumber dan koneksi."
+    const val UNSUPPORTED_16KB_PAGE_SIZE =
+        "Perangkat memakai halaman memori 16 KB yang belum didukung mesin unduh bawaan."
+    const val INSUFFICIENT_STORAGE =
+        "Ruang penyimpanan HP hampir penuh. Kosongkan minimal 150 MB lalu coba lagi."
+
+    private val allowedUserMessages = setOf(
+        UNSUPPORTED_16KB_PAGE_SIZE,
+        INSUFFICIENT_STORAGE,
+    )
+
+    fun sanitize(rawMessage: String?): String =
+        rawMessage?.takeIf { it in allowedUserMessages } ?: GENERIC
+}
+
+internal class IngestUserMessageException(val userMessage: String) : Exception(userMessage)

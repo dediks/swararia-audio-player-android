@@ -2,10 +2,14 @@ package com.swararia.audiolab
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -40,12 +44,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -127,11 +134,35 @@ internal fun PhaseCheckerScreen(
     }
     var permissionDeniedOnce by remember { mutableStateOf(false) }
     var pendingStartSingleAllInOne by remember { mutableStateOf(false) }
+    var promptedNotifOnce by rememberSaveable { mutableStateOf(false) }
+    var pendingTxAfterNotif by remember { mutableStateOf<(() -> Unit)?>(null) }
     var showGuideDialog by rememberSaveable { mutableStateOf(false) }
 
     val preserveTxInBackground by rememberUpdatedState(
         topology == PhasePhoneTopology.TWO_PHONES && twoPhoneRole == PhaseTwoPhoneRole.TRANSMITTER,
     )
+
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { _ ->
+        pendingTxAfterNotif?.invoke()
+        pendingTxAfterNotif = null
+    }
+
+    val launchTxWithOptionalNotif: (() -> Unit) -> Unit = { startAction ->
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !promptedNotifOnce &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+        ) {
+            promptedNotifOnce = true
+            pendingTxAfterNotif = startAction
+            notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            startAction()
+        }
+    }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -353,9 +384,11 @@ internal fun PhaseCheckerScreen(
                             if (state.generatorRunning) {
                                 engine.stopGenerator()
                             } else {
-                                if (state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.STEREO_IN_PHASE)
-                                onPauseOtherAudio()
-                                engine.startGenerator()
+                                launchTxWithOptionalNotif {
+                                    if (state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.STEREO_IN_PHASE)
+                                    onPauseOtherAudio()
+                                    engine.startGenerator()
+                                }
                             }
                         },
                     )
@@ -372,11 +405,13 @@ internal fun PhaseCheckerScreen(
                             if (state.generatorRunning) {
                                 engine.stopGenerator()
                             } else {
-                                onPauseOtherAudio()
-                                engine.startGenerator()
+                                launchTxWithOptionalNotif {
+                                    onPauseOtherAudio()
+                                    engine.startGenerator()
+                                }
                             }
                         },
-                        onShareWav = { engine.shareCurrentSignalWav() },
+                        onShareWav = { engine.shareCurrentSignalWavAsync() },
                     )
                 }
             }
@@ -614,8 +649,6 @@ private fun PolarityReadoutCard(state: PhaseCheckerUiState) {
                         text = when {
                             !state.micListening && state.pulseCount == 0 ->
                                 "Arahkan mic HP ~20–50 cm di depan speaker saat pulsa berbunyi."
-                            state.micListening && state.micSourceLabel.isNotBlank() ->
-                                state.micSourceLabel
                             state.heldEffectiveVerdict == PolarityVerdict.POSITIVE ->
                                 "Gelombang awal mendorong positif (+)."
                             state.heldEffectiveVerdict == PolarityVerdict.NEGATIVE ->
@@ -627,9 +660,23 @@ private fun PolarityReadoutCard(state: PhaseCheckerUiState) {
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    if (state.micListening && state.micSourceLabel.isNotBlank()) {
+                        val isFallbackDsp = state.micSourceLabel.contains("Non-raw", ignoreCase = true)
+                        Text(
+                            text = if (isFallbackDsp) {
+                                "${state.micSourceLabel} · AGC/filter HP aktif"
+                            } else {
+                                state.micSourceLabel
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isFallbackDsp) foh.warnAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Surface(
                     shape = RoundedCornerShape(10.dp),
@@ -868,9 +915,11 @@ private fun TwoPhoneTransmitterCard(
     onSelectMode: (PhaseTestSignalMode) -> Unit,
     onGainChange: (Float) -> Unit,
     onToggleTransmit: () -> Unit,
-    onShareWav: () -> Result<Unit>,
+    onShareWav: suspend () -> Result<Unit>,
 ) {
     val foh = FohTheme.colors
+    val exportScope = rememberCoroutineScope()
+    var exportingWav by remember { mutableStateOf(false) }
     var shareError by remember { mutableStateOf<String?>(null) }
     val pulseFlash = state.generatorRunning && (state.pulseTick % 2L == 1L)
 
@@ -983,13 +1032,26 @@ private fun TwoPhoneTransmitterCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedButton(
-                    onClick = { shareError = onShareWav().exceptionOrNull()?.message },
+                    onClick = {
+                        if (!exportingWav) {
+                            exportScope.launch {
+                                exportingWav = true
+                                shareError = null
+                                try {
+                                    shareError = onShareWav().exceptionOrNull()?.message
+                                } finally {
+                                    exportingWav = false
+                                }
+                            }
+                        }
+                    },
+                    enabled = !exportingWav,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(PhaseOnlyIcons.Share, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Ekspor & Bagikan File Pulsa (.wav)")
+                    Text(if (exportingWav) "Menyiapkan file WAV..." else "Ekspor & Bagikan File Pulsa (.wav)")
                 }
                 if (shareError != null) {
                     Text(
@@ -1008,6 +1070,12 @@ private fun GainSliderSection(
     gain: Float,
     onGainChange: (Float) -> Unit,
 ) {
+    var localGain by remember { mutableStateOf(gain) }
+    var dragging by remember { mutableStateOf(false) }
+    var lastDispatchedAt by remember { mutableStateOf(0L) }
+    LaunchedEffect(gain, dragging) {
+        if (!dragging) localGain = gain
+    }
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(
             Modifier.fillMaxWidth(),
@@ -1015,13 +1083,26 @@ private fun GainSliderSection(
         ) {
             Text("Level Output", style = MaterialTheme.typography.labelMedium)
             Text(
-                "${(gain * 100f).roundToInt()}%",
+                "${(localGain * 100f).roundToInt()}%",
                 style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
             )
         }
         Slider(
-            value = gain,
-            onValueChange = onGainChange,
+            value = localGain,
+            onValueChange = { next ->
+                dragging = true
+                localGain = next
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastDispatchedAt >= 80L) {
+                    lastDispatchedAt = now
+                    onGainChange(next)
+                }
+            },
+            onValueChangeFinished = {
+                dragging = false
+                lastDispatchedAt = SystemClock.elapsedRealtime()
+                onGainChange(localGain)
+            },
             valueRange = 0.15f..0.90f,
         )
         Text(

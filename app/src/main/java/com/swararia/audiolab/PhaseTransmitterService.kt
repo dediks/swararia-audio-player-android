@@ -48,6 +48,7 @@ class PhaseTransmitterService : Service() {
     private val txGeneration = AtomicLong(0L)
     private var txJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var audioFocusRequest: android.media.AudioFocusRequest? = null
 
     @Volatile
     private var currentMode: PhaseTestSignalMode = PhaseTestSignalMode.PULSE_FULL_RANGE
@@ -143,6 +144,7 @@ class PhaseTransmitterService : Service() {
     private fun stopTransmissionResources() {
         txJob?.cancel()
         txJob = null
+        abandonAudioFocus()
         runCatching {
             val wl = wakeLock
             if (wl != null && wl.isHeld) wl.release()
@@ -150,13 +152,61 @@ class PhaseTransmitterService : Service() {
         mutableState.update { it.copy(running = false) }
     }
 
+    private fun requestTxAudioFocus() {
+        val am = getSystemService(android.media.AudioManager::class.java) ?: return
+        val req = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build(),
+            )
+            .setWillPauseWhenDucked(false)
+            .setOnAudioFocusChangeListener({ change ->
+                if (change == android.media.AudioManager.AUDIOFOCUS_LOSS ||
+                    change == android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
+                ) {
+                    stopTransmission()
+                }
+            }, android.os.Handler(android.os.Looper.getMainLooper()))
+            .build()
+        val granted = runCatching { am.requestAudioFocus(req) }.getOrNull()
+        if (granted == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            audioFocusRequest = req
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        val req = audioFocusRequest ?: return
+        audioFocusRequest = null
+        runCatching { getSystemService(android.media.AudioManager::class.java)?.abandonAudioFocusRequest(req) }
+    }
+
     private fun runAudioTrackLoop(generation: Long) {
         val sampleRate = PhaseCheckerRules.SAMPLE_RATE
-        val minBuf = AudioTrack.getMinBufferSize(
+        val rawMinBuf = AudioTrack.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_OUT_STEREO,
             AudioFormat.ENCODING_PCM_16BIT,
-        ).coerceAtLeast(8192)
+        )
+        if (rawMinBuf <= 0) {
+            mutableState.update {
+                it.copy(
+                    running = false,
+                    errorMessage = "Output audio 48 kHz tidak didukung perangkat (kode $rawMinBuf).",
+                )
+            }
+            if (txGeneration.get() == generation) {
+                runCatching {
+                    val wl = wakeLock
+                    if (wl != null && wl.isHeld) wl.release()
+                }
+                ServiceCompat.stopForeground(this@PhaseTransmitterService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+            return
+        }
+        val minBuf = rawMinBuf.coerceAtLeast(8192)
         val bufferBytes = maxOf(minBuf * 2, 16_384)
         var track: AudioTrack? = null
         try {
@@ -184,6 +234,7 @@ class PhaseTransmitterService : Service() {
                 }
                 return
             }
+            requestTxAudioFocus()
             track.play()
 
             var builtMode = currentMode
@@ -220,6 +271,7 @@ class PhaseTransmitterService : Service() {
                 }
             }
         } finally {
+            abandonAudioFocus()
             runCatching { track?.pause() }
             runCatching { track?.flush() }
             runCatching { track?.stop() }

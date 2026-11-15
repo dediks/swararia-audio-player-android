@@ -165,4 +165,59 @@ class PhaseCheckerRulesTest {
         assertEquals(ReferenceComparison.INVERTED, PhaseCheckerRules.compareToReference(PolarityVerdict.NEGATIVE, PolarityVerdict.POSITIVE))
         assertEquals(ReferenceComparison.PENDING, PhaseCheckerRules.compareToReference(PolarityVerdict.LOW_SIGNAL, PolarityVerdict.POSITIVE))
     }
+
+    @Test
+    fun `PULSE_SUB widens cluster and damped leading detection for slow subwoofer impulse`() {
+        val sampleRate = 48_000
+        val len = 20_000
+        // Slow LF sub impulse (~8.5 ms leading edge + 22 ms overshoot + 18 ms ring) exceeding full-range 14 ms window.
+        val slowSubPos = ShortArray(len) { i ->
+            val rel = i - 4_500
+            val v = when {
+                rel in 0 until 410 -> sin(PI * rel / 410.0) * 0.90
+                rel in 410 until 1_460 -> -sin(PI * (rel - 410) / 1_050.0) * 0.84
+                rel in 1_460 until 2_320 -> sin(PI * (rel - 1_460) / 860.0) * 0.36
+                else -> 0.0
+            }
+            (v * 28_000.0).toInt().toShort()
+        }
+        val subResult = PhaseCheckerRules.analyzeMicWindow(
+            samples = slowSubPos,
+            sampleRate = sampleRate,
+            mode = PhaseTestSignalMode.PULSE_SUB,
+        )
+        assertEquals(PolarityVerdict.POSITIVE, subResult.effectiveVerdict)
+        assertTrue(subResult.confidence >= 0.5f)
+    }
+
+    @Test
+    fun `toggleHoldInversion flips readout polarity and preview while leaving reference invariant`() {
+        val state = PhaseCheckerUiState(
+            heldRawVerdict = PolarityVerdict.POSITIVE,
+            heldEffectiveVerdict = PolarityVerdict.POSITIVE,
+            asymmetry = 0.65f,
+            waveformPreview = listOf(0.5f, -0.25f),
+            referencePolarity = PolarityVerdict.POSITIVE,
+        )
+        val flipped = PhaseCheckerRules.toggleHoldInversion(
+            heldRawVerdict = state.heldRawVerdict,
+            currentAsymmetry = state.asymmetry,
+            currentWaveform = state.waveformPreview,
+            nextMicInverted = true,
+        )
+        val next = state.copy(
+            micInverted = flipped.micInverted,
+            heldEffectiveVerdict = flipped.heldEffectiveVerdict,
+            asymmetry = flipped.asymmetry,
+            waveformPreview = flipped.waveformPreview,
+        )
+        assertEquals(PolarityVerdict.NEGATIVE, next.heldEffectiveVerdict)
+        assertEquals(-0.65f, next.asymmetry, 0.001f)
+        assertEquals(listOf(-0.5f, 0.25f), next.waveformPreview)
+        assertEquals(PolarityVerdict.POSITIVE, next.referencePolarity)
+        assertEquals(
+            ReferenceComparison.INVERTED,
+            PhaseCheckerRules.compareToReference(next.heldEffectiveVerdict, next.referencePolarity),
+        )
+    }
 }

@@ -3,6 +3,8 @@ package com.swararia.audiolab
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -42,11 +44,11 @@ internal object PhaseWavExporter {
         return buf.array()
     }
 
-    fun sharePhaseTestWav(
+    private fun buildShareIntent(
         context: Context,
         mode: PhaseTestSignalMode,
         gain: Float,
-    ): Result<Unit> = runCatching {
+    ): Intent {
         val dir = File(context.cacheDir, "phase_export").apply {
             if (exists()) {
                 listFiles()?.forEach { old -> old.delete() }
@@ -69,9 +71,29 @@ internal object PhaseWavExporter {
             putExtra(Intent.EXTRA_SUBJECT, "Swararia Phase Test Signal ($tag)")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        val chooser = Intent.createChooser(send, "Bagikan File Uji Fasa (.wav)").apply {
+        return Intent.createChooser(send, "Bagikan File Uji Fasa (.wav)").apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        context.startActivity(chooser)
+    }
+
+    fun sharePhaseTestWav(
+        context: Context,
+        mode: PhaseTestSignalMode,
+        gain: Float,
+    ): Result<Unit> = runCatching {
+        context.startActivity(buildShareIntent(context, mode, gain))
+    }
+
+    suspend fun sharePhaseTestWavAsync(
+        context: Context,
+        mode: PhaseTestSignalMode,
+        gain: Float,
+    ): Result<Unit> {
+        val intentResult = withContext(Dispatchers.IO) {
+            runCatching { buildShareIntent(context, mode, gain) }
+        }
+        return intentResult.mapCatching { chooser ->
+            context.startActivity(chooser)
+        }
     }
 }

@@ -177,4 +177,16 @@ class BatchDownloadRunnerTest {
         }
         assertEquals(listOf("COMPLETED", "QUEUED", "QUEUED"), queue.jobs.value.map { it.status })
     }
+
+    @Test fun allowlistedIngestUserMessagesSurviveWhileRawMessagesAreRedacted() = runBlocking {
+        val queue = Queue(2)
+        BatchDownloadRunner(queue).run("batch") { job, _ ->
+            if (job.id == 1L) throw IngestUserMessageException(IngestFailureMessages.INSUFFICIENT_STORAGE)
+            throw IngestUserMessageException("raw secret https://internal.invalid/token=123")
+        }
+        assertEquals(listOf("FAILED", "FAILED"), queue.jobs.value.map { it.status })
+        assertEquals(IngestFailureMessages.INSUFFICIENT_STORAGE, queue.jobs.value[0].error)
+        assertEquals(IngestFailureMessages.GENERIC, queue.jobs.value[1].error)
+        assertEquals(IngestFailureMessages.UNSUPPORTED_16KB_PAGE_SIZE, IngestFailureMessages.sanitize(IngestFailureMessages.UNSUPPORTED_16KB_PAGE_SIZE))
+    }
 }

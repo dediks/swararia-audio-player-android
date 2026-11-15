@@ -284,7 +284,7 @@ fun PlaybackModeBar(
     val status = error ?: when {
         !state.connected -> "Playback disconnected"
         !state.modeSupported -> "Playback modes unavailable"
-        state.busy -> "Fading out, then pausing"
+        state.busy -> "Fading out — ketuk Fade lagi untuk potong instan"
         else -> null
     }
     if (fohContent != null) {

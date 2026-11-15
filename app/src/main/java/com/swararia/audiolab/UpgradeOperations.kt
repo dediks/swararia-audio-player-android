@@ -28,6 +28,11 @@ class UpgradeOperations(
         if(state.value || !canStart()) {message("Tunggu proses yang sedang berjalan.");return false}
         return true
     }
+    private fun canRun(allowAppend:Boolean, busyMessage:String):Boolean {
+        if(!allowAppend) return allowed()
+        if(state.value) {message(busyMessage);return false}
+        return true
+    }
     fun enqueue(requests:List<DownloadRequest>,authorized:Boolean,start:(String)->Unit) {
         enqueueInternal(requests, authorized, allowActiveQueue = false, start = start)
     }
@@ -72,11 +77,16 @@ class UpgradeOperations(
             } finally {state.value=false}
         }
     }
-    fun retry(batchId:String,start:(String)->Unit) {
-        if(!validBatch(batchId) || !allowed())return
+    fun retry(batchId:String, allowAppend:Boolean=true, start:(String)->Unit) {
+        if(!validBatch(batchId) || !canRun(allowAppend, "Tunggu proses antrean selesai."))return
+        val alreadyRunning = ingestActive()
         state.value=true
         scope.launch {
-            try {queue.retryFailed(batchId);start(batchId)}
+            try {
+                queue.retryFailed(batchId)
+                if (alreadyRunning) message("Item gagal ditambahkan ke antrean aktif.")
+                start(batchId)
+            }
             catch(c:CancellationException) {throw c}
             catch(_:Exception) {message("Queue belum dapat dijalankan. Coba lagi.")}
             finally {state.value=false}
@@ -90,25 +100,33 @@ class UpgradeOperations(
             catch(_:Exception) {message("Pembatalan queue belum tersimpan. Coba lagi.")}
         }
     }
-    fun retryJob(jobId:Long,start:(String)->Unit) {
-        if(!allowed())return
+    fun retryJob(jobId:Long, allowAppend:Boolean=true, start:(String)->Unit) {
+        if(!canRun(allowAppend, "Tunggu proses antrean selesai."))return
+        val alreadyRunning = ingestActive()
         state.value=true
         scope.launch {
             try {
                 val batch=queue.retryJob(jobId)
-                if(batch!=null) start(batch) else message("Item gagal belum siap diulang atau sudah di antrean.")
+                if(batch!=null) {
+                    if (alreadyRunning) message("Item gagal ditambahkan ke antrean aktif.")
+                    start(batch)
+                } else message("Item gagal belum siap diulang atau sudah di antrean.")
             } catch(c:CancellationException) {throw c}
             catch(_:Exception) {message("Queue belum dapat dijalankan. Coba lagi.")}
             finally {state.value=false}
         }
     }
-    fun retryAllFailed(start:(String)->Unit) {
-        if(!allowed())return
+    fun retryAllFailed(allowAppend:Boolean=true, start:(String)->Unit) {
+        if(!canRun(allowAppend, "Tunggu proses antrean selesai."))return
+        val alreadyRunning = ingestActive()
         state.value=true
         scope.launch {
             try {
                 val batch=queue.retryAllFailed()
-                if(batch!=null) start(batch) else message("Tidak ada item gagal yang siap diulang.")
+                if(batch!=null) {
+                    if (alreadyRunning) message("Item gagal ditambahkan ke antrean aktif.")
+                    start(batch)
+                } else message("Tidak ada item gagal yang siap diulang.")
             } catch(c:CancellationException) {throw c}
             catch(_:Exception) {message("Queue belum dapat dijalankan. Coba lagi.")}
             finally {state.value=false}

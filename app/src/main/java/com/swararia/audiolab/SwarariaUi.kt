@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.media3.session.MediaController
 
@@ -47,6 +48,10 @@ fun SwarariaUi(
     var destination by rememberSaveable { mutableIntStateOf(0) }
     var moreToolRoute by rememberSaveable { mutableStateOf(MoreToolRoute.HUB) }
     var fullPlayer by rememberSaveable { mutableStateOf(false) }
+    var playerViewMode by rememberSaveable { mutableStateOf(LocalPlayerViewMode.CUE_LIST) }
+    var playerDeckCollapsed by rememberSaveable { mutableStateOf(false) }
+    var playerKeepScreenOn by rememberSaveable { mutableStateOf(true) }
+    var playerGuardEnabled by rememberSaveable { mutableStateOf(true) }
     var activeModal by remember { mutableStateOf<SwarariaModal?>(null) }
     val pages = rememberSaveableStateHolder()
     val playbackClock = remember { PlaybackClockState() }
@@ -57,6 +62,13 @@ fun SwarariaUi(
     val downloadedTrackIds = remember(tracks) { tracks.mapTo(HashSet()) { it.id } }
     val previewActive = searchActions.preview.let { it.hit != null || it.loading || it.media != null || it.error != null }
     val onlineBusy = ingest.busy || upgrade.operationBusy || search.busy || searchActions.preview.loading
+    val view = LocalView.current
+    val keepWakeLock = playerKeepScreenOn && ((fullPlayer && !previewActive) || playback.wantsPlay)
+    DisposableEffect(view, keepWakeLock) {
+        val previous = view.keepScreenOn
+        view.keepScreenOn = keepWakeLock
+        onDispose { view.keepScreenOn = previous }
+    }
     val navigate: (Int) -> Unit = { target ->
         if (target != 3 && destination != 3 && (target != destination || fullPlayer)) searchActions.stopPreview()
         if (target == 4 && destination == 4 && !fullPlayer) moreToolRoute = MoreToolRoute.HUB
@@ -190,6 +202,14 @@ fun SwarariaUi(
             modifier = contentModifier, onBack = { fullPlayer = false },
             onRename = { activeModal = SwarariaModal.RenameTrack(it) },
             onSettings = { activeModal = SwarariaModal.EngineSettings },
+            viewMode = playerViewMode,
+            onSelectViewMode = { playerViewMode = it },
+            deckCollapsed = playerDeckCollapsed,
+            onToggleDeckCollapsed = { playerDeckCollapsed = !playerDeckCollapsed },
+            keepScreenOn = playerKeepScreenOn,
+            onToggleKeepScreenOn = { playerKeepScreenOn = !playerKeepScreenOn },
+            guardEnabled = playerGuardEnabled,
+            onToggleGuardEnabled = { playerGuardEnabled = !playerGuardEnabled },
             positionMsProvider = { playbackClock.positionMs },
         ) else pages.SaveableStateProvider(destination) {
             when (destination) {
@@ -208,7 +228,9 @@ fun SwarariaUi(
                     onOpenRenameHistory = { activeModal = SwarariaModal.RenameHistory },
                     onPauseOtherAudio = {
                         searchActions.stopPreview()
-                        controller?.takeIf { it.isConnected && it.isPlaying }?.pause()
+                        controller?.takeIf { it.isConnected && (it.isPlaying || it.playWhenReady) }?.let {
+                            pauseSwarariaPlaybackImmediately(it)
+                        }
                     },
                 )
                 0 -> LibraryPage(

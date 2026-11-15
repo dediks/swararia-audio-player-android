@@ -139,6 +139,17 @@ class UpgradeOperationsTest {
             assertTrue(f.queue.calls.contains("requeueAll:21,22"))
             assertTrue(f.queue.calls.contains("cancelAll:31,32"))
             assertTrue(f.queue.calls.contains("removeAll:41,42"))
+
+            var retriedBatch = ""
+            f.ops.retry(ID) { retriedBatch = it }
+            assertEquals(ID, retriedBatch)
+            assertTrue(f.queue.calls.contains("retry:$ID"))
+
+            retriedBatch = ""
+            f.ops.retryAllFailed { retriedBatch = it }
+            assertEquals(ID, retriedBatch)
+            assertTrue(f.queue.calls.contains("retryAll"))
+            assertTrue(f.messages.last().contains("antrean aktif"))
         }
     }
     companion object { const val ID="11111111-1111-4111-8111-111111111111" }

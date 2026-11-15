@@ -350,10 +350,14 @@ class DesktopRemoteSessionTest {
         } finally { scope.cancel() }
     }
 
-    private class FakeImporter(var alreadyHas: Boolean = false) : DesktopRemoteMediaImporter {
+    private class FakeImporter(
+        var alreadyHas: Boolean = false,
+        var hasStorage: Boolean = true,
+    ) : DesktopRemoteMediaImporter {
         var imports = 0
         val createdTempFiles = mutableListOf<java.io.File>()
         override suspend fun hasTrack(sha256: String, sizeBytes: Long): Boolean = alreadyHas
+        override fun hasEnoughStorage(requiredBytes: Long): Boolean = hasStorage
         override fun createTempDownloadFile(): java.io.File =
             java.io.File.createTempFile("remote-test-", ".part").also { createdTempFiles.add(it) }
         override suspend fun importDownloadedAudio(
@@ -423,6 +427,22 @@ class DesktopRemoteSessionTest {
             assertEquals("disconnected", session.state.value.phase)
             assertTrue(session.state.value.downloads.isEmpty())
             assertTrue(importer.createdTempFiles.all { !it.exists() })
+        } finally { scope.cancel() }
+    }
+
+    @Test fun trackDownloadFailsEarlyWhenPhoneStorageInsufficient() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val port = Port().apply { role = "control"; extended = true; mediaSupported = true }
+            val importer = FakeImporter(hasStorage = false)
+            val session = DesktopRemoteSession(port, scope, 100_000, ioDispatcher = Dispatchers.Unconfined, mediaImporter = importer)
+            session.visible(Any()); session.connect(pairing); settle()
+            session.downloadTrack("trk_01"); settle()
+            assertEquals(1, port.headCalls)
+            assertEquals(0, port.downloadCalls)
+            assertEquals(DesktopRemoteTrackDownload.Status.FAILED, session.state.value.downloads["trk_01"]?.status)
+            assertTrue(session.state.value.downloads["trk_01"]?.detail?.contains("penyimpanan") == true)
+            assertTrue(importer.createdTempFiles.isEmpty())
         } finally { scope.cancel() }
     }
 

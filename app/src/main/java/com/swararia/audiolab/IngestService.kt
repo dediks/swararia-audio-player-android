@@ -6,8 +6,10 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.StatFs
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -56,6 +58,8 @@ class IngestService : Service() {
     @Volatile private var runner: BatchDownloadRunner? = null
     @Volatile private var activeBatch: String? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+    private val lastProgressAtMs = AtomicLong(0L)
     private var lastNotification = 0L
     private val queue get() = (application as SwarariaApp).container.downloadQueue
     private val downloadPrefs get() = (application as SwarariaApp).container.downloadPreferences
@@ -111,9 +115,7 @@ class IngestService : Service() {
                 }
             }
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification("Menyiapkan...", null), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-            wakeLock = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:ingest").also {
-                it.acquire(30 * 60 * 1000L)
-            }
+            acquireLocks()
         } catch (_: Exception) {
             releaseResources(startId)
             IngestStatus.mutable.update { it.copy(busy = false, cancelable = false, error = true, stage = "Tidak dapat memulai layanan", detail = "Coba lagi saat aplikasi terbuka.") }
@@ -121,7 +123,20 @@ class IngestService : Service() {
         }
         task = scope.launch(start = CoroutineStart.ATOMIC) {
             var exclusive = false
-            val watchdog = scope.launch { delay(29 * 60 * 1000L); forceStop() }
+            val startedAtMs = android.os.SystemClock.elapsedRealtime()
+            lastProgressAtMs.set(startedAtMs)
+            val watchdog = scope.launch {
+                while (isActive) {
+                    delay(60_000L)
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    val idleMs = now - lastProgressAtMs.get()
+                    val totalMs = now - startedAtMs
+                    if (idleMs >= MAX_STALL_MS || totalMs >= MAX_TOTAL_SESSION_MS) {
+                        forceStop()
+                        break
+                    }
+                }
+            }
             try {
                 // Recovery/cleanup must never run concurrently with a live native worker.
                 exclusive = workerMutex.tryLock()
@@ -131,6 +146,7 @@ class IngestService : Service() {
                 cleanAbandonedWorkspaces()
                 when (intent?.action) {
                     ACTION_IMPORT -> {
+                        ensureSufficientStorage()
                         val uri = intent.data ?: error("File pilihan tidak ditemukan.")
                         enterProtectedPhase("Menyalin audio pilihan...")
                         val track = withContext(NonCancellable) { library.importAudio(uri) }
@@ -138,6 +154,7 @@ class IngestService : Service() {
                     }
                     ACTION_UPDATE -> {
                         report("Menyiapkan mesin...", null)
+                        checkSupportedPageSize()
                         YoutubeDL.init(applicationContext)
                         currentCoroutineContext().ensureActive()
                         enterProtectedPhase("Mengambil pembaruan yt-dlp dari GitHub resmi...")
@@ -182,10 +199,15 @@ class IngestService : Service() {
                 }
             } catch (_: CancellationException) {
                 finished("Dibatalkan", "File yang sudah selesai tetap di library.")
-            } catch (_: Exception) {
+            } catch (failure: Exception) {
                 // Never surface yt-dlp output/exception text: it can contain signed URLs and headers.
+                val detail = if (failure is IngestUserMessageException) {
+                    IngestFailureMessages.sanitize(failure.userMessage)
+                } else {
+                    "Periksa sumber, koneksi, dan dukungan perangkat, lalu coba ulang."
+                }
                 IngestStatus.mutable.update { it.copy(stage = "Belum berhasil", progress = null,
-                    detail = "Periksa sumber, koneksi, dan dukungan perangkat, lalu coba ulang.", error = true, cancelable = false) }
+                    detail = detail, error = true, cancelable = false) }
             } finally {
                 watchdog.cancel()
                 synchronized(phaseLock) { processId?.let { runCatching { YoutubeDL.destroyProcessById(it) } }; processId = null }
@@ -209,12 +231,14 @@ class IngestService : Service() {
             val url = DownloadQueueRules.validatedPublicSourceUrl(job.sourceUrl)
             val videoId = url.substringAfter("v=")
             synchronized(phaseLock) { interruptible = true; checkJobControls(job.id) }
+            acquireLocks()
+            lastProgressAtMs.set(android.os.SystemClock.elapsedRealtime())
+            ensureSufficientStorage()
+            checkSupportedPageSize()
             control.progress(null, "Menyiapkan mesin")
             report("Menyiapkan Python dan FFmpeg di HP...", null)
             val engineStarted = System.nanoTime()
             YoutubeDL.init(applicationContext)
-            val pageSize = android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE)
-            check(pageSize == 4096L) { "Perangkat membutuhkan mesin yang mendukung halaman memori 16 KB." }
             FFmpeg.init(applicationContext)
             android.util.Log.d("SwarariaTiming", "download_engine_init_ms=${((System.nanoTime() - engineStarted) / 1_000_000L).coerceAtLeast(0)}")
             currentCoroutineContext().ensureActive()
@@ -542,15 +566,62 @@ class IngestService : Service() {
         synchronized(phaseLock) { processId?.let { runCatching { YoutubeDL.destroyProcessById(it) } } }
         task?.cancel()
     }
+    private fun checkSupportedPageSize() {
+        val pageSize = android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE)
+        if (pageSize != 4096L) {
+            throw IngestUserMessageException(IngestFailureMessages.UNSUPPORTED_16KB_PAGE_SIZE)
+        }
+    }
+
+    private fun ensureSufficientStorage() {
+        val minBytes = MIN_FREE_STORAGE_BYTES
+        val cacheAvail = runCatching { StatFs(cacheDir.absolutePath).availableBytes }.getOrNull()
+        val filesAvail = runCatching { StatFs(filesDir.absolutePath).availableBytes }.getOrNull()
+        if ((cacheAvail != null && cacheAvail < minBytes) || (filesAvail != null && filesAvail < minBytes)) {
+            throw IngestUserMessageException(IngestFailureMessages.INSUFFICIENT_STORAGE)
+        }
+    }
+
     private fun cleanAbandonedWorkspaces() {
         val root = File(cacheDir, "ingest")
         root.listFiles().orEmpty().filter {
             it.isDirectory && runCatching { UUID.fromString(it.name).toString() == it.name && it.canonicalFile.parentFile == root.canonicalFile }.getOrDefault(false)
         }.forEach { it.deleteRecursively() }
+        val cutoff = System.currentTimeMillis() - STALE_CACHE_MS
+        File(cacheDir, "desktop_remote_downloads").listFiles().orEmpty().forEach { file ->
+            if (file.isFile && file.name.endsWith(".part") && file.lastModified() < cutoff) file.delete()
+        }
+        File(cacheDir, "phase_export").listFiles().orEmpty().forEach { file ->
+            if (file.isFile && file.lastModified() < cutoff) file.delete()
+        }
     }
+
+    @Suppress("DEPRECATION")
+    private fun acquireLocks() {
+        synchronized(phaseLock) {
+            if (wakeLock == null) {
+                wakeLock = getSystemService(PowerManager::class.java)
+                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:ingest")
+                    .apply { setReferenceCounted(false) }
+            }
+            runCatching { wakeLock?.acquire(WAKELOCK_SLICE_MS) }
+            if (wifiLock == null) {
+                val wifi = applicationContext.getSystemService(WifiManager::class.java)
+                wifiLock = wifi?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "$packageName:ingest-wifi")
+                    ?.apply { setReferenceCounted(false) }
+            }
+            runCatching { if (wifiLock?.isHeld == false) wifiLock?.acquire() }
+        }
+    }
+
     private fun releaseWakeLock() {
-        val held = synchronized(phaseLock) { wakeLock.also { wakeLock = null } }
-        held?.let { runCatching { if (it.isHeld) it.release() } }
+        val (heldWake, heldWifi) = synchronized(phaseLock) {
+            val wl = wakeLock.also { wakeLock = null }
+            val wfl = wifiLock.also { wifiLock = null }
+            wl to wfl
+        }
+        heldWake?.let { runCatching { if (it.isHeld) it.release() } }
+        heldWifi?.let { runCatching { if (it.isHeld) it.release() } }
     }
     private fun releaseResources(startId: Int) {
         releaseWakeLock()
@@ -558,9 +629,10 @@ class IngestService : Service() {
         runCatching { stopSelf(startId) }
     }
     private fun report(stage: String, progress: Float?, detail: String = "", cancelable: Boolean = true) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        lastProgressAtMs.set(now)
         IngestStatus.mutable.update { it.copy(busy = true, stage = stage, progress = progress,
             detail = detail, cancelable = cancelable, error = false) }
-        val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastNotification > 700) {
             runCatching { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(stage, progress)) }
             lastNotification = now
@@ -593,6 +665,11 @@ class IngestService : Service() {
     companion object {
         private val workerMutex = Mutex()
         private const val MAX_WORK_BYTES = 1024L * 1024 * 1024
+        private const val MIN_FREE_STORAGE_BYTES = 150L * 1024L * 1024L
+        private const val WAKELOCK_SLICE_MS = 30L * 60L * 1000L
+        private const val MAX_STALL_MS = 15L * 60L * 1000L
+        private const val MAX_TOTAL_SESSION_MS = 120L * 60L * 1000L
+        private const val STALE_CACHE_MS = 2L * 60L * 60L * 1000L
         private const val CHANNEL = "audio_ingest"
         private const val NOTIFICATION_ID = 101
         const val ACTION_DOWNLOAD = "com.swararia.audiolab.INGEST_DOWNLOAD"

@@ -50,4 +50,21 @@ class PlaybackRulesTest {
         assertEquals("0.3s", FadeRules.shortLabel(300L))
         assertEquals("2s", FadeRules.shortLabel(2000L))
     }
+
+    @Test fun fadeSwitchAutoPlayRespectsPendingStopAndPauseIntent() {
+        assertTrue(FadeRules.shouldAutoPlayOnSwitch(playWhenReady = true, isPlaying = true, fadingOutToStopOrPause = false))
+        assertTrue(FadeRules.shouldAutoPlayOnSwitch(playWhenReady = true, isPlaying = false, fadingOutToStopOrPause = false))
+        assertFalse(FadeRules.shouldAutoPlayOnSwitch(playWhenReady = false, isPlaying = false, fadingOutToStopOrPause = false))
+        assertFalse(FadeRules.shouldAutoPlayOnSwitch(playWhenReady = true, isPlaying = true, fadingOutToStopOrPause = true))
+        assertFalse(FadeRules.shouldAutoPlayOnSwitch(playWhenReady = true, isPlaying = false, fadingOutToStopOrPause = true))
+    }
+
+    @Test fun fadeControlAllowsStartDuringPlaybackAndHardCutDuringFadeOut() {
+        assertTrue(FadeRules.canTapFadeControl(fadeSupported = true, playing = true, fadeBusy = false, pending = false))
+        assertTrue(FadeRules.canTapFadeControl(fadeSupported = true, playing = true, fadeBusy = true, pending = false))
+        assertTrue(FadeRules.canTapFadeControl(fadeSupported = true, playing = false, fadeBusy = true, pending = false))
+        assertFalse(FadeRules.canTapFadeControl(fadeSupported = true, playing = false, fadeBusy = false, pending = false))
+        assertFalse(FadeRules.canTapFadeControl(fadeSupported = true, playing = true, fadeBusy = true, pending = true))
+        assertFalse(FadeRules.canTapFadeControl(fadeSupported = false, playing = true, fadeBusy = true, pending = false))
+    }
 }

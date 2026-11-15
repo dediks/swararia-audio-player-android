@@ -90,7 +90,8 @@ class RoomDownloadQueueRepository(private val database: AudioDatabase) : Downloa
         Unit
     }
     // Native exception strings may contain private URLs, credentials, or output paths.
-    override suspend fun fail(id: Long, message: String) = dao.fail(id, "Unduhan gagal. Coba ulang atau periksa sumber dan koneksi.")
+    override suspend fun fail(id: Long, message: String) =
+        dao.fail(id, IngestFailureMessages.sanitize(message))
     override suspend fun cancel(id: Long) = dao.cancel(id)
     override suspend fun cancelBatch(batchId: String) = dao.cancelBatch(batchId)
     override suspend fun cancelAllQueued() = dao.cancelAllQueued()

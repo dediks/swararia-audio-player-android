@@ -282,8 +282,10 @@ internal object PhaseCheckerRules {
         sampleRate: Int = SAMPLE_RATE,
         micInverted: Boolean = false,
         sensitivity: PhaseMicSensitivity = PhaseMicSensitivity.NORMAL,
+        mode: PhaseTestSignalMode = PhaseTestSignalMode.PULSE_FULL_RANGE,
     ): MicAnalysisResult {
         if (samples.size < 128) return MicAnalysisResult.idle()
+        val isSubMode = mode == PhaseTestSignalMode.PULSE_SUB
         var sum = 0.0
         for (s in samples) sum += s
         val mean = ((sum / samples.size) / 32768.0).toFloat()
@@ -302,8 +304,8 @@ internal object PhaseCheckerRules {
             }
         }
 
-        val exclBefore = (sampleRate * 0.025).roundToInt()
-        val exclAfter = (sampleRate * 0.055).roundToInt()
+        val exclBefore = (sampleRate * (if (isSubMode) 0.030 else 0.025)).roundToInt()
+        val exclAfter = (sampleRate * (if (isSubMode) 0.080 else 0.055)).roundToInt()
         var bgSumSq = 0.0
         var bgCount = 0
         for (i in norm.indices) {
@@ -357,8 +359,8 @@ internal object PhaseCheckerRules {
             )
         }
 
-        val clusterStart = max(0, peakIdx - (sampleRate * 0.008).roundToInt())
-        val clusterEnd = min(norm.size, peakIdx + (sampleRate * 0.014).roundToInt())
+        val clusterStart = max(0, peakIdx - (sampleRate * (if (isSubMode) 0.018 else 0.008)).roundToInt())
+        val clusterEnd = min(norm.size, peakIdx + (sampleRate * (if (isSubMode) 0.058 else 0.014)).roundToInt())
         var posPeak = 0f
         var negPeak = 0f
         var leadingSign = 0
@@ -382,6 +384,7 @@ internal object PhaseCheckerRules {
                 absPeak = absPeak,
                 sampleRate = sampleRate,
                 clusterEnd = clusterEnd,
+                isSubMode = isSubMode,
             )
             if (dampedLeading != null) {
                 rawVerdict = dampedLeading
@@ -400,8 +403,8 @@ internal object PhaseCheckerRules {
 
         val effective = effectivePolarity(rawVerdict, micInverted)
         val effectiveAsymmetry = if (micInverted) -rawAsymmetry else rawAsymmetry
-        val viewStart = max(0, peakIdx - (sampleRate * 0.010).roundToInt())
-        val viewEnd = min(norm.size, peakIdx + (sampleRate * 0.022).roundToInt())
+        val viewStart = max(0, peakIdx - (sampleRate * (if (isSubMode) 0.016 else 0.010)).roundToInt())
+        val viewEnd = min(norm.size, peakIdx + (sampleRate * (if (isSubMode) 0.064 else 0.022)).roundToInt())
         return MicAnalysisResult(
             rawVerdict = rawVerdict,
             effectiveVerdict = effective,
@@ -427,8 +430,9 @@ internal object PhaseCheckerRules {
         absPeak: Float,
         sampleRate: Int,
         clusterEnd: Int,
+        isSubMode: Boolean,
     ): PolarityVerdict? {
-        val searchBackStart = max(0, peakIdx - (sampleRate * 0.012).roundToInt())
+        val searchBackStart = max(0, peakIdx - (sampleRate * (if (isSubMode) 0.024 else 0.012)).roundToInt())
         val onsetThreshold = absPeak * 0.55f
         var firstArrivalIdx = -1
         for (i in searchBackStart..peakIdx) {
@@ -448,7 +452,7 @@ internal object PhaseCheckerRules {
         }
         if (preMax >= absPeak * 0.20f) return null
 
-        val leadEnd = min(norm.size, firstArrivalIdx + (sampleRate * 0.0045).roundToInt())
+        val leadEnd = min(norm.size, firstArrivalIdx + (sampleRate * (if (isSubMode) 0.012 else 0.0045)).roundToInt())
         var leadMaxSigned = 0f
         for (i in firstArrivalIdx until leadEnd) {
             if (abs(norm[i]) > abs(leadMaxSigned)) leadMaxSigned = norm[i]
@@ -456,7 +460,7 @@ internal object PhaseCheckerRules {
         if (abs(leadMaxSigned) < absPeak * 0.85f) return null
         val leadPositive = leadMaxSigned > 0f
 
-        val postStart = min(norm.size, firstArrivalIdx + (sampleRate * 0.0032).roundToInt())
+        val postStart = min(norm.size, firstArrivalIdx + (sampleRate * (if (isSubMode) 0.009 else 0.0032)).roundToInt())
         for (i in postStart until clusterEnd) {
             if (i <= leadEnd) continue
             val sameDirPeak = if (leadPositive) norm[i] else -norm[i]
@@ -464,6 +468,25 @@ internal object PhaseCheckerRules {
         }
         return if (leadPositive) PolarityVerdict.POSITIVE else PolarityVerdict.NEGATIVE
     }
+
+    internal data class InvertedHoldState(
+        val micInverted: Boolean,
+        val heldEffectiveVerdict: PolarityVerdict,
+        val asymmetry: Float,
+        val waveformPreview: List<Float>,
+    )
+
+    internal fun toggleHoldInversion(
+        heldRawVerdict: PolarityVerdict,
+        currentAsymmetry: Float,
+        currentWaveform: List<Float>,
+        nextMicInverted: Boolean,
+    ): InvertedHoldState = InvertedHoldState(
+        micInverted = nextMicInverted,
+        heldEffectiveVerdict = effectivePolarity(heldRawVerdict, nextMicInverted),
+        asymmetry = -currentAsymmetry,
+        waveformPreview = currentWaveform.map { -it },
+    )
 
     private fun downsampleSigned(
         data: FloatArray,

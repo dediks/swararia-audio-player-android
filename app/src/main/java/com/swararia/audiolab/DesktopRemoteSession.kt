@@ -385,6 +385,15 @@ class DesktopRemoteSession(
                     ))
                     return@launch
                 }
+                val hasSpace = withContext(ioDispatcher) { importer.hasEnoughStorage(head.sizeBytes) }
+                if (generation != ticket) return@launch
+                if (!hasSpace) {
+                    setDownloadState(ticket, trackId, DesktopRemoteTrackDownload(
+                        status = DesktopRemoteTrackDownload.Status.FAILED,
+                        detail = "Ruang penyimpanan HP tidak cukup untuk mengunduh lagu ini.",
+                    ))
+                    return@launch
+                }
                 setDownloadState(ticket, trackId, DesktopRemoteTrackDownload(
                     status = DesktopRemoteTrackDownload.Status.DOWNLOADING,
                     downloadedBytes = 0L,

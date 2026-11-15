@@ -1,5 +1,6 @@
 package com.swararia.audiolab
 
+import android.os.Bundle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -160,6 +160,17 @@ internal fun toggleSwarariaPlayback(controller: MediaController?) {
     }
 }
 
+/** Pauses active playback and cancels any ongoing fade immediately so cueing/switching never leaks a tail. */
+internal fun pauseSwarariaPlaybackImmediately(controller: MediaController?) {
+    val p = controller ?: return
+    if (!p.isConnected) return
+    if (p.isSessionCommandAvailable(PlaybackCommands.immediatePause)) {
+        p.sendCustomCommand(PlaybackCommands.immediatePause, Bundle.EMPTY)
+    } else if (p.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) {
+        p.pause()
+    }
+}
+
 private fun playbackTitle(current: AudioTrack?, playback: SessionPlayback): String =
     current?.let { UiPresentation.title(it.displayName) }
         ?: playback.title?.takeIf { it.isNotBlank() }?.let { UiPresentation.title(it) }
@@ -256,8 +267,8 @@ internal fun RemoteLocalAudioPill(
                 icon = UiIcons.Close,
                 description = "Hentikan dan tutup pemutar lokal",
                 onClick = {
+                    pauseSwarariaPlaybackImmediately(controller)
                     connectedCommand(controller, Player.COMMAND_STOP) { p ->
-                        p.pause()
                         p.stop()
                         if (p.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) p.clearMediaItems()
                     }
@@ -321,11 +332,19 @@ internal fun MiniPlayer(
             .semantics { contentDescription = "Buka pemutar lengkap" },
     ) {
         Column(Modifier.fillMaxWidth()) {
-            playback.durationMs?.let { duration ->
-                MiniPlayerProgressLine(
-                    durationMs = duration,
-                    positionMsProvider = positionMsProvider,
+            if (playback.buffering) {
+                FohIndeterminateBar(
+                    color = foh.safeAccent,
+                    trackColor = foh.borderSubtle,
+                    height = 2.5.dp,
                 )
+            } else {
+                playback.durationMs?.takeIf { it > 0L }?.let { duration ->
+                    MiniPlayerProgressLine(
+                        durationMs = duration,
+                        positionMsProvider = positionMsProvider,
+                    )
+                }
             }
             Row(
                 modifier = Modifier
@@ -396,7 +415,7 @@ private fun MiniPlayerProgressLine(
 ) {
     val foh = FohTheme.colors
     LinearProgressIndicator(
-        progress = { (positionMsProvider().toFloat() / durationMs).coerceIn(0f, 1f) },
+        progress = { if (durationMs <= 0L) 0f else (positionMsProvider().toFloat() / durationMs).coerceIn(0f, 1f) },
         modifier = modifier,
         color = foh.safeAccent,
         trackColor = foh.borderSubtle,
@@ -467,22 +486,33 @@ internal fun FocusedPlayer(
     onBack: () -> Unit,
     onRename: (AudioTrack) -> Unit,
     onSettings: () -> Unit,
+    viewMode: LocalPlayerViewMode,
+    onSelectViewMode: (LocalPlayerViewMode) -> Unit,
+    deckCollapsed: Boolean,
+    onToggleDeckCollapsed: () -> Unit,
+    keepScreenOn: Boolean,
+    onToggleKeepScreenOn: () -> Unit,
+    guardEnabled: Boolean,
+    onToggleGuardEnabled: () -> Unit,
     positionMsProvider: () -> Long = { playback.positionMs },
 ) {
-    var viewMode by rememberSaveable { mutableStateOf(LocalPlayerViewMode.CUE_LIST) }
-    var deckCollapsed by rememberSaveable { mutableStateOf(false) }
-    var keepScreenOn by rememberSaveable { mutableStateOf(true) }
-    var guardEnabled by rememberSaveable { mutableStateOf(true) }
     var pendingGuardEntry by remember { mutableStateOf<SessionQueueItem?>(null) }
     var routeDialogOpen by remember { mutableStateOf(false) }
     var faderSheetOpen by rememberSaveable { mutableStateOf(false) }
     var seekPosition by remember(playback.mediaId, playback.currentIndex) { mutableStateOf<Float?>(null) }
+    var pendingSeekTargetMs by remember(playback.mediaId, playback.currentIndex) { mutableStateOf<Long?>(null) }
 
-    val view = LocalView.current
-    DisposableEffect(view, keepScreenOn) {
-        val previous = view.keepScreenOn
-        view.keepScreenOn = keepScreenOn
-        onDispose { view.keepScreenOn = previous }
+    LaunchedEffect(pendingSeekTargetMs, playback.mediaId, playback.currentIndex) {
+        val target = pendingSeekTargetMs ?: return@LaunchedEffect
+        val deadlineNanos = System.nanoTime() + 450_000_000L
+        delay(60L)
+        while (isActive && pendingSeekTargetMs == target && System.nanoTime() < deadlineNanos) {
+            if (kotlin.math.abs(positionMsProvider() - target) <= 750L) break
+            delay(40L)
+        }
+        if (pendingSeekTargetMs == target) {
+            pendingSeekTargetMs = null
+        }
     }
 
     val outputRoute = rememberAudioOutputRoute()
@@ -505,8 +535,8 @@ internal fun FocusedPlayer(
                 guardEnabled = guardEnabled,
                 hasCurrentTrack = current != null,
                 onMinimize = onBack,
-                onToggleKeepScreenOn = { keepScreenOn = !keepScreenOn },
-                onToggleGuard = { guardEnabled = !guardEnabled },
+                onToggleKeepScreenOn = onToggleKeepScreenOn,
+                onToggleGuard = onToggleGuardEnabled,
                 onRename = { current?.let(onRename) },
                 onSettings = onSettings,
                 onRouteClick = { routeDialogOpen = true },
@@ -517,13 +547,24 @@ internal fun FocusedPlayer(
                 title = activeTitle,
                 playback = playback,
                 controlUi = controlUi,
-                seekPosition = seekPosition,
-                onSeekChange = { seekPosition = it },
+                seekPosition = seekPosition ?: pendingSeekTargetMs?.toFloat(),
+                onSeekChange = {
+                    pendingSeekTargetMs = null
+                    seekPosition = it
+                },
                 onSeekCommit = {
                     val requested = seekPosition
                     seekPosition = null
-                    if (requested != null) connectedCommand(controller, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) { p ->
-                        if (p.currentMediaItem?.mediaId == playback.mediaId && p.currentMediaItemIndex == playback.currentIndex) p.seekTo(requested.toLong())
+                    if (requested != null) {
+                        val targetMs = requested.toLong().coerceAtLeast(0L)
+                        var dispatched = false
+                        connectedCommand(controller, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) { p ->
+                            if (p.currentMediaItem?.mediaId == playback.mediaId && p.currentMediaItemIndex == playback.currentIndex) {
+                                p.seekTo(targetMs)
+                                dispatched = true
+                            }
+                        }
+                        if (dispatched) pendingSeekTargetMs = targetMs
                     }
                 },
                 positionMsProvider = positionMsProvider,
@@ -533,7 +574,7 @@ internal fun FocusedPlayer(
                 queueCount = playback.queue.size,
                 currentIndex = playback.currentIndex,
                 viewMode = viewMode,
-                onSelectViewMode = { viewMode = it },
+                onSelectViewMode = onSelectViewMode,
             )
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -576,7 +617,7 @@ internal fun FocusedPlayer(
                 playback = playback,
                 controlUi = controlUi,
                 collapsed = deckCollapsed,
-                onToggleCollapsed = { deckCollapsed = !deckCollapsed },
+                onToggleCollapsed = onToggleDeckCollapsed,
                 onPrevious = {
                     connectedCommand(controller, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) { p ->
                         if (p.hasPreviousMediaItem()) p.seekToPreviousMediaItem()
