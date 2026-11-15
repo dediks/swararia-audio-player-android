@@ -45,6 +45,7 @@ fun SwarariaUi(
     ytMusicActions: YoutubeMusicAccountActions = YoutubeMusicAccountActions(),
 ) {
     var destination by rememberSaveable { mutableIntStateOf(0) }
+    var moreToolRoute by rememberSaveable { mutableStateOf(MoreToolRoute.HUB) }
     var fullPlayer by rememberSaveable { mutableStateOf(false) }
     var activeModal by remember { mutableStateOf<SwarariaModal?>(null) }
     val pages = rememberSaveableStateHolder()
@@ -58,6 +59,7 @@ fun SwarariaUi(
     val onlineBusy = ingest.busy || upgrade.operationBusy || search.busy || searchActions.preview.loading
     val navigate: (Int) -> Unit = { target ->
         if (target != 3 && destination != 3 && (target != destination || fullPlayer)) searchActions.stopPreview()
+        if (target == 4 && destination == 4 && !fullPlayer) moreToolRoute = MoreToolRoute.HUB
         fullPlayer = false
         destination = target
     }
@@ -108,9 +110,13 @@ fun SwarariaUi(
         }
     }
     LaunchedEffect(previewActive) { if (previewActive) fullPlayer = false }
-    BackHandler(enabled = fullPlayer || destination != 0 || previewActive) {
+    BackHandler(enabled = fullPlayer || (destination == 4 && moreToolRoute != MoreToolRoute.HUB) || destination != 0 || previewActive) {
         if (destination != 3) searchActions.stopPreview()
-        if (fullPlayer) fullPlayer = false else destination = 0
+        when {
+            fullPlayer -> fullPlayer = false
+            destination == 4 && moreToolRoute != MoreToolRoute.HUB -> moreToolRoute = MoreToolRoute.HUB
+            else -> destination = 0
+        }
     }
     val activeDownloadCount = remember(upgrade.jobs, ingest.busy) {
         val jobActive = upgrade.jobs.count { it.status == "QUEUED" || it.status == "RUNNING" }
@@ -171,6 +177,8 @@ fun SwarariaUi(
                             label = { Text("Downloads") }, colors = navigationColors())
                         NavigationBarItem(selected = destination == 3, onClick = { navigate(3) },
                             icon = { Icon(UiIcons.Link, null) }, label = { Text("Remote") }, colors = navigationColors())
+                        NavigationBarItem(selected = destination == 4, onClick = { navigate(4) },
+                            icon = { Icon(UiIcons.More, null) }, label = { Text("More") }, colors = navigationColors())
                     }
                 }
             }
@@ -185,6 +193,24 @@ fun SwarariaUi(
             positionMsProvider = { playbackClock.positionMs },
         ) else pages.SaveableStateProvider(destination) {
             when (destination) {
+                4 -> MoreScreen(
+                    tracks = tracks,
+                    playlists = playlists,
+                    lastRename = lastRename,
+                    ytMusicState = ytMusicState,
+                    playbackSettings = playbackSettings,
+                    remoteServerState = remoteServerState,
+                    jobs = upgrade.jobs,
+                    activeTool = moreToolRoute,
+                    onSelectTool = { moreToolRoute = it },
+                    modifier = contentModifier,
+                    onOpenSettings = { activeModal = SwarariaModal.EngineSettings },
+                    onOpenRenameHistory = { activeModal = SwarariaModal.RenameHistory },
+                    onPauseOtherAudio = {
+                        searchActions.stopPreview()
+                        controller?.takeIf { it.isConnected && it.isPlaying }?.pause()
+                    },
+                )
                 0 -> LibraryPage(
                     tracks = tracks,
                     playlists = playlists,
