@@ -37,8 +37,8 @@ class NativeUiSourceContracts(unittest.TestCase):
     def test_search_selection_is_loaded_only_and_consent_is_fresh(self):
         code = source('AddAudioScreen.kt')
         for text in ['combinedClickable(', 'onLongClick =', 'selectionMode', 'selectedIds',
-                     'loadedSongs', 'Text("Clear")', 'Text("Select all")', 'Download (',
-                     'DownloadConsentDialog(', 'onDownloadBatch(listOf(hit), true)',
+                     'loadedSongs', 'Text("Reset"', 'Semua', 'Unduh (',
+                     'AddAudioSourceTab.LOCAL_FILE', 'onDownloadBatch(listOf(hit), true)',
                      'SearchChoice(', 'trailingIcon =', 'KeyboardActions(onSearch',
                      'BackHandler(', 'actions.leavePlaylist()', 'YoutubeThumbnail(hit.thumbnailUrl, hit.title']:
             self.assertIn(text, code)
@@ -57,7 +57,8 @@ class NativeUiSourceContracts(unittest.TestCase):
         code = source('DownloadsScreen.kt')
         for text in ['upgrade.jobs', '"COMPLETED"', '"RUNNING"', '"QUEUED"', '"FAILED"',
                      '"CANCELED"', 'job.progress', 'job.stage', 'job.error', 'job.thumbnailUrl',
-                     'onCancelBatch', 'onRetryFailed', 'Cancel batch', 'Retry failed']:
+                     'DownloadQueueSegmentedBar(', 'onCancelBatch', 'onRetryFailed',
+                     'onRetryAllFailed', 'Batalkan semua', 'Ulangi semua']:
             self.assertIn(text, code)
         self.assertNotIn('Pause', code)
         self.assertNotIn('Resume', code)

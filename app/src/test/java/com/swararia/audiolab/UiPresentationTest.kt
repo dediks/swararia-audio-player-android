@@ -133,6 +133,10 @@ class UiPresentationTest {
         assertEquals(listOf("RUNNING", "QUEUED", "QUEUED"), UiPresentation.filterDownloads(rows, DownloadFilterTab.ACTIVE) { it.second }.map { it.second })
         assertEquals(listOf("COMPLETED"), UiPresentation.filterDownloads(rows, DownloadFilterTab.COMPLETED) { it.second }.map { it.second })
         assertEquals(listOf("FAILED"), UiPresentation.filterDownloads(rows, DownloadFilterTab.FAILED) { it.second }.map { it.second })
+
+        assertEquals(listOf("RUNNING", "QUEUED", "QUEUED"), UiPresentation.filterQueueTab(rows, DownloadQueueTab.ACTIVE) { it.second }.map { it.second })
+        assertEquals(listOf("FAILED"), UiPresentation.filterQueueTab(rows, DownloadQueueTab.FAILED) { it.second }.map { it.second })
+        assertEquals(listOf("COMPLETED", "CANCELED"), UiPresentation.filterQueueTab(rows, DownloadQueueTab.COMPLETED) { it.second }.map { it.second })
     }
 
     @Test fun batchGroupLabelFormatsTodayYesterdayAndOlderDates() {

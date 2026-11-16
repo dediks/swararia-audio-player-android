@@ -21,6 +21,12 @@ enum class DownloadFilterTab(val label: String) {
     FAILED("Gagal"),
 }
 
+enum class DownloadQueueTab(val label: String) {
+    ACTIVE("Antrean"),
+    FAILED("Gagal"),
+    COMPLETED("Selesai"),
+}
+
 data class DownloadQueueSummary(
     val total: Int,
     val running: Int,
@@ -210,6 +216,22 @@ object UiPresentation {
         }
         DownloadFilterTab.COMPLETED -> items.filter { statusSelector(it) == "COMPLETED" }
         DownloadFilterTab.FAILED -> items.filter { statusSelector(it) == "FAILED" }
+    }
+
+    fun <T> filterQueueTab(
+        items: List<T>,
+        tab: DownloadQueueTab,
+        statusSelector: (T) -> String,
+    ): List<T> = when (tab) {
+        DownloadQueueTab.ACTIVE -> items.filter {
+            val status = statusSelector(it)
+            status == "RUNNING" || status == "QUEUED"
+        }
+        DownloadQueueTab.FAILED -> items.filter { statusSelector(it) == "FAILED" }
+        DownloadQueueTab.COMPLETED -> items.filter {
+            val status = statusSelector(it)
+            status == "COMPLETED" || status == "CANCELED"
+        }
     }
 
     /** Records a valid non-URL query to the front of recent history without case-insensitive duplicates. */

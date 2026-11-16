@@ -67,7 +67,8 @@ fun SwarariaUi(
         tracks.mapNotNullTo(HashSet()) { UiPresentation.sourceVideoId(it.displayName) }
     }
     val previewActive = searchActions.preview.let { it.hit != null || it.loading || it.media != null || it.error != null }
-    val onlineBusy = ingest.busy || upgrade.operationBusy || search.busy || searchActions.preview.loading
+    val queueBusy = upgrade.operationBusy || search.busy || searchActions.preview.loading
+    val onlineBusy = ingest.busy || queueBusy
     val context = androidx.compose.ui.platform.LocalContext.current
     val brandManager = remember(context) {
         (context.applicationContext as? SwarariaApp)?.container?.brandSkinManager
@@ -291,21 +292,21 @@ fun SwarariaUi(
                             upgrade = upgrade,
                             downloadedTrackIds = downloadedTrackIds,
                             downloadedVideoIds = downloadedVideoIds,
+                            tracks = tracks,
                             activeDownloadCount = activeDownloadCount,
+                            failedDownloadCount = failedDownloadCount,
                             onBack = {
                                 searchActions.stopPreview()
                                 pustakaSubRoute = PustakaSubRoute.LIBRARY
                             },
                             onOpenDownloads = { downloadsSheetOpen = true },
                             onDownload = { url, authorized ->
-                                if (!onlineBusy && authorized) {
-                                    searchActions.stopPreview()
+                                if (!queueBusy && authorized) {
                                     onDownload(url, true)
                                 }
                             },
                             onDownloadBatch = { hits, authorized ->
-                                if (!onlineBusy && authorized && hits.isNotEmpty()) {
-                                    searchActions.stopPreview()
+                                if (!queueBusy && authorized && hits.isNotEmpty()) {
                                     upgrade.onDownloadBatch(hits, true)
                                     if (hits.size > 1) downloadsSheetOpen = true
                                 }

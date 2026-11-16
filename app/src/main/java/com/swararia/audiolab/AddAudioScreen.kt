@@ -25,11 +25,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.session.MediaController
+import kotlinx.coroutines.delay
 
 data class SearchActions(
     val preview: PreviewState,
@@ -47,7 +49,13 @@ data class SearchActions(
 
 private enum class HitLibraryStatus { NONE, QUEUED, SAVED }
 
-/** Catalog search, public link download, and local file import screen aligned with Library UX. */
+private enum class AddAudioSourceTab(val label: String) {
+    YOUTUBE_MUSIC("YT Music"),
+    YOUTUBE("YouTube"),
+    LOCAL_FILE("File HP"),
+}
+
+/** Catalog search, 1-tap public link/song download, and local file import aligned with Library UX. */
 @Composable
 fun AddAudioScreen(
     ingest: IngestState,
@@ -64,26 +72,35 @@ fun AddAudioScreen(
     onDownloadBatch: (List<SearchHit>, Boolean) -> Unit,
     downloadedTrackIds: Set<Long> = emptySet(),
     downloadedVideoIds: Set<String> = emptySet(),
+    tracks: List<AudioTrack> = emptyList(),
     onOpenDownloads: () -> Unit = {},
     activeDownloadCount: Int = 0,
+    failedDownloadCount: Int = 0,
     onBack: (() -> Unit)? = null,
 ) {
     var query by rememberSaveable { mutableStateOf(search.query) }
-    var providerName by rememberSaveable { mutableStateOf(search.provider.name) }
+    var sourceTabName by rememberSaveable {
+        mutableStateOf(
+            if (search.provider == SearchProvider.YOUTUBE) AddAudioSourceTab.YOUTUBE.name
+            else AddAudioSourceTab.YOUTUBE_MUSIC.name,
+        )
+    }
     var kindName by rememberSaveable { mutableStateOf(search.kind.name) }
     var recentQueries by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
     var linkDialog by remember { mutableStateOf(false) }
     var initialLinkUrl by remember { mutableStateOf("") }
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
-    var pending by remember { mutableStateOf<List<SearchHit>?>(null) }
+    var quickToast by remember { mutableStateOf<String?>(null) }
     var playlistChannel by rememberSaveable { mutableStateOf<String?>(null) }
     var playlistThumbnail by rememberSaveable { mutableStateOf<String?>(null) }
 
-    val provider = SearchProvider.entries.firstOrNull { it.name == providerName } ?: SearchProvider.YOUTUBE_MUSIC
+    val sourceTab = AddAudioSourceTab.entries.firstOrNull { it.name == sourceTabName } ?: AddAudioSourceTab.YOUTUBE_MUSIC
+    val provider = if (sourceTab == AddAudioSourceTab.YOUTUBE) SearchProvider.YOUTUBE else SearchProvider.YOUTUBE_MUSIC
     val kind = SearchKind.entries.firstOrNull { it.name == kindName } ?: SearchKind.SONGS
     val controlsEnabled = !ingest.busy && !upgrade.operationBusy
     val idle = controlsEnabled && !search.busy && !actions.preview.loading
+    val queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading
     val validQuery = remember(query) { runCatching { YoutubeSearchRules.validatedQuery(query) }.isSuccess }
     val detectedUrl = remember(query) { runCatching { DownloadQueueRules.validatedPublicSourceUrl(query) }.getOrNull() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -93,6 +110,7 @@ fun AddAudioScreen(
     val sorted = remember(search.results, search.sort) { YoutubeSearchRules.sorted(search.results, search.sort) }
     val loadedSongs = remember(sorted) { sorted.filter { it.kind == SearchKind.SONGS } }
     val selectedSongs = remember(loadedSongs, selectedIds) { loadedSongs.filter { it.videoId in selectedIds } }
+    val recentLocalTracks = remember(tracks) { tracks.take(8) }
 
     val queuedUrls = remember(upgrade.jobs) {
         upgrade.jobs.asSequence()
@@ -121,27 +139,34 @@ fun AddAudioScreen(
             }
         }
     }
-    val switchTabSearch: (SearchProvider, SearchKind) -> Unit = { nextProvider, nextKind ->
-        providerName = nextProvider.name
+    val switchSourceTab: (AddAudioSourceTab, SearchKind) -> Unit = { nextTab, nextKind ->
+        sourceTabName = nextTab.name
         kindName = nextKind.name
-        val nextSort = if (nextKind == SearchKind.PLAYLISTS &&
-            (search.sort == SearchSort.DURATION_ASC || search.sort == SearchSort.DURATION_DESC)
-        ) SearchSort.RELEVANCE else search.sort
-        val activeQuery = query.takeIf { validQuery && detectedUrl == null }
-            ?: search.query.takeIf { search.hasSearched && detectedUrl == null }
-        val shouldSwitch = activeQuery != null && (
-            nextProvider != search.provider ||
-                nextKind != search.kind ||
-                !search.hasSearched ||
-                activeQuery.trim() != search.query.trim() ||
-                search.error != null ||
-                search.busy
-            )
-        if (shouldSwitch) {
-            if (query != activeQuery) query = activeQuery
-            executeSearch(activeQuery, nextProvider, nextKind, nextSort, true)
-        } else if (nextKind == SearchKind.PLAYLISTS && nextSort != search.sort) {
-            actions.sort(nextSort)
+        if (nextTab == AddAudioSourceTab.LOCAL_FILE) {
+            keyboard?.hide()
+            selectionMode = false
+            selectedIds = arrayListOf()
+        } else {
+            val nextProvider = if (nextTab == AddAudioSourceTab.YOUTUBE) SearchProvider.YOUTUBE else SearchProvider.YOUTUBE_MUSIC
+            val nextSort = if (nextKind == SearchKind.PLAYLISTS &&
+                (search.sort == SearchSort.DURATION_ASC || search.sort == SearchSort.DURATION_DESC)
+            ) SearchSort.RELEVANCE else search.sort
+            val activeQuery = query.takeIf { validQuery && detectedUrl == null }
+                ?: search.query.takeIf { search.hasSearched && detectedUrl == null }
+            val shouldSwitch = activeQuery != null && (
+                nextProvider != search.provider ||
+                    nextKind != search.kind ||
+                    !search.hasSearched ||
+                    activeQuery.trim() != search.query.trim() ||
+                    search.error != null ||
+                    search.busy
+                )
+            if (shouldSwitch) {
+                if (query != activeQuery) query = activeQuery
+                executeSearch(activeQuery, nextProvider, nextKind, nextSort, true)
+            } else if (nextKind == SearchKind.PLAYLISTS && nextSort != search.sort) {
+                actions.sort(nextSort)
+            }
         }
     }
     val submit = { executeSearch(query, provider, kind, search.sort, !idle) }
@@ -151,20 +176,38 @@ fun AddAudioScreen(
         })
     }
     val openLinkModal: (String) -> Unit = { preset ->
-        actions.stopPreview()
         initialLinkUrl = preset
         linkDialog = true
+    }
+    val triggerLocalImport: () -> Unit = {
+        sourceTabName = AddAudioSourceTab.LOCAL_FILE.name
+        if (idle) onImport()
+    }
+    val enqueueSingleHit: (SearchHit) -> Unit = { hit ->
+        if (queueIdle) {
+            onDownloadBatch(listOf(hit), true)
+            quickToast = "\"${hit.title}\" masuk antrean"
+        }
     }
 
     LaunchedEffect(search.query, search.provider, search.playlistId) {
         selectionMode = false
         selectedIds = arrayListOf()
-        pending = null
     }
     LaunchedEffect(search.playlistId, search.hasSearched, search.provider, search.kind) {
-        if (search.playlistId == null && search.hasSearched) {
-            providerName = search.provider.name
+        if (search.playlistId == null && search.hasSearched && sourceTab != AddAudioSourceTab.LOCAL_FILE) {
+            sourceTabName = if (search.provider == SearchProvider.YOUTUBE) {
+                AddAudioSourceTab.YOUTUBE.name
+            } else {
+                AddAudioSourceTab.YOUTUBE_MUSIC.name
+            }
             kindName = search.kind.name
+        }
+    }
+    LaunchedEffect(quickToast) {
+        if (quickToast != null) {
+            delay(3_500L)
+            quickToast = null
         }
     }
     BackHandler(enabled = selectionMode || inPlaylist) {
@@ -188,15 +231,16 @@ fun AddAudioScreen(
                     inPlaylist = inPlaylist,
                     selectionMode = selectionMode,
                     selectedCount = selectedSongs.size,
-                    hasSongs = loadedSongs.isNotEmpty(),
+                    hasSongs = loadedSongs.isNotEmpty() && (inPlaylist || sourceTab != AddAudioSourceTab.LOCAL_FILE),
                     idle = idle,
-                    queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading,
+                    queueIdle = queueIdle,
                     activeDownloadCount = activeDownloadCount,
+                    failedDownloadCount = failedDownloadCount,
                     onBack = onBack,
                     onOpenDownloads = onOpenDownloads,
                     onLeavePlaylist = leave,
                     onOpenLink = { openLinkModal(detectedUrl.orEmpty()) },
-                    onOpenImport = onImport,
+                    onOpenImport = triggerLocalImport,
                     onEnterSelection = { actions.stopPreview(); selectionMode = true },
                     onExitSelection = { selectionMode = false; selectedIds = arrayListOf() },
                     onSelectAll = { selectedIds = ArrayList(loadedSongs.map { it.videoId }) },
@@ -204,39 +248,47 @@ fun AddAudioScreen(
                     onOpenSettings = onSettings,
                 )
             }
-            if (ingest.busy || queuedUrls.isNotEmpty()) item(key = "ingest", contentType = "banner") {
-                SearchIngestBanner(
-                    stage = if (ingest.busy && ingest.stage.isNotBlank()) ingest.stage else "Menyiapkan antrean unduhan (${queuedUrls.size})…",
-                    cancelable = ingest.cancelable,
-                    onOpenDownloads = onOpenDownloads,
-                    onCancel = onCancel,
-                )
+
+            if ((ingest.busy && ingest.batchId != null) || (queuedUrls.isNotEmpty() && sourceTab != AddAudioSourceTab.LOCAL_FILE)) {
+                item(key = "ingest", contentType = "banner") {
+                    SearchIngestBanner(
+                        stage = if (ingest.busy && ingest.stage.isNotBlank()) ingest.stage else "${queuedUrls.size} dalam antrean",
+                        cancelable = ingest.cancelable,
+                        onOpenDownloads = onOpenDownloads,
+                        onCancel = onCancel,
+                    )
+                }
             }
-            if (inPlaylist) item(key = "playlist-context", contentType = "playlist-context") {
-                SearchPlaylistContextHeader(
-                    title = search.playlistTitle.orEmpty(),
-                    channel = playlistChannel,
-                    thumbnailUrl = playlistThumbnail,
-                    songCount = loadedSongs.size,
-                )
+
+            if (inPlaylist) {
+                item(key = "playlist-context", contentType = "playlist-context") {
+                    SearchPlaylistContextHeader(
+                        title = search.playlistTitle.orEmpty(),
+                        channel = playlistChannel,
+                        thumbnailUrl = playlistThumbnail,
+                        songCount = loadedSongs.size,
+                    )
+                }
             }
+
             if (!inPlaylist && !selectionMode) {
                 item(key = "source-and-query", contentType = "controls") {
                     SearchControlsPanel(
+                        sourceTab = sourceTab,
                         query = query,
                         provider = provider,
                         kind = kind,
                         sort = search.sort,
                         controlsEnabled = controlsEnabled,
-                        idle = idle,
                         validQuery = validQuery,
                         detectedUrl = detectedUrl,
                         recentQueries = recentQueries,
                         showRecent = !search.hasSearched && recentQueries.isNotEmpty() && detectedUrl == null,
-                        resultCount = sorted.size,
-                        showResultsHeader = search.hasSearched && sorted.isNotEmpty(),
+                        hasResults = sorted.isNotEmpty(),
                         inPlaylist = inPlaylist,
                         searchBusy = search.busy,
+                        queueIdle = queueIdle,
+                        onSelectSourceTab = { nextTab -> switchSourceTab(nextTab, kind) },
                         onQueryChange = { query = it },
                         onClearQuery = { query = "" },
                         onSubmit = submit,
@@ -245,10 +297,15 @@ fun AddAudioScreen(
                             executeSearch(term, provider, kind, search.sort, !idle)
                         },
                         onClearRecent = { recentQueries = arrayListOf() },
-                        onSelectProvider = { nextProvider -> switchTabSearch(nextProvider, kind) },
-                        onSelectKind = { nextKind -> switchTabSearch(provider, nextKind) },
+                        onSelectKind = { nextKind -> switchSourceTab(sourceTab, nextKind) },
                         onSort = actions.sort,
-                        onOpenDetectedUrl = { url -> openLinkModal(url) },
+                        onDownloadDetectedUrl = { url ->
+                            if (queueIdle) {
+                                onDownload(url, true)
+                                query = ""
+                                quickToast = "Tautan masuk antrean"
+                            }
+                        },
                     )
                 }
             } else if (inPlaylist && !selectionMode && sorted.isNotEmpty()) {
@@ -256,7 +313,7 @@ fun AddAudioScreen(
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             "${sorted.size} lagu",
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
                         )
@@ -264,218 +321,313 @@ fun AddAudioScreen(
                     }
                 }
             }
-            if (search.busy) item(key = "loading", contentType = "banner") {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = FohTheme.colors.surfaceCard,
-                    border = BorderStroke(1.dp, FohTheme.colors.safeBorder.copy(alpha = 0.7f)),
-                ) {
-                    Column(
-                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+
+            if (!inPlaylist && sourceTab == AddAudioSourceTab.LOCAL_FILE) {
+                item(key = "local-import-cta", contentType = "local-import") {
+                    LocalImportActionBanner(
+                        enabled = idle,
+                        onPickFiles = triggerLocalImport,
+                    )
+                }
+                if (ingest.batchId == null && (ingest.busy || ingest.error)) {
+                    item(key = "local-ingest-status", contentType = "banner") {
+                        LocalIngestStatusBanner(
+                            ingest = ingest,
+                            onCancel = onCancel,
+                        )
+                    }
+                }
+                item(key = "local-library-header", contentType = "section-header") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        Text(
+                            text = "Tersimpan (${tracks.size})",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (onBack != null && tracks.isNotEmpty()) {
+                            TextButton(
+                                onClick = onBack,
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier.heightIn(min = 28.dp),
+                            ) {
+                                Text("Buka Pustaka ›", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+                if (recentLocalTracks.isEmpty()) {
+                    item(key = "local-empty", contentType = "empty") {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = FohTheme.colors.surfaceCard,
+                            border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
                         ) {
-                            FohSpinningIndicator(
-                                size = 20.dp,
-                                strokeWidth = 2.4.dp,
-                                color = FohTheme.colors.safeAccent,
+                            Text(
+                                text = "Belum ada audio tersimpan di Pustaka.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.fillMaxWidth().padding(14.dp),
                             )
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        }
+                    }
+                } else {
+                    items(recentLocalTracks, key = { "local-${it.id}" }, contentType = { "local-track" }) { track ->
+                        LocalSavedTrackRow(track = track)
+                    }
+                }
+            } else {
+                if (search.busy) item(key = "loading", contentType = "banner") {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = FohTheme.colors.surfaceCard,
+                        border = BorderStroke(1.dp, FohTheme.colors.safeBorder.copy(alpha = 0.7f)),
+                    ) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                FohSpinningIndicator(
+                                    size = 20.dp,
+                                    strokeWidth = 2.4.dp,
+                                    color = FohTheme.colors.safeAccent,
+                                )
                                 Text(
                                     text = when {
                                         search.loadingMore -> "Memuat hasil berikutnya…"
-                                        inPlaylist -> "Memuat isi playlist…"
-                                        else -> "Mencari ${search.kind.label.lowercase()} di ${search.provider.label}…"
+                                        inPlaylist -> "Memuat playlist…"
+                                        else -> "Mencari di ${search.provider.label}…"
                                     },
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
                                 )
-                                Text(
-                                    text = "Menyusun metadata & kualitas audio…",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                                TextButton(onClick = onCancelSearch) { Text("Batalkan") }
                             }
-                            TextButton(onClick = onCancelSearch) { Text("Batalkan") }
+                            FohIndeterminateBar(
+                                color = FohTheme.colors.safeAccent,
+                                trackColor = FohTheme.colors.surfaceDeep,
+                                height = 4.dp,
+                            )
                         }
-                        FohIndeterminateBar(
-                            color = FohTheme.colors.safeAccent,
-                            trackColor = FohTheme.colors.surfaceDeep,
-                            height = 4.dp,
+                    }
+                }
+
+                if (search.busy && sorted.isEmpty() && !search.loadingMore) {
+                    items(4, key = { "search-skeleton-$it" }, contentType = { "skeleton" }) {
+                        SearchSkeletonRow()
+                    }
+                }
+
+                search.error?.let { error ->
+                    item(key = "error", contentType = "banner") {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = FohTheme.colors.alertBg,
+                            border = BorderStroke(1.dp, FohTheme.colors.alertBorder),
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Text(
+                                    text = UiPresentation.friendlySearchError(error),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = FohTheme.colors.alertAccent,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = actions.retry, enabled = idle) { Text("Coba lagi") }
+                            }
+                        }
+                    }
+                }
+
+                if (!search.busy && sorted.isEmpty() && detectedUrl == null) {
+                    item(key = "empty", contentType = "empty") {
+                        SearchEmptyState(
+                            hasSearched = search.hasSearched,
+                            provider = provider,
+                            idle = idle,
+                            queueIdle = queueIdle,
+                            onOpenLink = { openLinkModal("") },
+                            onOpenImport = triggerLocalImport,
+                            onSwitchProviderSearch = { alt ->
+                                val targetTab = if (alt == SearchProvider.YOUTUBE) {
+                                    AddAudioSourceTab.YOUTUBE
+                                } else {
+                                    AddAudioSourceTab.YOUTUBE_MUSIC
+                                }
+                                if (validQuery) {
+                                    switchSourceTab(targetTab, kind)
+                                } else {
+                                    sourceTabName = targetTab.name
+                                }
+                            },
                         )
                     }
                 }
-            }
-            if (search.busy && sorted.isEmpty() && !search.loadingMore) {
-                items(4, key = { "search-skeleton-$it" }, contentType = { "skeleton" }) {
-                    SearchSkeletonRow()
-                }
-            }
-            search.error?.let { error ->
-                item(key = "error", contentType = "banner") {
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = FohTheme.colors.alertBg,
-                        border = BorderStroke(1.dp, FohTheme.colors.alertBorder),
-                    ) {
-                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = UiPresentation.friendlySearchError(error),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = FohTheme.colors.alertAccent,
-                            )
-                            TextButton(onClick = actions.retry, enabled = idle) { Text("Coba lagi") }
-                        }
+
+                items(sorted, key = { "${it.kind}-${it.videoId}" }, contentType = { "search-hit" }) { hit ->
+                    val hitStatus = when {
+                        hit.url in queuedUrls -> HitLibraryStatus.QUEUED
+                        hit.url in savedUrls || hit.videoId in downloadedVideoIds -> HitLibraryStatus.SAVED
+                        else -> HitLibraryStatus.NONE
                     }
-                }
-            }
-            if (!search.busy && sorted.isEmpty() && detectedUrl == null) {
-                item(key = "empty", contentType = "empty") {
-                    SearchEmptyState(
-                        hasSearched = search.hasSearched,
-                        provider = provider,
-                        idle = idle,
-                        onOpenLink = { openLinkModal("") },
-                        onOpenImport = onImport,
-                        onSwitchProviderSearch = { alt ->
-                            if (validQuery) {
-                                switchTabSearch(alt, kind)
+                    val previewThisHit = actions.preview.hit?.videoId == hit.videoId &&
+                        actions.preview.error == null &&
+                        (actions.preview.loading || actions.preview.media != null || actions.preview.phase.isNotEmpty())
+                    val previewLoading = previewThisHit && (
+                        actions.preview.loading ||
+                            actions.preview.canceling ||
+                            actions.preview.phase in setOf("resolving", "connecting", "buffering")
+                        )
+                    CatalogResult(
+                        hit = hit,
+                        enabled = idle,
+                        queueEnabled = queueIdle,
+                        selectionMode = selectionMode,
+                        selected = hit.videoId in selectedIds,
+                        previewActive = previewThisHit,
+                        previewLoading = previewLoading,
+                        status = hitStatus,
+                        onTap = {
+                            if (selectionMode) toggle(hit)
+                            else if (hit.kind == SearchKind.PLAYLISTS) {
+                                actions.stopPreview()
+                                playlistChannel = hit.channel
+                                playlistThumbnail = hit.thumbnailUrl
+                                actions.openPlaylist(hit)
+                            } else if (previewThisHit) {
+                                actions.stopPreview()
                             } else {
-                                providerName = alt.name
+                                actions.previewSong(hit)
                             }
                         },
+                        onLongPress = {
+                            if (hit.kind == SearchKind.SONGS) {
+                                actions.stopPreview()
+                                selectionMode = true
+                                toggle(hit)
+                            }
+                        },
+                        onDownload = { enqueueSingleHit(hit) },
+                        onToggle = { toggle(hit) },
                     )
                 }
-            }
-            items(sorted, key = { "${it.kind}-${it.videoId}" }, contentType = { "search-hit" }) { hit ->
-                val hitStatus = when {
-                    hit.url in queuedUrls -> HitLibraryStatus.QUEUED
-                    hit.url in savedUrls || hit.videoId in downloadedVideoIds -> HitLibraryStatus.SAVED
-                    else -> HitLibraryStatus.NONE
-                }
-                val previewThisHit = actions.preview.hit?.videoId == hit.videoId &&
-                    actions.preview.error == null &&
-                    (actions.preview.loading || actions.preview.media != null || actions.preview.phase.isNotEmpty())
-                val previewLoading = previewThisHit && (
-                    actions.preview.loading ||
-                        actions.preview.canceling ||
-                        actions.preview.phase in setOf("resolving", "connecting", "buffering")
+
+                if (search.incompleteCount > 0) item(key = "incomplete", contentType = "notice") {
+                    Text(
+                        "${search.incompleteCount} hasil tidak lengkap disembunyikan.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp),
                     )
-                val queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading
-                CatalogResult(
-                    hit = hit,
-                    enabled = idle,
-                    queueEnabled = queueIdle,
-                    selectionMode = selectionMode,
-                    selected = hit.videoId in selectedIds,
-                    previewActive = previewThisHit,
-                    previewLoading = previewLoading,
-                    status = hitStatus,
-                    onTap = {
-                        if (selectionMode) toggle(hit)
-                        else if (hit.kind == SearchKind.PLAYLISTS) {
-                            actions.stopPreview()
-                            playlistChannel = hit.channel
-                            playlistThumbnail = hit.thumbnailUrl
-                            actions.openPlaylist(hit)
-                        } else if (previewThisHit) {
-                            actions.stopPreview()
-                        } else {
-                            actions.previewSong(hit)
+                }
+
+                if (search.hasMore) item(key = "more", contentType = "more") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = actions.loadMore,
+                            enabled = idle,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            if (search.loadingMore) {
+                                FohSpinningIndicator(
+                                    size = 18.dp,
+                                    strokeWidth = 2.2.dp,
+                                    color = FohTheme.colors.safeAccent,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("Memuat hasil berikutnya…")
+                            } else {
+                                Text("Tampilkan lebih banyak")
+                            }
                         }
-                    },
-                    onLongPress = {
-                        if (hit.kind == SearchKind.SONGS) {
-                            actions.stopPreview()
-                            selectionMode = true
-                            toggle(hit)
-                        }
-                    },
-                    onDownload = { pending = listOf(hit) },
-                    onToggle = { toggle(hit) },
-                )
-            }
-            if (search.incompleteCount > 0) item(key = "incomplete", contentType = "notice") {
-                Text(
-                    "${search.incompleteCount} hasil tidak lengkap disembunyikan.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
-            }
-            if (search.hasMore) item(key = "more", contentType = "more") {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = actions.loadMore,
-                        enabled = idle,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                        shape = RoundedCornerShape(14.dp),
-                    ) {
                         if (search.loadingMore) {
-                            FohSpinningIndicator(
-                                size = 18.dp,
-                                strokeWidth = 2.2.dp,
+                            FohIndeterminateBar(
                                 color = FohTheme.colors.safeAccent,
+                                trackColor = FohTheme.colors.surfaceDeep,
+                                height = 4.dp,
                             )
-                            Spacer(Modifier.width(8.dp))
-                            Text("Memuat hasil berikutnya…")
-                        } else {
-                            Text("Tampilkan lebih banyak")
                         }
-                    }
-                    if (search.loadingMore) {
-                        FohIndeterminateBar(
-                            color = FohTheme.colors.safeAccent,
-                            trackColor = FohTheme.colors.surfaceDeep,
-                            height = 4.dp,
-                        )
                     }
                 }
             }
         }
+
         if (selectionMode) {
-            val queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading
-            Button(
-                onClick = { pending = selectedSongs.toList() },
-                enabled = queueIdle && selectedSongs.isNotEmpty(),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).heightIn(min = 48.dp),
+            Surface(
+                color = FohTheme.colors.surfaceDeck,
+                border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
             ) {
-                Icon(UiIcons.Download, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Download (${selectedSongs.size})")
+                Button(
+                    onClick = {
+                        if (queueIdle && selectedSongs.isNotEmpty()) {
+                            val targets = selectedSongs.toList()
+                            selectionMode = false
+                            selectedIds = arrayListOf()
+                            onDownloadBatch(targets, true)
+                        }
+                    },
+                    enabled = queueIdle && selectedSongs.isNotEmpty(),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).heightIn(min = 48.dp),
+                ) {
+                    Icon(UiIcons.Download, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Unduh (${selectedSongs.size} Lagu)", fontWeight = FontWeight.Bold)
+                }
+            }
+        } else if (quickToast != null) {
+            Surface(
+                onClick = {
+                    quickToast = null
+                    onOpenDownloads()
+                },
+                shape = RoundedCornerShape(14.dp),
+                color = FohTheme.colors.safeBg,
+                border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(UiIcons.Check, null, tint = FohTheme.colors.safeAccent, modifier = Modifier.size(16.dp))
+                    Text(
+                        text = quickToast.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "Lihat ›",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = FohTheme.colors.safeAccent,
+                    )
+                }
             }
         }
     }
 
-    val queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading
-    pending?.let { hits ->
-        DownloadConsentDialog(
-            hits = hits,
-            busy = !queueIdle,
-            onDismiss = { pending = null },
-            onConfirm = {
-                if (queueIdle) {
-                    pending = null
-                    selectionMode = false
-                    selectedIds = arrayListOf()
-                    if (hits.size == 1) {
-                        val hit = hits.single()
-                        onDownloadBatch(listOf(hit), true)
-                    } else {
-                        onDownloadBatch(hits, true)
-                    }
-                }
-            },
-        )
-    }
     if (linkDialog) {
         DownloadLinkDialog(
             busy = !queueIdle,
@@ -485,6 +637,7 @@ fun AddAudioScreen(
                 if (queueIdle) {
                     linkDialog = false
                     onDownload(url, true)
+                    quickToast = "Tautan masuk antrean"
                 }
             },
         )
@@ -500,6 +653,7 @@ private fun SearchTopHeader(
     idle: Boolean,
     queueIdle: Boolean = idle,
     activeDownloadCount: Int = 0,
+    failedDownloadCount: Int = 0,
     onBack: (() -> Unit)? = null,
     onOpenDownloads: () -> Unit = {},
     onLeavePlaylist: () -> Unit,
@@ -513,21 +667,47 @@ private fun SearchTopHeader(
 ) {
     var menu by remember { mutableStateOf(false) }
     if (selectionMode) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            GlyphButton(UiIcons.Close, "Keluar selection", onExitSelection)
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            CompactCircleButton(
+                icon = UiIcons.Close,
+                description = "Keluar mode pilih",
+                onClick = onExitSelection,
+                size = 36.dp,
+                iconSize = 18.dp,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            )
             Text(
-                "$selectedCount dipilih",
-                style = MaterialTheme.typography.titleLarge,
+                text = "$selectedCount dipilih",
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
+                color = FohTheme.colors.safeAccent,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onSelectAll, enabled = hasSongs) { Text("Select all") }
-            TextButton(onClick = onClearSelection) { Text("Clear") }
+            FohHeaderChipButton(
+                label = "Semua",
+                icon = UiIcons.Check,
+                active = true,
+                enabled = hasSongs,
+                onClick = onSelectAll,
+            )
+            TextButton(
+                onClick = onClearSelection,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text("Reset", style = MaterialTheme.typography.labelMedium)
+            }
         }
         return
     }
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -552,47 +732,39 @@ private fun SearchTopHeader(
         }
         Text(
             text = if (inPlaylist) "Playlist" else "Tambah Lagu",
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             softWrap = false,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        if (activeDownloadCount > 0) {
-            BadgedBox(
-                badge = {
+        BadgedBox(
+            badge = {
+                if (activeDownloadCount > 0 || failedDownloadCount > 0) {
                     Badge(
-                        containerColor = FohTheme.colors.safeAccent,
-                        contentColor = FohTheme.colors.surfaceDeep,
+                        containerColor = if (activeDownloadCount > 0) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.error,
+                        contentColor = if (activeDownloadCount > 0) FohTheme.colors.surfaceDeep else MaterialTheme.colorScheme.onError,
                     ) {
-                        Text("$activeDownloadCount")
+                        Text("${if (activeDownloadCount > 0) activeDownloadCount else failedDownloadCount}")
                     }
-                },
-            ) {
-                CompactCircleButton(
-                    icon = UiIcons.Download,
-                    description = "Antrean unduhan",
-                    onClick = onOpenDownloads,
-                    size = 36.dp,
-                    iconSize = 19.dp,
-                    containerColor = FohTheme.colors.safeBg,
-                    contentColor = FohTheme.colors.safeAccent,
-                )
-            }
-        }
-        if (!inPlaylist) {
-            FohHeaderChipButton(label = "Link", icon = UiIcons.Link, enabled = queueIdle, onClick = onOpenLink)
-        }
-        if (hasSongs) {
-            FohHeaderChipButton(label = "Pilih", icon = UiIcons.Check, enabled = queueIdle, onClick = onEnterSelection)
-        } else if (!inPlaylist) {
-            FohHeaderChipButton(label = "Pilih File", icon = UiIcons.Import, enabled = idle, onClick = onOpenImport)
+                }
+            },
+        ) {
+            CompactCircleButton(
+                icon = UiIcons.Download,
+                description = "Antrean unduhan",
+                onClick = onOpenDownloads,
+                size = 36.dp,
+                iconSize = 19.dp,
+                containerColor = if (activeDownloadCount > 0) FohTheme.colors.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = if (activeDownloadCount > 0) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface,
+            )
         }
         Box {
             CompactCircleButton(
                 icon = UiIcons.More,
-                description = "Menu Search",
+                description = "Menu Tambah Lagu",
                 onClick = { menu = true },
                 size = 36.dp,
                 iconSize = 20.dp,
@@ -600,13 +772,19 @@ private fun SearchTopHeader(
             )
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
+                    text = { Text("Pilih banyak lagu") },
+                    enabled = hasSongs && queueIdle,
+                    leadingIcon = { Icon(UiIcons.Check, null) },
+                    onClick = { menu = false; onEnterSelection() },
+                )
+                DropdownMenuItem(
                     text = { Text("Unduh dari Link") },
-                    enabled = idle,
+                    enabled = queueIdle,
                     leadingIcon = { Icon(UiIcons.Link, null) },
                     onClick = { menu = false; onOpenLink() },
                 )
                 DropdownMenuItem(
-                    text = { Text("Pilih File dari HP") },
+                    text = { Text("Impor File HP") },
                     enabled = idle,
                     leadingIcon = { Icon(UiIcons.Import, null) },
                     onClick = { menu = false; onOpenImport() },
@@ -623,52 +801,54 @@ private fun SearchTopHeader(
 
 @Composable
 private fun SearchControlsPanel(
+    sourceTab: AddAudioSourceTab,
     query: String,
     provider: SearchProvider,
     kind: SearchKind,
     sort: SearchSort,
     controlsEnabled: Boolean,
-    idle: Boolean,
     validQuery: Boolean,
     detectedUrl: String?,
     recentQueries: List<String>,
     showRecent: Boolean,
-    resultCount: Int,
-    showResultsHeader: Boolean,
+    hasResults: Boolean,
     inPlaylist: Boolean,
     searchBusy: Boolean,
+    queueIdle: Boolean,
+    onSelectSourceTab: (AddAudioSourceTab) -> Unit,
     onQueryChange: (String) -> Unit,
     onClearQuery: () -> Unit,
     onSubmit: () -> Unit,
     onSelectRecent: (String) -> Unit,
     onClearRecent: () -> Unit,
-    onSelectProvider: (SearchProvider) -> Unit,
     onSelectKind: (SearchKind) -> Unit,
     onSort: (SearchSort) -> Unit,
-    onOpenDetectedUrl: (String) -> Unit,
+    onDownloadDetectedUrl: (String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         FohSegmentedBar(
-            options = SearchProvider.entries,
-            selected = provider,
-            label = { if (it == SearchProvider.YOUTUBE_MUSIC) "YT Music" else "YouTube" },
+            options = AddAudioSourceTab.entries,
+            selected = sourceTab,
+            label = { it.label },
             enabled = controlsEnabled,
-            onSelect = onSelectProvider,
+            onSelect = onSelectSourceTab,
         )
+        if (sourceTab == AddAudioSourceTab.LOCAL_FILE) return
+
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
             enabled = controlsEnabled,
             placeholder = {
                 Text(
-                    "Cari lagu di ${if (provider == SearchProvider.YOUTUBE_MUSIC) "YT Music" else "YouTube"}…",
+                    "Cari di ${if (provider == SearchProvider.YOUTUBE_MUSIC) "YT Music" else "YouTube"} atau tempel link…",
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(14.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 focusedContainerColor = MaterialTheme.colorScheme.surface,
@@ -689,59 +869,75 @@ private fun SearchControlsPanel(
                         IconButton(onClick = onClearQuery, enabled = controlsEnabled && !searchBusy) {
                             Icon(UiIcons.Close, contentDescription = "Hapus kata kunci", modifier = Modifier.size(18.dp))
                         }
-                        Surface(
-                            onClick = onSubmit,
-                            enabled = controlsEnabled && validQuery,
-                            shape = RoundedCornerShape(999.dp),
-                            color = if (controlsEnabled && validQuery) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                        ) {
-                            if (searchBusy) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                                ) {
-                                    FohSpinningIndicator(
-                                        size = 15.dp,
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        trackColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.24f),
+                        if (detectedUrl == null) {
+                            Surface(
+                                onClick = onSubmit,
+                                enabled = controlsEnabled && validQuery,
+                                shape = RoundedCornerShape(999.dp),
+                                color = if (controlsEnabled && validQuery) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ) {
+                                if (searchBusy) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                    ) {
+                                        FohSpinningIndicator(
+                                            size = 15.dp,
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            trackColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.24f),
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = "Cari",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (controlsEnabled && validQuery) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                                     )
                                 }
-                            } else {
-                                Text(
-                                    text = "Cari",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (controlsEnabled && validQuery) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                                )
                             }
                         }
                     }
                 }
             },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
+            keyboardActions = KeyboardActions(onSearch = {
+                if (detectedUrl != null) onDownloadDetectedUrl(detectedUrl) else onSubmit()
+            }),
         )
+
         if (detectedUrl != null) {
             Surface(
-                onClick = { onOpenDetectedUrl(detectedUrl) },
-                enabled = !searchBusy,
                 shape = RoundedCornerShape(14.dp),
                 color = FohTheme.colors.btBg,
                 border = BorderStroke(1.dp, FohTheme.colors.btBorder),
             ) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Icon(UiIcons.Link, contentDescription = null, tint = FohTheme.colors.btAccent, modifier = Modifier.size(18.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Tautan YouTube terdeteksi", style = MaterialTheme.typography.labelLarge, color = FohTheme.colors.btAccent)
-                        Text("Ketuk untuk unduh langsung jadi audio", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Tautan siap diunduh", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = FohTheme.colors.btAccent)
+                        Text(detectedUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Icon(UiIcons.Download, contentDescription = "Download link", tint = FohTheme.colors.btAccent, modifier = Modifier.size(20.dp))
+                    Surface(
+                        onClick = { onDownloadDetectedUrl(detectedUrl) },
+                        enabled = queueIdle,
+                        shape = RoundedCornerShape(999.dp),
+                        color = FohTheme.colors.btAccent,
+                    ) {
+                        Text(
+                            text = "Unduh",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = FohTheme.colors.surfaceDeep,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        )
+                    }
                 }
             }
         } else {
@@ -790,27 +986,160 @@ private fun SearchControlsPanel(
                         )
                     }
                 }
-                val sorts = if (!inPlaylist && kind == SearchKind.PLAYLISTS) {
-                    listOf(SearchSort.RELEVANCE, SearchSort.TITLE)
-                } else {
-                    SearchSort.entries
+                if (hasResults) {
+                    val sorts = if (!inPlaylist && kind == SearchKind.PLAYLISTS) {
+                        listOf(SearchSort.RELEVANCE, SearchSort.TITLE)
+                    } else {
+                        SearchSort.entries
+                    }
+                    SearchChoice(
+                        value = sort.takeIf { it in sorts } ?: SearchSort.RELEVANCE,
+                        choices = sorts,
+                        label = { it.label },
+                        enabled = !searchBusy,
+                        modifier = Modifier,
+                        selected = onSort,
+                    )
                 }
-                SearchChoice(
-                    value = sort.takeIf { it in sorts } ?: SearchSort.RELEVANCE,
-                    choices = sorts,
-                    label = { it.label },
-                    enabled = !searchBusy,
-                    modifier = Modifier,
-                    selected = onSort,
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalImportActionBanner(
+    enabled: Boolean,
+    onPickFiles: () -> Unit,
+) {
+    Surface(
+        onClick = onPickFiles,
+        enabled = enabled,
+        shape = RoundedCornerShape(16.dp),
+        color = FohTheme.colors.safeBg,
+        border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(FohTheme.colors.surfaceDeep),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(UiIcons.Folder, contentDescription = null, tint = FohTheme.colors.safeAccent, modifier = Modifier.size(22.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Pilih File Audio dari HP", style = MaterialTheme.typography.titleSmall, color = FohTheme.colors.safeAccent)
+                Text("MP3 · WAV · FLAC · OPUS · M4A", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = if (enabled) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Text(
+                    text = "Pilih",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (enabled) FohTheme.colors.surfaceDeep else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
                 )
             }
-            if (showResultsHeader) {
+        }
+    }
+}
+
+@Composable
+private fun LocalIngestStatusBanner(
+    ingest: IngestState,
+    onCancel: () -> Unit,
+) {
+    val progress = ingest.progress?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = FohTheme.colors.surfaceCard,
+        border = BorderStroke(1.dp, if (ingest.error) FohTheme.colors.alertBorder else FohTheme.colors.safeBorder),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (ingest.busy) {
+                    FohSpinningIndicator(size = 18.dp, strokeWidth = 2.2.dp, color = FohTheme.colors.safeAccent)
+                } else if (ingest.error) {
+                    Icon(UiIcons.Warning, null, tint = FohTheme.colors.alertAccent, modifier = Modifier.size(18.dp))
+                }
                 Text(
-                    text = "$resultCount hasil ditemukan",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp),
+                    text = ingest.stage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (ingest.error) FohTheme.colors.alertAccent else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+                if (ingest.busy && ingest.cancelable) {
+                    TextButton(onClick = onCancel, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+                        Text("Batal", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+            if (ingest.busy) {
+                if (progress != null && progress > 0.01f) {
+                    FohDeterminateShimmerBar(progress = progress, color = FohTheme.colors.safeAccent, trackColor = FohTheme.colors.surfaceDeep, height = 4.dp)
+                } else {
+                    FohIndeterminateBar(color = FohTheme.colors.safeAccent, trackColor = FohTheme.colors.surfaceDeep, height = 4.dp)
+                }
+            }
+            if (ingest.error && ingest.detail.isNotBlank()) {
+                Text(ingest.detail, style = MaterialTheme.typography.bodySmall, color = FohTheme.colors.alertAccent)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalSavedTrackRow(track: AudioTrack) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = FohTheme.colors.surfaceCard,
+        border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            TrackArtwork(
+                artworkKey = track.artworkKey,
+                modifier = Modifier.size(46.dp).clip(RoundedCornerShape(9.dp)),
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = UiPresentation.title(track.displayName),
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = UiPresentation.qualitySummary(track.displayName, track.sizeBytes, track.durationMs),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = FohTheme.colors.safeBg,
+                border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(UiIcons.Check, null, tint = FohTheme.colors.safeAccent, modifier = Modifier.size(13.dp))
+                    Text("Tersimpan", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = FohTheme.colors.safeAccent)
+                }
             }
         }
     }
@@ -828,24 +1157,12 @@ private fun SearchSkeletonRow() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            FohShimmerBox(
-                modifier = Modifier.size(52.dp),
-                cornerRadius = 10.dp,
-            )
+            FohShimmerBox(modifier = Modifier.size(46.dp), cornerRadius = 9.dp)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FohShimmerBox(
-                    modifier = Modifier.fillMaxWidth(0.74f).height(13.dp),
-                    cornerRadius = 6.dp,
-                )
-                FohShimmerBox(
-                    modifier = Modifier.fillMaxWidth(0.46f).height(10.dp),
-                    cornerRadius = 5.dp,
-                )
+                FohShimmerBox(modifier = Modifier.fillMaxWidth(0.74f).height(13.dp), cornerRadius = 6.dp)
+                FohShimmerBox(modifier = Modifier.fillMaxWidth(0.46f).height(10.dp), cornerRadius = 5.dp)
             }
-            FohShimmerBox(
-                modifier = Modifier.size(34.dp),
-                cornerRadius = 17.dp,
-            )
+            FohShimmerBox(modifier = Modifier.size(34.dp), cornerRadius = 17.dp)
         }
     }
 }
@@ -864,36 +1181,36 @@ private fun SearchIngestBanner(
         border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                FohSpinningIndicator(
-                    size = 20.dp,
-                    strokeWidth = 2.4.dp,
+                FohSpinningIndicator(size = 18.dp, strokeWidth = 2.2.dp, color = FohTheme.colors.safeAccent)
+                Text(
+                    text = stage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "Lihat ›",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
                     color = FohTheme.colors.safeAccent,
                 )
-                Column(Modifier.weight(1f)) {
-                    Text(stage, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        "Pencarian baru menunggu proses selesai · Ketuk untuk lihat",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 if (cancelable) {
-                    TextButton(onClick = onCancel) { Text("Batalkan") }
+                    TextButton(onClick = onCancel, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                        Text("Batal", style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
-            FohIndeterminateBar(
-                color = FohTheme.colors.safeAccent,
-                trackColor = FohTheme.colors.surfaceDeep,
-                height = 4.dp,
-            )
+            FohIndeterminateBar(color = FohTheme.colors.safeAccent, trackColor = FohTheme.colors.surfaceDeep, height = 4.dp)
         }
     }
 }
@@ -906,7 +1223,7 @@ private fun SearchPlaylistContextHeader(
     songCount: Int,
 ) {
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = FohTheme.colors.surfaceCard,
         border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
     ) {
@@ -915,14 +1232,16 @@ private fun SearchPlaylistContextHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            YoutubeThumbnail(thumbnailUrl, title, Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)))
+            YoutubeThumbnail(thumbnailUrl, title, Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Daftar putar", style = MaterialTheme.typography.labelSmall, color = FohTheme.colors.safeAccent)
-                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("Playlist", style = MaterialTheme.typography.labelSmall, color = FohTheme.colors.safeAccent)
+                Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(
-                    listOfNotNull(channel, "$songCount lagu dimuat").joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium,
+                    listOfNotNull(channel, "$songCount lagu").joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -934,6 +1253,7 @@ private fun SearchEmptyState(
     hasSearched: Boolean,
     provider: SearchProvider,
     idle: Boolean,
+    queueIdle: Boolean,
     onOpenLink: () -> Unit,
     onOpenImport: () -> Unit,
     onSwitchProviderSearch: (SearchProvider) -> Unit,
@@ -941,16 +1261,19 @@ private fun SearchEmptyState(
     if (hasSearched) {
         val alternate = if (provider == SearchProvider.YOUTUBE_MUSIC) SearchProvider.YOUTUBE else SearchProvider.YOUTUBE_MUSIC
         Surface(
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(14.dp),
             color = FohTheme.colors.surfaceCard,
             border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
         ) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Belum ada hasil yang cocok", style = MaterialTheme.typography.titleSmall)
+            Row(
+                Modifier.fillMaxWidth().padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Text(
-                    "Coba ejaan lain atau cari langsung di tab ${if (alternate == SearchProvider.YOUTUBE_MUSIC) "YT Music" else "YouTube"}.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = "Tidak ada hasil",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
                 )
                 OutlinedButton(onClick = { onSwitchProviderSearch(alternate) }, enabled = idle) {
                     Text("Cari di ${if (alternate == SearchProvider.YOUTUBE_MUSIC) "YT Music" else "YouTube"}")
@@ -959,42 +1282,35 @@ private fun SearchEmptyState(
         }
         return
     }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
-        Text(
-            "Cara cepat tambah audio",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 2.dp),
-        )
-        QuickEntrySurface(
+    Row(
+        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Max).padding(top = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        QuickEntryPad(
             icon = UiIcons.Link,
-            title = "Tempel Link YouTube / YT Music",
-            subtitle = "Sudah menyalin tautan video? Unduh langsung jadi audio",
+            title = "Tempel Link",
+            subtitle = "YouTube / YT Music",
             accent = FohTheme.colors.safeAccent,
             iconBg = FohTheme.colors.safeBg,
-            enabled = true,
+            enabled = queueIdle,
             onClick = onOpenLink,
+            modifier = Modifier.weight(1f).fillMaxHeight(),
         )
-        QuickEntrySurface(
+        QuickEntryPad(
             icon = UiIcons.Import,
-            title = "Pilih File Audio dari HP",
-            subtitle = "Ambil MP3, OPUS, WAV, atau FLAC dari penyimpanan HP",
-            accent = MaterialTheme.colorScheme.secondary,
-            iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = "Impor File",
+            subtitle = "MP3 · WAV · FLAC",
+            accent = MaterialTheme.colorScheme.onSurface,
+            iconBg = FohTheme.colors.surfaceDeep,
             enabled = idle,
             onClick = onOpenImport,
-        )
-        Text(
-            "Tips: Setelah hasil muncul, ketuk satu lagu untuk dengar preview, atau tekan Select untuk mengunduh banyak sekaligus.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+            modifier = Modifier.weight(1f).fillMaxHeight(),
         )
     }
 }
 
 @Composable
-private fun QuickEntrySurface(
+private fun QuickEntryPad(
     icon: ImageVector,
     title: String,
     subtitle: String,
@@ -1002,6 +1318,7 @@ private fun QuickEntrySurface(
     iconBg: Color,
     enabled: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         onClick = onClick,
@@ -1009,28 +1326,27 @@ private fun QuickEntrySurface(
         shape = RoundedCornerShape(16.dp),
         color = FohTheme.colors.surfaceCard,
         border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
+        modifier = modifier,
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        Column(
+            Modifier.fillMaxSize().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Box(
-                modifier = Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(iconBg),
+                modifier = Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(iconBg),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(20.dp))
+                Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(19.dp))
             }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Icon(UiIcons.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
         }
     }
 }
 
-/** Calm, accessible catalog row matching Library cards: tap row to preview, explicit button to download. */
+/** Calm, accessible catalog row matching Library cards: tap row to preview, 1-tap button to download. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CatalogResult(
@@ -1051,10 +1367,10 @@ private fun CatalogResult(
     Surface(
         color = if (highlighted) FohTheme.colors.safeBg else FohTheme.colors.surfaceCard,
         border = BorderStroke(1.dp, if (highlighted) FohTheme.colors.safeBorder else FohTheme.colors.borderSubtle),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
     ) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 74.dp)
+            Modifier.fillMaxWidth().heightIn(min = 68.dp)
                 .combinedClickable(
                     enabled = if (selectionMode) queueEnabled else (enabled || previewActive),
                     onClick = onTap,
@@ -1062,22 +1378,22 @@ private fun CatalogResult(
                     onLongClickLabel = "Pilih lagu",
                 )
                 .semantics { this.selected = selected }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Box(modifier = Modifier.size(48.dp)) {
-                YoutubeThumbnail(hit.thumbnailUrl, hit.title, Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)))
+            Box(modifier = Modifier.size(46.dp)) {
+                YoutubeThumbnail(hit.thumbnailUrl, hit.title, Modifier.fillMaxSize().clip(RoundedCornerShape(9.dp)))
                 if (hit.kind == SearchKind.SONGS && !selectionMode) {
                     if (previewLoading) {
                         Box(
                             modifier = Modifier.fillMaxSize()
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(9.dp))
                                 .background(Color.Black.copy(alpha = 0.52f)),
                             contentAlignment = Alignment.Center,
                         ) {
                             FohSpinningIndicator(
-                                size = 22.dp,
+                                size = 20.dp,
                                 strokeWidth = 2.2.dp,
                                 color = Color.White,
                                 trackColor = Color.White.copy(alpha = 0.28f),
@@ -1100,7 +1416,7 @@ private fun CatalogResult(
                     }
                 }
             }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = hit.title,
                     style = MaterialTheme.typography.titleSmall,
@@ -1123,23 +1439,12 @@ private fun CatalogResult(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (previewActive || status != HitLibraryStatus.NONE) {
-                    val badgeText = when {
-                        previewLoading -> "Memuat preview… · Ketuk untuk batal"
-                        previewActive -> "PREVIEW · Ketuk untuk berhenti"
-                        status == HitLibraryStatus.SAVED -> "Sudah di Library"
-                        else -> "Sedang diantrekan"
-                    }
-                    val badgeColor = when {
-                        previewActive -> FohTheme.colors.safeAccent
-                        status == HitLibraryStatus.SAVED -> FohTheme.colors.safeAccent
-                        else -> FohTheme.colors.warnAccent
-                    }
+                if (previewActive) {
                     Text(
-                        text = badgeText,
+                        text = if (previewLoading) "MEMUAT" else "PREVIEW",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = badgeColor,
+                        color = FohTheme.colors.safeAccent,
                         maxLines = 1,
                     )
                 }
@@ -1167,7 +1472,8 @@ private fun CatalogResult(
                                 )
                                 Text(
                                     "Antrean",
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = FohTheme.colors.warnAccent,
                                 )
                             }
@@ -1188,11 +1494,11 @@ private fun CatalogResult(
                                     imageVector = UiIcons.Check,
                                     contentDescription = "Tersimpan ${hit.title}",
                                     tint = FohTheme.colors.safeAccent,
-                                    modifier = Modifier.size(14.dp),
+                                    modifier = Modifier.size(13.dp),
                                 )
                                 Text(
                                     "Tersimpan",
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold,
                                     color = FohTheme.colors.safeAccent,
                                 )
@@ -1211,7 +1517,7 @@ private fun CatalogResult(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = UiIcons.Download,
-                                    contentDescription = "Download ${hit.title}",
+                                    contentDescription = "Unduh ${hit.title}",
                                     tint = if (queueEnabled) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                                     modifier = Modifier.size(19.dp),
                                 )

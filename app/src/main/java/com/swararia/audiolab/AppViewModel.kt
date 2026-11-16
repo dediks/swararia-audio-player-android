@@ -193,7 +193,6 @@ class AppViewModel(
     }
     fun enqueueDownloads(requests: List<DownloadRequest>, authorized: Boolean, start: (String) -> Unit) {
         if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
-        cancelPreview()
         operations.enqueueOrAppend(requests, authorized) { batch ->
             if (canDownloadOnNetworkNow()) start(batch)
             else message("Mode Hanya Wi-Fi aktif. Disimpan di antrean hingga Wi-Fi terhubung.")
@@ -201,7 +200,6 @@ class AppViewModel(
     }
     fun retryDownloads(batchId: String, start: (String) -> Unit) {
         if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
-        cancelPreview()
         if (ingest.value.busy && ingest.value.batchId != null) {
             operations.retry(batchId) { start(it) }
         } else {
@@ -213,7 +211,6 @@ class AppViewModel(
     }
     fun retryDownloadJob(jobId: Long, start: (String) -> Unit) {
         if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
-        cancelPreview()
         operations.requeueJob(jobId, allowAppend = true) { batch ->
             if (canDownloadOnNetworkNow()) start(batch)
             else message("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.")
@@ -221,7 +218,6 @@ class AppViewModel(
     }
     fun requeueDownloadJobs(jobIds: List<Long>, start: (String) -> Unit) {
         if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
-        cancelPreview()
         operations.requeueJobs(jobIds) { batch ->
             if (canDownloadOnNetworkNow()) start(batch)
             else message("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.")
@@ -229,7 +225,6 @@ class AppViewModel(
     }
     fun retryAllFailedDownloads(start: (String) -> Unit) {
         if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
-        cancelPreview()
         operations.retryAllFailed { batch ->
             if (canDownloadOnNetworkNow()) start(batch)
             else message("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.")
@@ -241,7 +236,6 @@ class AppViewModel(
             message("Hubungkan ke Wi-Fi terlebih dahulu (Mode Hanya Wi-Fi aktif).")
             return
         }
-        cancelPreview()
         operations.continueQueue(start)
     }
     fun moveDownloadJobUp(jobId: Long) = operations.moveJobUp(jobId)

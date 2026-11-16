@@ -65,7 +65,14 @@ class MainActivity : ComponentActivity() {
         if (!model.canDispatchOrAppendDownload()) {
             model.message("Tunggu proses pencarian atau pengelola selesai."); return
         }
-        model.cancelPreview()
+        // Keep an already-playing preview alive while queueing downloads in the background.
+        action()
+    }
+
+    private fun whenQueueStartReady(action: () -> Unit) {
+        if (!model.canStartOnlineOperation()) {
+            model.message("Tunggu pencarian atau proses audio selesai terlebih dahulu."); return
+        }
         action()
     }
 
@@ -220,8 +227,8 @@ class MainActivity : ComponentActivity() {
                                 IngestService.pauseQueue(this)
                             }
                         },
-                        onContinueQueue = { whenOnlineIdle {
-                            withIngestPermissions { whenOnlineIdle {
+                        onContinueQueue = { whenQueueStartReady {
+                            withIngestPermissions { whenQueueStartReady {
                                 model.continueDownloadQueue { IngestService.ensureBatch(this, it) }
                             } }
                         } },
