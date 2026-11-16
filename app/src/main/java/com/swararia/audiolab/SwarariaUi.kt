@@ -63,6 +63,9 @@ fun SwarariaUi(
         tracks.firstOrNull { it.id.toString() == playback.mediaId }
     }
     val downloadedTrackIds = remember(tracks) { tracks.mapTo(HashSet()) { it.id } }
+    val downloadedVideoIds = remember(tracks) {
+        tracks.mapNotNullTo(HashSet()) { UiPresentation.sourceVideoId(it.displayName) }
+    }
     val previewActive = searchActions.preview.let { it.hit != null || it.loading || it.media != null || it.error != null }
     val onlineBusy = ingest.busy || upgrade.operationBusy || search.busy || searchActions.preview.loading
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -287,6 +290,7 @@ fun SwarariaUi(
                             modifier = contentModifier,
                             upgrade = upgrade,
                             downloadedTrackIds = downloadedTrackIds,
+                            downloadedVideoIds = downloadedVideoIds,
                             activeDownloadCount = activeDownloadCount,
                             onBack = {
                                 searchActions.stopPreview()

@@ -121,13 +121,12 @@ internal fun DownloadLinkDialog(
     onDownload: (String) -> Unit,
 ) {
     var url by remember(initialUrl) { mutableStateOf(initialUrl) }
-    var authorized by remember { mutableStateOf(false) }
+    var authorized by remember { mutableStateOf(true) }
     val context = LocalContext.current
     val validUrl = remember(url) { runCatching { DownloadQueueRules.validatedPublicSourceUrl(url) }.getOrNull() }
     val pasteFromClipboard = {
         readPlainTextFromClipboard(context)?.let {
             url = it.trim()
-            authorized = false
         }
     }
     AlertDialog(
@@ -145,7 +144,7 @@ internal fun DownloadLinkDialog(
                 )
                 OutlinedTextField(
                     value = url,
-                    onValueChange = { url = it; authorized = false },
+                    onValueChange = { url = it },
                     enabled = !busy,
                     label = { Text("YouTube / YT Music link") },
                     modifier = Modifier.fillMaxWidth(),
@@ -173,14 +172,6 @@ internal fun DownloadLinkDialog(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                RightsConsent(authorized, { authorized = it }, !busy)
-                if (!authorized) {
-                    Text(
-                        text = "Centang kotak di atas untuk mengaktifkan tombol Download.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
         },
         confirmButton = {
@@ -193,37 +184,10 @@ internal fun DownloadLinkDialog(
     )
 }
 
-@Composable
-private fun RightsConsent(checked: Boolean, change: (Boolean) -> Unit, enabled: Boolean) {
-    Surface(
-        onClick = { if (enabled) change(!checked) },
-        enabled = enabled,
-        shape = RoundedCornerShape(12.dp),
-        color = if (checked) FohTheme.colors.safeBg else FohTheme.colors.surfaceCard,
-        border = BorderStroke(
-            1.dp,
-            if (checked) FohTheme.colors.safeBorder else FohTheme.colors.borderSubtle,
-        ),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(end = 12.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(checked = checked, onCheckedChange = change, enabled = enabled)
-            Text(
-                text = "Saya memiliki izin untuk download audio ini.",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-}
-
-/** Fresh composition for every request: rights are never remembered across downloads. */
+/** Fresh composition for every request: state is scoped to this dialog instance. */
 @Composable
 internal fun DownloadConsentDialog(hits: List<SearchHit>, busy: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    var authorized by remember { mutableStateOf(false) }
+    var authorized by remember { mutableStateOf(true) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Download (${hits.size})?") },
@@ -241,14 +205,6 @@ internal fun DownloadConsentDialog(hits: List<SearchHit>, busy: Boolean, onDismi
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                }
-                RightsConsent(authorized, { authorized = it }, !busy)
-                if (!authorized) {
-                    Text(
-                        text = "Centang kotak di atas untuk mengaktifkan tombol Download.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         },

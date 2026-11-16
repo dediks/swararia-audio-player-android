@@ -46,9 +46,10 @@ class NativeUiSourceContracts(unittest.TestCase):
         link_dialog = source('SwarariaDialogs.kt').split('internal fun DownloadLinkDialog(',1)[-1].split('\n@Composable',1)[0]
         self.assertIn('DownloadQueueRules.validatedPublicSourceUrl(url)',link_dialog)
         self.assertIn('YouTube / YT Music',link_dialog)
-        self.assertIn('authorized = false',link_dialog)
+        self.assertNotIn('RightsConsent(',link_dialog)
         dialog = source('SwarariaDialogs.kt').split('internal fun DownloadConsentDialog(', 1)[-1].split('\n@Composable', 1)[0]
-        self.assertIn('var authorized by remember { mutableStateOf(false) }', dialog)
+        self.assertIn('var authorized by remember { mutableStateOf(true) }', dialog)
+        self.assertNotIn('RightsConsent(', dialog)
         self.assertIn('enabled = authorized && !busy', dialog)
         self.assertNotIn('rememberSaveable', dialog)
 

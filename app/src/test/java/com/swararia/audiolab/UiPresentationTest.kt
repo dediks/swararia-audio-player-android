@@ -152,4 +152,9 @@ class UiPresentationTest {
         assertEquals("Batch Kemarin · 21:05", UiPresentation.formatBatchGroupLabel(yesterdayCal.timeInMillis, nowCal.timeInMillis))
         assertEquals("Riwayat Unduhan", UiPresentation.formatBatchGroupLabel(0L, nowCal.timeInMillis))
     }
+
+    @Test fun sourceVideoIdExtractsYoutubeIdAndIgnoresPlainTitles() {
+        assertEquals("dQw4w9WgXcQ", UiPresentation.sourceVideoId("Gugatan Rakyat Semesta [dQw4w9WgXcQ].opus"))
+        assertEquals(null, UiPresentation.sourceVideoId("Lagu Tanpa ID.mp3"))
+    }
 }

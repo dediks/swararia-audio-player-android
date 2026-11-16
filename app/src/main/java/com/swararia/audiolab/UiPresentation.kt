@@ -44,11 +44,17 @@ data class LibraryTrackGroup<T>(
 object UiPresentation {
     private val audioExtensions = setOf("mp3", "m4a", "mp4", "opus", "ogg", "webm", "wav", "flac", "aac")
     private val generatedIdSuffix = Regex("[ _]+\\[[A-Za-z0-9_-]{11}\\]$")
+    private val extractedVideoId = Regex("[ _]+\\[([A-Za-z0-9_-]{11})\\]$")
     private val separators = Regex("[_\\s]+")
-    fun title(displayName: String): String {
+    private fun stemWithoutAudioExtension(displayName: String): String {
         val dot = displayName.lastIndexOf('.')
         val extension = displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
-        val stem = if (dot > 0 && extension in audioExtensions) displayName.substring(0, dot) else displayName
+        return if (dot > 0 && extension in audioExtensions) displayName.substring(0, dot) else displayName
+    }
+    fun sourceVideoId(displayName: String): String? =
+        extractedVideoId.find(stemWithoutAudioExtension(displayName))?.groupValues?.getOrNull(1)
+    fun title(displayName: String): String {
+        val stem = stemWithoutAudioExtension(displayName)
         return stem.replace(generatedIdSuffix, "").replace(separators, " ").trim().ifBlank { displayName.ifBlank { "Audio" } }
     }
     fun metadata(displayName: String, durationMs: Long?): String {

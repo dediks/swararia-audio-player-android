@@ -63,6 +63,7 @@ fun AddAudioScreen(
     upgrade: UpgradeUiActions,
     onDownloadBatch: (List<SearchHit>, Boolean) -> Unit,
     downloadedTrackIds: Set<Long> = emptySet(),
+    downloadedVideoIds: Set<String> = emptySet(),
     onOpenDownloads: () -> Unit = {},
     activeDownloadCount: Int = 0,
     onBack: (() -> Unit)? = null,
@@ -357,7 +358,7 @@ fun AddAudioScreen(
             items(sorted, key = { "${it.kind}-${it.videoId}" }, contentType = { "search-hit" }) { hit ->
                 val hitStatus = when {
                     hit.url in queuedUrls -> HitLibraryStatus.QUEUED
-                    hit.url in savedUrls -> HitLibraryStatus.SAVED
+                    hit.url in savedUrls || hit.videoId in downloadedVideoIds -> HitLibraryStatus.SAVED
                     else -> HitLibraryStatus.NONE
                 }
                 val previewThisHit = actions.preview.hit?.videoId == hit.videoId &&
@@ -1173,7 +1174,30 @@ private fun CatalogResult(
                         }
                     }
                     HitLibraryStatus.SAVED -> {
-                        GlyphButton(UiIcons.Download, "Unduh ulang ${hit.title}", onDownload, enabled = queueEnabled)
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = FohTheme.colors.safeBg,
+                            border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                Icon(
+                                    imageVector = UiIcons.Check,
+                                    contentDescription = "Tersimpan ${hit.title}",
+                                    tint = FohTheme.colors.safeAccent,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                                Text(
+                                    "Tersimpan",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = FohTheme.colors.safeAccent,
+                                )
+                            }
+                        }
                     }
                     HitLibraryStatus.NONE -> {
                         Surface(
