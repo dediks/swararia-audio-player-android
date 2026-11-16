@@ -8,8 +8,8 @@ enum class LibrarySectionTab(val label: String) {
 }
 
 enum class LibraryGroupMode(val label: String) {
-    ALL("All"),
-    ARTIST("Artist"),
+    ALL("Semua"),
+    ARTIST("Artis"),
     ALBUM("Album"),
     FORMAT("Format"),
 }

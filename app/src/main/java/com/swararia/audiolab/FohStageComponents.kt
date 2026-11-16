@@ -642,6 +642,10 @@ internal fun FohSafeModeSheet(
     settings: FohSafeModeSettings,
     dndGranted: Boolean,
     route: AudioOutputRoute,
+    keepScreenOn: Boolean = true,
+    onToggleKeepScreenOn: (Boolean) -> Unit = {},
+    guardEnabled: Boolean = true,
+    onToggleGuard: (Boolean) -> Unit = {},
     onToggleEnabled: (Boolean) -> Unit,
     onToggleAutoDnd: (Boolean) -> Unit,
     onToggleFocusLock: (Boolean) -> Unit,
@@ -666,6 +670,82 @@ internal fun FohSafeModeSheet(
                 .padding(bottom = 22.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            Text(
+                text = "Setup FOH (Pra-Acara)",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (route.kind == AudioOutputKind.SPEAKER) colors.warnBg else colors.safeBg,
+                border = BorderStroke(1.dp, if (route.kind == AudioOutputKind.SPEAKER) colors.warnBorder else colors.safeBorder),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = route.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (route.kind == AudioOutputKind.SPEAKER) colors.warnAccent else colors.safeAccent,
+                    )
+                    Text(
+                        text = route.detail,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = colors.surfaceDeep,
+                border = BorderStroke(1.dp, colors.borderSubtle),
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Guard Switch (Pengaman Live)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = "Konfirmasi sebelum memutus lagu yang sedang diputar",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = guardEnabled, onCheckedChange = onToggleGuard)
+                    }
+
+                    HorizontalDivider(color = colors.borderSubtle.copy(alpha = 0.6f))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Layar Tetap Menyala (Awake)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = "Mencegah layar HP terkunci saat di meja FOH",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = keepScreenOn, onCheckedChange = onToggleKeepScreenOn)
+                    }
+                }
+            }
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = if (settings.enabled) colors.safeBg else colors.surfaceDeep,

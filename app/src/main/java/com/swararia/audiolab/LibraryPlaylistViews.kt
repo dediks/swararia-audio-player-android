@@ -1,5 +1,10 @@
 package com.swararia.audiolab
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -17,6 +22,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -34,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,13 +75,20 @@ internal fun LibraryCompactHeader(
     onToggleSort: (Boolean) -> Unit,
     onHistory: () -> Unit,
     onSettings: () -> Unit,
+    onAdd: () -> Unit = {},
+    activeDownloadCount: Int = 0,
+    failedDownloadCount: Int = 0,
+    onOpenDownloads: () -> Unit = {},
     onOpenStageRta: () -> Unit = {},
     onOpenBrandStudio: () -> Unit = {},
+    welcomeBanner: (@Composable () -> Unit)? = null,
 ) {
     var appMenu by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
+    var searchVisible by rememberSaveable { mutableStateOf(false) }
+    val showSearchField = searchVisible || query.isNotEmpty()
     val brand = FohTheme.brand
-    val showRtaLabel = LocalConfiguration.current.screenWidthDp >= 380 || section != LibrarySectionTab.ALL_TRACKS
+    val foh = FohTheme.colors
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
@@ -86,11 +101,11 @@ internal fun LibraryCompactHeader(
                     .weight(1f)
                     .clickable(onClick = onOpenBrandStudio),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 PrestigeBrandEmblem(
                     logoKey = brand.customLogoKey,
-                    size = 28.dp,
+                    size = 30.dp,
                     shimmerEnabled = brand.prestigeAnimations,
                 )
                 Column(modifier = Modifier.weight(1f)) {
@@ -106,7 +121,7 @@ internal fun LibraryCompactHeader(
                         text = BrandSkinRules.effectiveEventSubtitle(brand),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (BrandSkinRules.hasCustomBrand(brand)) {
-                            FohTheme.colors.safeAccent
+                            foh.safeAccent
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
@@ -116,28 +131,58 @@ internal fun LibraryCompactHeader(
                     )
                 }
             }
-            StageRtaEntryPill(
-                onClick = onOpenStageRta,
-                showLabel = showRtaLabel,
+            CompactCircleButton(
+                icon = UiIcons.Search,
+                description = if (showSearchField) "Tutup pencarian pustaka" else "Cari di pustaka",
+                onClick = {
+                    if (showSearchField) {
+                        searchVisible = false
+                        if (query.isNotEmpty()) onQueryChange("")
+                    } else {
+                        searchVisible = true
+                    }
+                },
+                size = 36.dp,
+                iconSize = 19.dp,
+                containerColor = if (showSearchField) foh.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = if (showSearchField) foh.safeAccent else MaterialTheme.colorScheme.onSurface,
             )
-            if (section == LibrarySectionTab.ALL_TRACKS) {
-                FohHeaderChipButton(
-                    label = "Import",
-                    icon = UiIcons.Plus,
-                    active = false,
-                    enabled = importEnabled,
-                    onClick = onImport,
+            BadgedBox(
+                badge = {
+                    if (activeDownloadCount > 0 || failedDownloadCount > 0) {
+                        Badge(
+                            containerColor = if (activeDownloadCount > 0) foh.safeAccent else MaterialTheme.colorScheme.error,
+                            contentColor = if (activeDownloadCount > 0) foh.surfaceDeep else MaterialTheme.colorScheme.onError,
+                        ) {
+                            Text("${if (activeDownloadCount > 0) activeDownloadCount else failedDownloadCount}")
+                        }
+                    }
+                },
+            ) {
+                CompactCircleButton(
+                    icon = UiIcons.Download,
+                    description = "Antrean unduhan",
+                    onClick = onOpenDownloads,
+                    size = 36.dp,
+                    iconSize = 19.dp,
+                    containerColor = if (activeDownloadCount > 0) foh.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = if (activeDownloadCount > 0) foh.safeAccent else MaterialTheme.colorScheme.onSurface,
                 )
-                FohHeaderChipButton(
-                    label = "Select",
-                    icon = UiIcons.Check,
-                    active = selectionMode,
-                    enabled = !actionBusy && trackCount > 0,
-                    onClick = onToggleSelectionMode,
+            }
+            if (section == LibrarySectionTab.ALL_TRACKS) {
+                CompactCircleButton(
+                    icon = UiIcons.Plus,
+                    description = "Tambah lagu",
+                    onClick = onAdd,
+                    enabled = importEnabled,
+                    size = 36.dp,
+                    iconSize = 20.dp,
+                    containerColor = foh.safeBg,
+                    contentColor = foh.safeAccent,
                 )
             } else {
                 FohHeaderChipButton(
-                    label = "New Playlist",
+                    label = "Buat Playlist",
                     icon = UiIcons.Plus,
                     active = true,
                     enabled = !actionBusy,
@@ -154,15 +199,19 @@ internal fun LibraryCompactHeader(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 )
                 DropdownMenu(expanded = appMenu, onDismissRequest = { appMenu = false }) {
+                    if (section == LibrarySectionTab.ALL_TRACKS) {
+                        DropdownMenuItem(
+                            text = { Text(if (selectionMode) "Selesai memilih" else "Pilih banyak lagu") },
+                            enabled = (trackCount > 0 && !actionBusy) || selectionMode,
+                            leadingIcon = { Icon(UiIcons.Check, null) },
+                            onClick = { appMenu = false; onToggleSelectionMode() },
+                        )
+                    }
                     DropdownMenuItem(
-                        text = { Text("Stage Brand & Live RTA") },
-                        leadingIcon = { Icon(UiIcons.Rta, null) },
-                        onClick = { appMenu = false; onOpenStageRta() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Logo & Skin Tema") },
-                        leadingIcon = { Icon(UiIcons.Palette, null) },
-                        onClick = { appMenu = false; onOpenBrandStudio() },
+                        text = { Text("Impor file dari HP") },
+                        enabled = importEnabled,
+                        leadingIcon = { Icon(UiIcons.Import, null) },
+                        onClick = { appMenu = false; onImport() },
                     )
                     DropdownMenuItem(
                         text = { Text("Riwayat nama & urungkan") },
@@ -178,43 +227,62 @@ internal fun LibraryCompactHeader(
             }
         }
 
+        welcomeBanner?.invoke()
+
         FohSegmentedBar(
             options = LibrarySectionTab.entries,
             selected = section,
             label = { tab ->
                 val count = if (tab == LibrarySectionTab.ALL_TRACKS) trackCount else playlistCount
-                "${tab.label} ($count)"
+                val tabLabel = if (tab == LibrarySectionTab.ALL_TRACKS) "Semua Lagu" else "Playlist"
+                "$tabLabel ($count)"
             },
             onSelect = onSelectSection,
         )
 
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            placeholder = {
-                Text(
-                    if (section == LibrarySectionTab.ALL_TRACKS) "Cari track, artist, format, atau playlist…"
-                    else "Cari nama playlist atau track di dalamnya…",
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            },
-            leadingIcon = { Icon(UiIcons.Search, null) },
-            trailingIcon = if (query.isNotEmpty()) {
-                { GlyphButton(UiIcons.Close, "Hapus pencarian pustaka", { onQueryChange("") }) }
-            } else null,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                disabledContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedBorderColor = FohTheme.colors.borderSubtle,
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-            ),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-        )
+        AnimatedVisibility(
+            visible = showSearchField,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                placeholder = {
+                    Text(
+                        if (section == LibrarySectionTab.ALL_TRACKS) "Cari judul atau artis…"
+                        else "Cari playlist…",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                leadingIcon = { Icon(UiIcons.Search, null) },
+                trailingIcon = {
+                    GlyphButton(
+                        icon = UiIcons.Close,
+                        description = if (query.isNotEmpty()) "Hapus pencarian pustaka" else "Tutup pencarian pustaka",
+                        onClick = {
+                            if (query.isNotEmpty()) {
+                                onQueryChange("")
+                            } else {
+                                searchVisible = false
+                            }
+                        },
+                    )
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    disabledContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedBorderColor = FohTheme.colors.borderSubtle,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            )
+        }
 
         if (section == LibrarySectionTab.ALL_TRACKS) {
             Row(

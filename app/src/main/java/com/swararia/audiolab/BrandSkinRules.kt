@@ -113,6 +113,7 @@ data class BrandSkinConfig(
     val haloChannelMode: HaloChannelMode = HaloChannelMode.MIRRORED,
     val cleanStageMode: Boolean = false,
     val prestigeAnimations: Boolean = true,
+    val welcomeBannerDismissed: Boolean = false,
 )
 
 /** Pure rules for rental branding, logo validation, theme token derivation, and Stage RTA modes. */
@@ -153,18 +154,21 @@ object BrandSkinRules {
         HaloChannelMode.entries.firstOrNull { it.id == id } ?: HaloChannelMode.MIRRORED
 
     fun effectiveRentalTitle(config: BrandSkinConfig): String =
-        sanitizeRentalName(config.rentalName).ifBlank { "SETELO" }
+        sanitizeRentalName(config.rentalName).ifBlank { "SWR Player" }
 
     fun effectiveEventSubtitle(config: BrandSkinConfig): String {
         val tag = sanitizeEventTag(config.eventTag)
         if (tag.isNotBlank()) return tag
-        return if (sanitizeRentalName(config.rentalName).isNotBlank()) "FOH AUDIO SYSTEM" else "by Swararia"
+        return "Pro Audio Player"
     }
 
     fun hasCustomBrand(config: BrandSkinConfig): Boolean =
         validLogoKey(config.customLogoKey) ||
             sanitizeRentalName(config.rentalName).isNotBlank() ||
             sanitizeEventTag(config.eventTag).isNotBlank()
+
+    fun shouldShowWelcomeBrandCard(config: BrandSkinConfig): Boolean =
+        !config.welcomeBannerDismissed && !hasCustomBrand(config)
 
     fun activeAccentArgb(config: BrandSkinConfig): Long {
         if (config.useCustomLogoAccent) {

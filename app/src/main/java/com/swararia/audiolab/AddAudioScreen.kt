@@ -64,6 +64,8 @@ fun AddAudioScreen(
     onDownloadBatch: (List<SearchHit>, Boolean) -> Unit,
     downloadedTrackIds: Set<Long> = emptySet(),
     onOpenDownloads: () -> Unit = {},
+    activeDownloadCount: Int = 0,
+    onBack: (() -> Unit)? = null,
 ) {
     var query by rememberSaveable { mutableStateOf(search.query) }
     var providerName by rememberSaveable { mutableStateOf(search.provider.name) }
@@ -188,6 +190,9 @@ fun AddAudioScreen(
                     hasSongs = loadedSongs.isNotEmpty(),
                     idle = idle,
                     queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading,
+                    activeDownloadCount = activeDownloadCount,
+                    onBack = onBack,
+                    onOpenDownloads = onOpenDownloads,
                     onLeavePlaylist = leave,
                     onOpenLink = { openLinkModal(detectedUrl.orEmpty()) },
                     onOpenImport = onImport,
@@ -493,6 +498,9 @@ private fun SearchTopHeader(
     hasSongs: Boolean,
     idle: Boolean,
     queueIdle: Boolean = idle,
+    activeDownloadCount: Int = 0,
+    onBack: (() -> Unit)? = null,
+    onOpenDownloads: () -> Unit = {},
     onLeavePlaylist: () -> Unit,
     onOpenLink: () -> Unit,
     onOpenImport: () -> Unit,
@@ -531,9 +539,18 @@ private fun SearchTopHeader(
                 iconSize = 20.dp,
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             )
+        } else if (onBack != null) {
+            CompactCircleButton(
+                icon = UiIcons.Back,
+                description = "Kembali ke Pustaka",
+                onClick = onBack,
+                size = 36.dp,
+                iconSize = 20.dp,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            )
         }
         Text(
-            text = if (inPlaylist) "Playlist" else "Search",
+            text = if (inPlaylist) "Playlist" else "Tambah Lagu",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -541,13 +558,35 @@ private fun SearchTopHeader(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        if (activeDownloadCount > 0) {
+            BadgedBox(
+                badge = {
+                    Badge(
+                        containerColor = FohTheme.colors.safeAccent,
+                        contentColor = FohTheme.colors.surfaceDeep,
+                    ) {
+                        Text("$activeDownloadCount")
+                    }
+                },
+            ) {
+                CompactCircleButton(
+                    icon = UiIcons.Download,
+                    description = "Antrean unduhan",
+                    onClick = onOpenDownloads,
+                    size = 36.dp,
+                    iconSize = 19.dp,
+                    containerColor = FohTheme.colors.safeBg,
+                    contentColor = FohTheme.colors.safeAccent,
+                )
+            }
+        }
         if (!inPlaylist) {
             FohHeaderChipButton(label = "Link", icon = UiIcons.Link, enabled = queueIdle, onClick = onOpenLink)
         }
         if (hasSongs) {
-            FohHeaderChipButton(label = "Select", icon = UiIcons.Check, enabled = queueIdle, onClick = onEnterSelection)
+            FohHeaderChipButton(label = "Pilih", icon = UiIcons.Check, enabled = queueIdle, onClick = onEnterSelection)
         } else if (!inPlaylist) {
-            FohHeaderChipButton(label = "Import", icon = UiIcons.Import, enabled = idle, onClick = onOpenImport)
+            FohHeaderChipButton(label = "Pilih File", icon = UiIcons.Import, enabled = idle, onClick = onOpenImport)
         }
         Box {
             CompactCircleButton(

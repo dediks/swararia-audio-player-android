@@ -132,18 +132,16 @@ internal fun LocalFohHeaderBar(
 ) {
     var menu by remember { mutableStateOf(false) }
     val foh = FohTheme.colors
-
-    val (routeBg, routeBorder, routeAccent, routeIcon) = when (route.kind) {
-        AudioOutputKind.LINE_OR_USB -> Quad(foh.safeBg, foh.safeBorder, foh.safeAccent, UiIcons.Plug)
-        AudioOutputKind.BLUETOOTH -> Quad(foh.btBg, foh.btBorder, foh.btAccent, UiIcons.Bluetooth)
-        AudioOutputKind.SPEAKER -> Quad(foh.warnBg, foh.warnBorder, foh.warnAccent, UiIcons.Warning)
-    }
-
-    val (routeText, routeBadge) = when (route.kind) {
-        AudioOutputKind.LINE_OR_USB -> "Output: USB / Line Out" to "Stage Ready"
-        AudioOutputKind.BLUETOOTH -> "Output: Bluetooth Audio" to "Wireless"
-        AudioOutputKind.SPEAKER -> "Output: Phone Speaker · No Line Out" to "Cek"
-    }
+    val setupPill = LocalFohRules.setupStatusPill(
+        route = route,
+        safeModeEnabled = safeModeEnabled,
+        needsDndPermission = safeNeedsDndPermission,
+        guardEnabled = guardEnabled,
+    )
+    val pillAttention = setupPill.level == FohReadinessLevel.ATTENTION
+    val pillBg = if (pillAttention) foh.warnBg else foh.safeBg
+    val pillBorder = if (pillAttention) foh.warnBorder else foh.safeBorder
+    val pillAccent = if (pillAttention) foh.warnAccent else foh.safeAccent
 
     Column(
         modifier = Modifier
@@ -154,141 +152,54 @@ internal fun LocalFohHeaderBar(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            CompactCircleButton(
-                icon = UiIcons.ChevronDown,
-                description = "Perkecil pemutar",
-                onClick = onMinimize,
-                size = 36.dp,
-                iconSize = 20.dp,
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Live Deck",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${route.label} · ${if (guardEnabled) "Guard Aktif" else "Guard Nonaktif"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (route.kind == AudioOutputKind.SPEAKER) foh.warnAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
 
-            Text(
-                text = "LOCAL FOH",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.padding(horizontal = 2.dp),
-            )
-
-            Row(
+            Surface(
+                onClick = onOpenSafeMode,
+                shape = RoundedCornerShape(50),
+                color = pillBg,
+                border = BorderStroke(1.dp, pillBorder),
                 modifier = Modifier
-                    .weight(1f)
-                    .horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.End),
+                    .heightIn(min = 34.dp)
+                    .semantics { contentDescription = "Setup FOH: ${setupPill.label}" },
             ) {
-                val safeBg = when {
-                    safeNeedsDndPermission -> foh.warnBg
-                    safeModeEnabled -> foh.safeBg
-                    else -> MaterialTheme.colorScheme.surfaceContainerHigh
-                }
-                val safeBorder = when {
-                    safeNeedsDndPermission -> foh.warnBorder
-                    safeModeEnabled -> foh.safeBorder
-                    else -> foh.borderSubtle
-                }
-                val safeAccent = when {
-                    safeNeedsDndPermission -> foh.warnAccent
-                    safeModeEnabled -> foh.safeAccent
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
-                Surface(
-                    onClick = onOpenSafeMode,
-                    shape = RoundedCornerShape(50),
-                    color = safeBg,
-                    border = BorderStroke(1.dp, safeBorder),
-                    modifier = Modifier
-                        .heightIn(min = 34.dp)
-                        .semantics { contentDescription = if (safeModeEnabled) "FOH Safe Mode ON" else "FOH Safe Mode OFF" },
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(
-                            UiIcons.VolumeMuted,
-                            contentDescription = null,
-                            tint = safeAccent,
-                            modifier = Modifier.size(13.dp),
-                        )
-                        Text(
-                            text = "Safe",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = if (safeModeEnabled || safeNeedsDndPermission) FontWeight.Bold else FontWeight.SemiBold,
-                            color = safeAccent,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
-                }
-
-                Surface(
-                    onClick = onToggleKeepScreenOn,
-                    shape = RoundedCornerShape(50),
-                    color = if (keepScreenOn) foh.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    border = BorderStroke(1.dp, if (keepScreenOn) foh.safeBorder else foh.borderSubtle),
-                    modifier = Modifier
-                        .heightIn(min = 34.dp)
-                        .semantics { contentDescription = if (keepScreenOn) "Screen Awake aktif" else "Aktifkan Screen Awake" },
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(
-                            UiIcons.KeepAwake,
-                            contentDescription = null,
-                            tint = if (keepScreenOn) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        Text(
-                            text = if (keepScreenOn) "Awake" else "Sleep OK",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (keepScreenOn) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
-                }
-
-                Surface(
-                    onClick = onToggleGuard,
-                    shape = RoundedCornerShape(50),
-                    color = if (guardEnabled) foh.safeBg else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    border = BorderStroke(1.dp, if (guardEnabled) foh.safeBorder else foh.borderSubtle),
-                    modifier = Modifier
-                        .heightIn(min = 34.dp)
-                        .semantics { contentDescription = if (guardEnabled) "Guard ON" else "Guard OFF" },
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(
-                            UiIcons.Shield,
-                            contentDescription = null,
-                            tint = if (guardEnabled) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        Text(
-                            text = if (guardEnabled) "Guard ON" else "Guard OFF",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (guardEnabled) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
+                    Icon(
+                        if (pillAttention) UiIcons.Warning else UiIcons.Shield,
+                        contentDescription = null,
+                        tint = pillAccent,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Text(
+                        text = setupPill.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = pillAccent,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
 
@@ -302,14 +213,6 @@ internal fun LocalFohHeaderBar(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 )
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Stage Brand & Live RTA") },
-                        leadingIcon = { Icon(UiIcons.Rta, null) },
-                        onClick = {
-                            menu = false
-                            onOpenStageRta()
-                        },
-                    )
                     DropdownMenuItem(
                         text = { Text("Ubah nama audio") },
                         leadingIcon = { Icon(UiIcons.Rename, null) },
@@ -328,41 +231,6 @@ internal fun LocalFohHeaderBar(
                         },
                     )
                 }
-            }
-        }
-
-        Surface(
-            onClick = onRouteClick,
-            shape = RoundedCornerShape(12.dp),
-            color = routeBg,
-            border = BorderStroke(1.dp, routeBorder),
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 32.dp)
-                .semantics { contentDescription = route.label },
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(routeIcon, contentDescription = null, tint = routeAccent, modifier = Modifier.size(15.dp))
-                Text(
-                    text = routeText,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = routeAccent,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                FohMicroChip(
-                    label = routeBadge,
-                    containerColor = routeAccent.copy(alpha = 0.16f),
-                    contentColor = routeAccent,
-                )
             }
         }
 
@@ -464,7 +332,6 @@ internal fun LocalFohTrackSummaryCard(
                 playing = playback.playing,
                 muted = controlUi.faderState.muted,
                 effectiveGain = controlUi.faderState.effectiveGain,
-                modifier = Modifier.clickable(onClick = onOpenStageRta),
             )
 
             LocalFohSeekAndEndingSection(

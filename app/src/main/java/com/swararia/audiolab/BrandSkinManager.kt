@@ -71,6 +71,10 @@ class BrandSkinManager(context: Context) {
         updateConfig { it.copy(prestigeAnimations = enabled) }
     }
 
+    fun dismissWelcomeBanner() {
+        updateConfig { it.copy(welcomeBannerDismissed = true) }
+    }
+
     fun clearCustomLogo() {
         val previousKey = mutableState.value.customLogoKey
         updateConfig {
@@ -94,6 +98,7 @@ class BrandSkinManager(context: Context) {
                 customLogoKey = null,
                 customAccentArgb = null,
                 useCustomLogoAccent = false,
+                welcomeBannerDismissed = false,
             )
         }
         if (previousKey != null) {
@@ -268,6 +273,7 @@ class BrandSkinManager(context: Context) {
         private const val KEY_HALO_CHANNEL_MODE = "halo_channel_mode"
         private const val KEY_CLEAN_STAGE = "clean_stage_mode"
         private const val KEY_PRESTIGE_ANIM = "prestige_animations"
+        private const val KEY_WELCOME_DISMISSED = "welcome_banner_dismissed"
 
         fun resolveLogoFile(context: Context, key: String?): File? {
             if (!BrandSkinRules.validLogoKey(key)) return null
@@ -298,6 +304,7 @@ class BrandSkinManager(context: Context) {
                 haloChannelMode = BrandSkinRules.resolveHaloChannelMode(prefs.getString(KEY_HALO_CHANNEL_MODE, null)),
                 cleanStageMode = prefs.getBoolean(KEY_CLEAN_STAGE, false),
                 prestigeAnimations = prefs.getBoolean(KEY_PRESTIGE_ANIM, true),
+                welcomeBannerDismissed = prefs.getBoolean(KEY_WELCOME_DISMISSED, false),
             )
         }
 
@@ -323,6 +330,7 @@ class BrandSkinManager(context: Context) {
                 putString(KEY_HALO_CHANNEL_MODE, config.haloChannelMode.id)
                 putBoolean(KEY_CLEAN_STAGE, config.cleanStageMode)
                 putBoolean(KEY_PRESTIGE_ANIM, config.prestigeAnimations)
+                putBoolean(KEY_WELCOME_DISMISSED, config.welcomeBannerDismissed)
             }.apply()
         }
     }

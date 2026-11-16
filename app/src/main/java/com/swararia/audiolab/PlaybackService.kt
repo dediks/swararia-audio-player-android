@@ -684,7 +684,7 @@ class PlaybackService : MediaSessionService() {
         )
         val notification = NotificationCompat.Builder(this, REMOTE_SERVER_CHANNEL)
             .setSmallIcon(R.drawable.ic_audio)
-            .setContentTitle("SETELO Server FOH aktif")
+            .setContentTitle("SWR Player Server FOH aktif")
             .setContentText("Terbuka di https://$remoteEndpointLabel")
             .setContentIntent(open)
             .setOngoing(true)

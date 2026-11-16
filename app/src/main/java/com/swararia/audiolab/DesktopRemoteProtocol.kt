@@ -337,7 +337,7 @@ object DesktopRemoteJson {
                 if (!ch.isISOControl()) append(ch)
             }
         }.trim().take(80)
-        return cleaned.ifEmpty { "SETELO Android" }
+        return cleaned.ifEmpty { "SWR Player Android" }
     }
 
     fun pairBody(rawLabel: String): ByteArray =

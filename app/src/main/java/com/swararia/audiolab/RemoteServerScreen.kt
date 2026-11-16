@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -59,12 +60,20 @@ internal fun RemoteTabScreen(
     serverActions: RemoteServerUiActions,
     modifier: Modifier = Modifier,
     localAudioBanner: @Composable () -> Unit = {},
+    onBack: (() -> Unit)? = null,
 ) {
-    var serverMode by rememberSaveable { mutableStateOf(false) }
+    var selectedRole by rememberSaveable { mutableStateOf("") }
     var showGuideDialog by rememberSaveable { mutableStateOf(false) }
     var qrScanRequestTick by remember { mutableIntStateOf(0) }
     val remoteState by desktopRemote.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val effectiveRole = when {
+        selectedRole.isNotEmpty() -> selectedRole
+        serverState.snapshot.enabled -> "server"
+        remoteState.phase == "active" -> "controller"
+        else -> ""
+    }
+    val serverMode = effectiveRole == "server"
 
     DisposableEffect(lifecycle, serverMode) {
         val observer = LifecycleEventObserver { _, event ->
@@ -90,30 +99,60 @@ internal fun RemoteTabScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             RemoteHeader(
+                effectiveRole = effectiveRole,
                 serverMode = serverMode,
                 serverState = serverState,
                 remoteState = remoteState,
+                onBack = {
+                    if (selectedRole.isNotEmpty() && !serverState.snapshot.enabled && remoteState.phase != "active") {
+                        selectedRole = ""
+                    } else {
+                        onBack?.invoke()
+                    }
+                },
+                onSwitchRole = { selectedRole = "" },
                 onTriggerScan = { qrScanRequestTick++ },
                 onRefreshRemote = { desktopRemote.refresh() },
                 onRefreshInterfaces = serverActions.onRefreshInterfaces,
                 onOpenGuide = { showGuideDialog = true },
             )
-            FohSegmentedBar(
-                options = listOf(false, true),
-                selected = serverMode,
-                label = { isSrv ->
-                    when {
-                        !isSrv -> "Kendalikan"
-                        serverState.snapshot.enabled -> "● Server Aktif"
-                        else -> "Mode Server"
-                    }
-                },
-                onSelect = { serverMode = it },
-                modifier = Modifier.fillMaxWidth(),
-            )
         }
         localAudioBanner()
-        if (serverMode) {
+        if (effectiveRole.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = FohTheme.colors.surfaceCard,
+                    border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        RemoteRoleOptionRow(
+                            icon = UiIcons.QrScan,
+                            title = "HP ini jadi Remote",
+                            subtitle = "Kendalikan pemutar lain via QR",
+                            accentTint = FohTheme.colors.safeAccent,
+                            chevronTint = FohTheme.colors.safeAccent,
+                            onClick = { selectedRole = "controller" },
+                        )
+                        HorizontalDivider(color = FohTheme.colors.borderSubtle)
+                        RemoteRoleOptionRow(
+                            icon = UiIcons.Play,
+                            title = "HP ini jadi Pemutar (Server)",
+                            subtitle = "Putar audio & tampilkan QR kontrol",
+                            accentTint = FohTheme.colors.safeAccent,
+                            chevronTint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            onClick = { selectedRole = "server" },
+                        )
+                    }
+                }
+            }
+        } else if (serverMode) {
             RemoteServerScreen(
                 state = serverState,
                 actions = serverActions,
@@ -139,9 +178,12 @@ internal fun RemoteTabScreen(
 
 @Composable
 private fun RemoteHeader(
+    effectiveRole: String,
     serverMode: Boolean,
     serverState: RemoteServerUiState,
     remoteState: DesktopRemoteUiState,
+    onBack: (() -> Unit)? = null,
+    onSwitchRole: () -> Unit = {},
     onTriggerScan: () -> Unit,
     onRefreshRemote: () -> Unit,
     onRefreshInterfaces: () -> Unit,
@@ -155,16 +197,40 @@ private fun RemoteHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (onBack != null) {
+            CompactCircleButton(
+                icon = UiIcons.Back,
+                description = "Kembali",
+                onClick = onBack,
+                size = 36.dp,
+                iconSize = 20.dp,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            )
+        }
         Text(
-            text = "Remote",
-            style = MaterialTheme.typography.headlineSmall,
+            text = when (effectiveRole) {
+                "controller" -> "HP ini: Remote"
+                "server" -> "HP ini: Pemutar"
+                else -> "Remote Multi-Device"
+            },
+            style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             softWrap = false,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        if (serverMode) {
+        if (effectiveRole.isNotEmpty()) {
+            FohHeaderChipButton(
+                label = "Ubah Peran",
+                icon = UiIcons.Refresh,
+                active = false,
+                onClick = onSwitchRole,
+            )
+        }
+        if (effectiveRole.isEmpty()) {
+            // Only show info button when on role picker
+        } else if (serverMode) {
             if (serverState.snapshot.enabled) {
                 FohHeaderChipButton(
                     label = "Server On",
@@ -250,7 +316,7 @@ private fun RemoteGuideDialog(onDismiss: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = "• Mode Server: Jadikan perangkat ini pemutar panggung agar bisa dikendalikan dari aplikasi SETELO lain (QR) atau browser HP/Laptop/iPhone (URL HTTPS + PIN).",
+                    text = "• Mode Server: Jadikan perangkat ini pemutar panggung agar bisa dikendalikan dari aplikasi SWR Player lain (QR) atau browser HP/Laptop/iPhone (URL HTTPS + PIN).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -488,7 +554,7 @@ internal fun RemoteServerScreen(
                 ) {
                     Text(
                         text = if (snapshot.enabled) {
-                            "Belum ada perangkat terhubung. Pindai QR dari tab Kendalikan di perangkat SETELO lain atau buka URL HTTPS di browser FOH."
+                            "Belum ada perangkat terhubung. Pindai QR dari menu Remote di perangkat SWR Player lain atau buka URL HTTPS di browser FOH."
                         } else {
                             "Nyalakan Server FOH agar HP lain, Laptop/PC, atau browser dapat terhubung."
                         },
@@ -861,7 +927,7 @@ private fun ServerInviteCard(
                             textAlign = TextAlign.Center,
                         )
                         Text(
-                            text = "Setiap QR aplikasi hanya berlaku satu kali pairing. Buat QR baru untuk menautkan perangkat SETELO Android lain.",
+                            text = "Setiap QR aplikasi hanya berlaku satu kali pairing. Buat QR baru untuk menautkan perangkat SWR Player Android lain.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant,
                             textAlign = TextAlign.Center,
@@ -1031,7 +1097,7 @@ private fun PendingDeviceCard(
                     Text(device.label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Text(
                         text = if (device.kind == RemoteClientKind.WEB) "Browser Web • ${device.deviceId.take(8)}"
-                        else "Aplikasi SETELO • ${device.deviceId.take(8)}",
+                        else "Aplikasi SWR Player • ${device.deviceId.take(8)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSurfaceVariant,
                     )
@@ -1107,7 +1173,7 @@ private fun ConnectedDeviceCard(
                 Column(Modifier.weight(1f)) {
                     Text(device.label, style = MaterialTheme.typography.titleSmall)
                     val roleLabel = if (device.role == "control") "Kendali Penuh (Control)" else "Pantau Saja (View-Only)"
-                    val kindLabel = if (device.kind == RemoteClientKind.WEB) "Browser Web" else "Aplikasi SETELO"
+                    val kindLabel = if (device.kind == RemoteClientKind.WEB) "Browser Web" else "Aplikasi SWR Player"
                     Text(
                         text = "$kindLabel • $roleLabel",
                         style = MaterialTheme.typography.bodySmall,
@@ -1227,4 +1293,55 @@ private fun rememberRemainingSeconds(expiresAt: Double?): Int {
     }
     if (expiresAt == null) return 0
     return ceil(expiresAt - nowSec).toInt().coerceAtLeast(0)
+}
+
+@Composable
+private fun RemoteRoleOptionRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    accentTint: Color,
+    chevronTint: Color,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = FohTheme.colors.safeBg,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = accentTint,
+                    modifier = Modifier.padding(10.dp).size(20.dp),
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(UiIcons.ChevronRight, contentDescription = null, tint = chevronTint)
+        }
+    }
 }

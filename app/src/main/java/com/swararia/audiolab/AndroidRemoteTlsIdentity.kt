@@ -39,7 +39,7 @@ object AndroidRemoteTlsIdentity {
     fun generate(
         primaryIp: String,
         extraIps: List<String> = emptyList(),
-        commonName: String = "SETELO Android Server",
+        commonName: String = "SWR Player Android Server",
         ttlHours: Long = 12L,
         nowMillis: Long = System.currentTimeMillis(),
     ): RemoteTlsIdentity {

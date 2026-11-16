@@ -9,6 +9,23 @@ internal enum class LocalPlayerViewMode(val label: String) {
     ART("Art"),
 }
 
+internal enum class MainRootTab(val label: String) {
+    PUSTAKA("Pustaka"),
+    LIVE_DECK("Live Deck"),
+    STAGE_RTA("Stage RTA"),
+    TOOLS("Alat & Skin"),
+}
+
+internal enum class FohReadinessLevel {
+    READY,
+    ATTENTION,
+}
+
+internal data class FohSetupStatusPill(
+    val label: String,
+    val level: FohReadinessLevel,
+)
+
 internal enum class AudioOutputKind {
     LINE_OR_USB,
     BLUETOOTH,
@@ -116,6 +133,25 @@ internal object LocalFohRules {
         PlaybackMode.ONCE -> "Once (Auto-Stop)"
         PlaybackMode.CONTINUE -> "Continue"
         PlaybackMode.LOOP_TRACK -> "Loop Track"
+    }
+
+    fun initialRootTab(hasActiveTrackOrQueue: Boolean): MainRootTab =
+        if (hasActiveTrackOrQueue) MainRootTab.LIVE_DECK else MainRootTab.PUSTAKA
+
+    fun setupStatusPill(
+        route: AudioOutputRoute,
+        safeModeEnabled: Boolean,
+        needsDndPermission: Boolean,
+        guardEnabled: Boolean,
+    ): FohSetupStatusPill {
+        val attention = route.kind == AudioOutputKind.SPEAKER || needsDndPermission
+        return if (attention) {
+            FohSetupStatusPill(label = "Perlu Cek", level = FohReadinessLevel.ATTENTION)
+        } else if (safeModeEnabled && guardEnabled) {
+            FohSetupStatusPill(label = "FOH Ready", level = FohReadinessLevel.READY)
+        } else {
+            FohSetupStatusPill(label = "Setup FOH", level = FohReadinessLevel.READY)
+        }
     }
 
     private fun entryTitle(entry: SessionQueueItem, byId: Map<String, AudioTrack>): String? =

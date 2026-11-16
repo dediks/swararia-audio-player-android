@@ -427,7 +427,7 @@ private fun DownloadsHeader(
             )
         } else {
             Text(
-                text = "Downloads",
+                text = "Antrean Unduhan",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -437,7 +437,7 @@ private fun DownloadsHeader(
             )
             if (hasJobs) {
                 FohHeaderChipButton(
-                    label = "Select",
+                    label = "Pilih",
                     icon = UiIcons.Check,
                     enabled = !operationBusy,
                     onClick = onEnterSelection,
@@ -1325,3 +1325,50 @@ private fun DownloadsBatchActionBar(
 }
 
 private data class DownloadPillStyle(val label: String, val bg: Color, val border: Color, val fg: Color)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun DownloadsQueueSheet(
+    upgrade: UpgradeUiActions,
+    ingest: IngestState,
+    tracks: List<AudioTrack>,
+    playlists: List<LibraryPlaylist> = emptyList(),
+    playlistActions: PlaylistUiActions = PlaylistUiActions(),
+    ytMusic: YoutubeMusicAccountState = YoutubeMusicAccountState(),
+    connected: Boolean,
+    currentPlayingTrackId: String? = null,
+    isPlayingActive: Boolean = false,
+    onSettings: () -> Unit,
+    onCancelIngest: () -> Unit,
+    onAddAudio: () -> Unit,
+    onPlayTrack: (AudioTrack) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = FohTheme.colors.surfaceCard,
+    ) {
+        DownloadsScreen(
+            upgrade = upgrade,
+            ingest = ingest,
+            tracks = tracks,
+            playlists = playlists,
+            playlistActions = playlistActions,
+            ytMusic = ytMusic,
+            connected = connected,
+            currentPlayingTrackId = currentPlayingTrackId,
+            isPlayingActive = isPlayingActive,
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.88f),
+            onSettings = onSettings,
+            onCancelIngest = onCancelIngest,
+            onAddAudio = {
+                onDismiss()
+                onAddAudio()
+            },
+            onPlayTrack = onPlayTrack,
+        )
+    }
+}

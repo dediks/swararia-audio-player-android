@@ -46,13 +46,13 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 internal fun BrandLogo(size: Dp, modifier: Modifier = Modifier) {
-    Image(painterResource(R.drawable.swararia_logo), contentDescription = "Logo SETELO",
+    Image(painterResource(R.drawable.swararia_logo), contentDescription = "Logo SWR Player",
         modifier = modifier.size(size), contentScale = ContentScale.Fit)
 }
 
 @Composable
 internal fun RoyalBrandLogo(size: Dp, modifier: Modifier = Modifier) {
-    Image(painterResource(R.drawable.setelo_logo_royal), contentDescription = "Logo SETELO",
+    Image(painterResource(R.drawable.setelo_logo_royal), contentDescription = "Logo SWR Player",
         modifier = modifier.size(size), contentScale = ContentScale.Fit)
 }
 

@@ -645,7 +645,7 @@ class IngestService : Service() {
     private fun notification(stage: String, progress: Float?): Notification {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_audio)
-            .setContentTitle("SETELO by Swararia").setContentText(stage).setContentIntent(open)
+            .setContentTitle("SWR Player").setContentText(stage).setContentIntent(open)
             .setOnlyAlertOnce(true).setOngoing(true)
             .setProgress(100, ((progress ?: 0f) * 100).toInt(), progress == null).build()
     }

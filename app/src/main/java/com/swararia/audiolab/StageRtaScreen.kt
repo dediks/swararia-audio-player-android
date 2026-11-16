@@ -83,6 +83,7 @@ internal fun StageRtaScreen(
     onClose: () -> Unit,
     onOpenBrandStudio: () -> Unit,
     modifier: Modifier = Modifier,
+    showCloseButton: Boolean = false,
 ) {
     val context = LocalContext.current
     val brandManager = remember(context) {
@@ -140,6 +141,7 @@ internal fun StageRtaScreen(
                 cleanMode = brand.cleanStageMode,
                 rtaStyle = brand.stageRtaStyle,
                 haloChannelMode = brand.haloChannelMode,
+                showCloseButton = showCloseButton,
                 onClose = onClose,
                 onOpenThemeQuickSheet = { quickThemeOpen = true },
                 onToggleCleanMode = { brandManager?.setCleanStageMode(!brand.cleanStageMode) },
@@ -152,7 +154,6 @@ internal fun StageRtaScreen(
                 dbfsText = dbfsText,
                 dbfsColor = dbfsColor,
                 compactEmblem = brand.stageRtaStyle == StageRtaStyle.HALO,
-                onEmblemClick = onOpenBrandStudio,
             )
 
             StageRtaAnalyzerCard(
@@ -169,7 +170,6 @@ internal fun StageRtaScreen(
                     }
                     brandManager?.setHaloChannelMode(next)
                 },
-                onCenterLogoClick = onOpenBrandStudio,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
@@ -220,6 +220,7 @@ private fun StageRtaTopBar(
     cleanMode: Boolean,
     rtaStyle: StageRtaStyle,
     haloChannelMode: HaloChannelMode,
+    showCloseButton: Boolean = false,
     onClose: () -> Unit,
     onOpenThemeQuickSheet: () -> Unit,
     onToggleCleanMode: () -> Unit,
@@ -237,15 +238,17 @@ private fun StageRtaTopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        CompactCircleButton(
-            icon = UiIcons.ChevronDown,
-            description = "Kembali",
-            onClick = onClose,
-            size = 36.dp,
-            iconSize = 20.dp,
-            containerColor = foh.surfaceCard,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-        )
+        if (showCloseButton) {
+            CompactCircleButton(
+                icon = UiIcons.ChevronDown,
+                description = "Kembali",
+                onClick = onClose,
+                size = 36.dp,
+                iconSize = 20.dp,
+                containerColor = foh.surfaceCard,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            )
+        }
 
         Surface(
             shape = CircleShape,
@@ -305,7 +308,6 @@ private fun StageHeroBrandHeader(
     dbfsText: String,
     dbfsColor: Color,
     compactEmblem: Boolean,
-    onEmblemClick: () -> Unit,
 ) {
     val foh = FohTheme.colors
     val rentalTitle = BrandSkinRules.effectiveRentalTitle(brand)
@@ -325,14 +327,11 @@ private fun StageHeroBrandHeader(
                 shimmerEnabled = brand.prestigeAnimations,
                 bassEnergy = bassEnergy,
                 playing = liveActive,
-                onClick = onEmblemClick,
             )
         }
 
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .clickable(onClick = onEmblemClick),
+            modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
@@ -350,12 +349,6 @@ private fun StageHeroBrandHeader(
                 color = foh.safeAccent,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = if (BrandSkinRules.hasCustomBrand(brand)) "SETELO FOH ENGINE" else "AUDIO LAB · FOH STAGE",
-                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.5.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                maxLines = 1,
             )
         }
 
@@ -403,7 +396,6 @@ private fun StageRtaAnalyzerCard(
     bassEnergy: Float,
     onSelectRtaStyle: (StageRtaStyle) -> Unit,
     onToggleHaloChannelMode: () -> Unit,
-    onCenterLogoClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val foh = FohTheme.colors
@@ -520,7 +512,6 @@ private fun StageRtaAnalyzerCard(
                         shimmerEnabled = brand.prestigeAnimations,
                         bassEnergy = bassEnergy,
                         playing = liveActive,
-                        onClick = onCenterLogoClick,
                     )
                 }
             }

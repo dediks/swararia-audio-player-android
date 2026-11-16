@@ -146,7 +146,7 @@
       setVisible(tPill, false);
       el('subStatus').textContent = sessionState?.status === 'pending'
         ? 'Menunggu persetujuan di HP Server'
-        : 'Siap disambungkan ke HP SETELO';
+        : 'Siap disambungkan ke HP SWR Player';
       return;
     }
     const isControl = sessionState.role === 'control';

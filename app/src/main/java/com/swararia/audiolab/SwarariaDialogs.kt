@@ -348,7 +348,7 @@ internal fun EngineSettingsDialog(
     onCancel: () -> Unit,
 ) {
     var details by remember { mutableStateOf(false) }
-    AlertDialog(onDismissRequest = onDismiss, icon = { BrandLogo(44.dp) }, title = { Text("Pengaturan & Tentang SETELO") },
+    AlertDialog(onDismissRequest = onDismiss, icon = { BrandLogo(44.dp) }, title = { Text("Pengaturan & Tentang SWR Player") },
         text = {
             Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Pemutaran & Transisi (Global)", style = MaterialTheme.typography.titleMedium)
@@ -474,8 +474,8 @@ internal fun EngineSettingsDialog(
                 }
                 TextButton(onClick = { details = true }) { Text("Buka diagnostik") }
                 HorizontalDivider()
-                Text("Tentang SETELO", style = MaterialTheme.typography.titleMedium)
-                Text("SETELO by Swararia menyimpan audio lokal di Music/SwarariaAudioLab. Impor membuat salinan tanpa mengubah file asli. Pemutar memakai file lokal; pencarian, tautan, dan pembaruan memerlukan internet.",
+                Text("Tentang SWR Player", style = MaterialTheme.typography.titleMedium)
+                Text("SWR Player menyimpan audio lokal di Music/SwarariaAudioLab. Impor membuat salinan tanpa mengubah file asli. Pemutar memakai file lokal; pencarian, tautan, dan pembaruan memerlukan internet.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Default tanpa akun (opsional masuk YT Music Premium dienkripsi Android Keystore tanpa backup cloud), tanpa server luar, atau analitik aplikasi. Unduh hanya audio yang boleh Anda gunakan. Engine downloader dan FFmpeg memiliki kewajiban lisensi; lihat source dan catatan lisensi sebelum distribusi.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

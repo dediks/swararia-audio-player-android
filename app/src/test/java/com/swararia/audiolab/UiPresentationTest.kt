@@ -48,7 +48,7 @@ class UiPresentationTest {
 
     @Test fun playlistWorkflowSummariesAndBadgesFormatCleanly() {
         assertEquals(listOf("All Tracks", "Playlists"), LibrarySectionTab.entries.map { it.label })
-        assertEquals(listOf("All", "Artist", "Album", "Format"), LibraryGroupMode.entries.map { it.label })
+        assertEquals(listOf("Semua", "Artis", "Album", "Format"), LibraryGroupMode.entries.map { it.label })
         assertEquals("5 tracks · Total 22:45", UiPresentation.playlistStatsSummary(5, 1_365_000L))
         assertEquals("2 tracks", UiPresentation.playlistStatsSummary(2, 0L))
 

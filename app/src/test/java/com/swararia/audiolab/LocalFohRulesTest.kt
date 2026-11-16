@@ -119,4 +119,40 @@ class LocalFohRulesTest {
         assertEquals("ModeLoopTrack", loop.name)
         assertEquals(3, setOf(once, cont, loop).size)
     }
+
+    @Test
+    fun initialRootTabAndSetupStatusPillReflectFohReadiness() {
+        assertEquals(MainRootTab.PUSTAKA, LocalFohRules.initialRootTab(hasActiveTrackOrQueue = false))
+        assertEquals(MainRootTab.LIVE_DECK, LocalFohRules.initialRootTab(hasActiveTrackOrQueue = true))
+
+        val usbRoute = AudioOutputRoute(AudioOutputKind.LINE_OR_USB, "USB / Line Out", "Connected")
+        val speakerRoute = AudioOutputRoute(AudioOutputKind.SPEAKER, "Output: Phone Speaker", "Speaker")
+
+        val ready = LocalFohRules.setupStatusPill(
+            route = usbRoute,
+            safeModeEnabled = true,
+            needsDndPermission = false,
+            guardEnabled = true,
+        )
+        assertEquals("FOH Ready", ready.label)
+        assertEquals(FohReadinessLevel.READY, ready.level)
+
+        val attentionSpeaker = LocalFohRules.setupStatusPill(
+            route = speakerRoute,
+            safeModeEnabled = true,
+            needsDndPermission = false,
+            guardEnabled = true,
+        )
+        assertEquals("Perlu Cek", attentionSpeaker.label)
+        assertEquals(FohReadinessLevel.ATTENTION, attentionSpeaker.level)
+
+        val attentionDnd = LocalFohRules.setupStatusPill(
+            route = usbRoute,
+            safeModeEnabled = true,
+            needsDndPermission = true,
+            guardEnabled = true,
+        )
+        assertEquals("Perlu Cek", attentionDnd.label)
+        assertEquals(FohReadinessLevel.ATTENTION, attentionDnd.level)
+    }
 }

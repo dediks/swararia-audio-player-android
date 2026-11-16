@@ -17,8 +17,8 @@ class NativeUiSourceContracts(unittest.TestCase):
     def test_root_has_upgrade_contract_and_three_saveable_destinations(self):
         code = source('SwarariaUi.kt')
         for text in ['upgrade: UpgradeUiActions', 'rememberSaveable', 'BackHandler(',
-                     'Text("Library")', 'Text("Search")', 'Text("Downloads")', 'DownloadsScreen(',
-                     'WindowInsets.safeDrawing', '.imePadding()']:
+                     'Text("Pustaka")', 'Text("Live Deck")', 'Text("Stage RTA")', 'Text("Alat & Skin")',
+                     'DownloadsQueueSheet(', 'WindowInsets.safeDrawing', '.imePadding()']:
             self.assertIn(text, code)
         actions = source('UpgradeUiActions.kt')
         for text in ['jobs: List<DownloadJob>', 'operationBusy: Boolean',
@@ -76,8 +76,8 @@ class NativeUiSourceContracts(unittest.TestCase):
                      'permanen', 'salinan', 'asli', 'onDelete(track, onDismiss)']:
             self.assertIn(text, code)
         row = source('LibraryScreen.kt')
-        self.assertIn('Text("Rename")', row)
-        self.assertIn('Text("Delete", color = MaterialTheme.colorScheme.error)', row)
+        self.assertIn('Text("Ubah nama")', row)
+        self.assertIn('Text("Hapus", color = MaterialTheme.colorScheme.error)', row)
 
     def test_preview_is_actual_state_seekable_and_service_owned(self):
         code = source('SearchPreviewPlayer.kt')

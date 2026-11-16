@@ -427,7 +427,7 @@ private fun defaultAndroidClientLabel(): String {
         .lowercase(java.util.Locale.ROOT)
         .replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }
     val combined = when {
-        model.isBlank() && prettyManufacturer.isBlank() -> "SETELO Android"
+        model.isBlank() && prettyManufacturer.isBlank() -> "SWR Player Android"
         model.isBlank() -> prettyManufacturer
         prettyManufacturer.isBlank() -> model
         model.startsWith(prettyManufacturer, ignoreCase = true) -> model

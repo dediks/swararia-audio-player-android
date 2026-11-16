@@ -33,12 +33,14 @@ class BrandSkinRulesTest {
     }
 
     @Test
-    fun presetAndTitleFallbacksMatchSeteloDefaultsWhenBlank() {
+    fun presetAndTitleFallbacksMatchSwrPlayerDefaultsWhenBlank() {
         val defaults = BrandSkinConfig()
         assertEquals(FohSkinPreset.SWARARIA_EMERALD, BrandSkinRules.resolvePreset("unknown"))
-        assertEquals("SETELO", BrandSkinRules.effectiveRentalTitle(defaults))
-        assertEquals("by Swararia", BrandSkinRules.effectiveEventSubtitle(defaults))
+        assertEquals("SWR Player", BrandSkinRules.effectiveRentalTitle(defaults))
+        assertEquals("Pro Audio Player", BrandSkinRules.effectiveEventSubtitle(defaults))
         assertFalse(BrandSkinRules.hasCustomBrand(defaults))
+        assertTrue(BrandSkinRules.shouldShowWelcomeBrandCard(defaults))
+        assertFalse(BrandSkinRules.shouldShowWelcomeBrandCard(defaults.copy(welcomeBannerDismissed = true)))
 
         val rental = BrandSkinConfig(
             presetId = FohSkinPreset.ROYAL_GOLD.id,
@@ -49,6 +51,7 @@ class BrandSkinRulesTest {
         assertEquals("MAIN STAGE", BrandSkinRules.effectiveEventSubtitle(rental))
         assertEquals(FohSkinPreset.ROYAL_GOLD.accentArgb, BrandSkinRules.activeAccentArgb(rental))
         assertTrue(BrandSkinRules.hasCustomBrand(rental))
+        assertFalse(BrandSkinRules.shouldShowWelcomeBrandCard(rental))
     }
 
     @Test

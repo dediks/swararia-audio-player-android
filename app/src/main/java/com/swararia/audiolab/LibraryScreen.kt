@@ -79,6 +79,9 @@ internal fun LibraryPage(
     onOpenPlayer: () -> Unit = {},
     onOpenStageRta: () -> Unit = {},
     onOpenBrandStudio: () -> Unit = {},
+    activeDownloadCount: Int = 0,
+    failedDownloadCount: Int = 0,
+    onOpenDownloads: () -> Unit = {},
     playlistActions: PlaylistUiActions = PlaylistUiActions(),
     onRename: (AudioTrack) -> Unit,
     onHistory: () -> Unit,
@@ -106,6 +109,11 @@ internal fun LibraryPage(
     val visiblePlaylists = state.visiblePlaylists
     val groupedTracks = state.groupedTracks
     val activeTrackId = remember(currentId) { currentId?.toLongOrNull() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val brandManager = remember(context) {
+        (context.applicationContext as? SwarariaApp)?.container?.brandSkinManager
+    }
+    val brand = FohTheme.brand
 
     Column(modifier = modifier.fillMaxSize()) {
         LazyColumn(
@@ -136,8 +144,23 @@ internal fun LibraryPage(
                         onToggleSort = { state.alphabetical = it },
                         onHistory = onHistory,
                         onSettings = onSettings,
+                        onAdd = onAdd,
+                        activeDownloadCount = activeDownloadCount,
+                        failedDownloadCount = failedDownloadCount,
+                        onOpenDownloads = onOpenDownloads,
                         onOpenStageRta = onOpenStageRta,
                         onOpenBrandStudio = onOpenBrandStudio,
+                        welcomeBanner = if (BrandSkinRules.shouldShowWelcomeBrandCard(brand)) {
+                            {
+                                WelcomeBrandBanner(
+                                    brand = brand,
+                                    onSetup = onOpenBrandStudio,
+                                    onDismiss = { brandManager?.dismissWelcomeBanner() },
+                                )
+                            }
+                        } else {
+                            null
+                        },
                     )
                 }
             }
@@ -807,13 +830,13 @@ private fun LibraryAudioRow(
                                 )
                             }
                             DropdownMenuItem(
-                                text = { Text("Rename") },
+                                text = { Text("Ubah nama") },
                                 leadingIcon = { Icon(UiIcons.Rename, null) },
                                 enabled = renameEnabled,
                                 onClick = { menu = false; onRename() },
                             )
                             DropdownMenuItem(
-                                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                text = { Text("Hapus", color = MaterialTheme.colorScheme.error) },
                                 leadingIcon = { Icon(UiIcons.Delete, null) },
                                 enabled = renameEnabled,
                                 onClick = { menu = false; onDelete() },
@@ -878,6 +901,68 @@ private fun RundownReorderIconButton(
                 contentDescription = description,
                 tint = if (enabled) tint else tint.copy(alpha = 0.28f),
                 modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun WelcomeBrandBanner(
+    brand: BrandSkinConfig,
+    onSetup: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val foh = FohTheme.colors
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = foh.safeBg,
+        border = BorderStroke(1.dp, foh.safeBorder),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 10.dp, end = 6.dp, top = 7.dp, bottom = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PrestigeBrandEmblem(
+                logoKey = brand.customLogoKey,
+                size = 28.dp,
+                shimmerEnabled = brand.prestigeAnimations,
+            )
+            Text(
+                text = "Pasang Logo & Nama Rental",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = foh.safeAccent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Surface(
+                onClick = onSetup,
+                shape = RoundedCornerShape(999.dp),
+                color = foh.safeAccent,
+            ) {
+                Text(
+                    text = "Atur",
+                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = foh.surfaceDeep,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+            CompactCircleButton(
+                icon = UiIcons.Close,
+                description = "Tutup kartu sambutan",
+                onClick = onDismiss,
+                size = 30.dp,
+                iconSize = 16.dp,
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
