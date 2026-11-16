@@ -57,6 +57,8 @@ class AndroidPackageContract(unittest.TestCase):
                 self.assertIn(item,dex)
             plugin='assets/search_plugins/yt_dlp_plugins/extractor/swararia_music.py'
             self.assertEqual(z.read(plugin),(ROOT/'app/src/main/assets/search_plugins/yt_dlp_plugins/extractor/swararia_music.py').read_bytes())
+            dl_plugin='assets/download_plugins/yt_dlp_plugins/postprocessor/swararia_metadata.py'
+            self.assertEqual(z.read(dl_plugin),(ROOT/'app/src/main/assets/download_plugins/yt_dlp_plugins/postprocessor/swararia_metadata.py').read_bytes())
             self.assertTrue(any('swararia_logo' in n for n in names),'Provided logo must be packaged')
             self.assertTrue(any('ic_launcher' in n for n in names),'Adaptive launcher resources must be packaged')
             for annotation in [b'KONSEP UI',b'DATA CONTOH',b'Logo asli',b'Hujan di jendela']:

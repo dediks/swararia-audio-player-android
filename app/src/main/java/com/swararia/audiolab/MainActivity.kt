@@ -78,16 +78,30 @@ class MainActivity : ComponentActivity() {
 
     private fun syncControllerTrackTitles(player: MediaController?, tracks: List<AudioTrack>) {
         if (player == null || !player.isConnected || tracks.isEmpty()) return
-        val titles = tracks.associateBy { it.id.toString() }
+        val tracksById = tracks.associateBy { it.id.toString() }
         for (index in 0 until player.mediaItemCount) {
             val item = player.getMediaItemAt(index)
-            val updated = titles[item.mediaId] ?: continue
+            val updated = tracksById[item.mediaId] ?: continue
             val title = UiPresentation.title(updated.displayName)
-            if (item.mediaMetadata.title?.toString() != title) {
+            val artist = updated.artist?.trim()?.takeIf { it.isNotEmpty() }
+            val album = updated.album?.trim()?.takeIf { it.isNotEmpty() }
+            val genre = updated.genre?.trim()?.takeIf { it.isNotEmpty() }
+            val meta = item.mediaMetadata
+            if (
+                meta.title?.toString() != title ||
+                meta.artist?.toString() != artist ||
+                meta.albumTitle?.toString() != album ||
+                meta.genre?.toString() != genre
+            ) {
                 player.replaceMediaItem(
                     index,
                     item.buildUpon().setMediaMetadata(
-                        item.mediaMetadata.buildUpon().setTitle(title).build(),
+                        meta.buildUpon()
+                            .setTitle(title)
+                            .setArtist(artist)
+                            .setAlbumTitle(album)
+                            .setGenre(genre)
+                            .build(),
                     ).build(),
                 )
             }
@@ -386,7 +400,14 @@ class MainActivity : ComponentActivity() {
         val playable = tracks.filter { model.playbackDeletion.canPlay(it.id) }
         val queue = playable.map { item ->
             MediaItem.Builder().setMediaId(item.id.toString()).setUri(Uri.parse(item.uri))
-                .setMediaMetadata(MediaMetadata.Builder().setTitle(UiPresentation.title(item.displayName)).build()).build()
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(UiPresentation.title(item.displayName))
+                        .setArtist(item.artist?.trim()?.takeIf { it.isNotEmpty() })
+                        .setAlbumTitle(item.album?.trim()?.takeIf { it.isNotEmpty() })
+                        .setGenre(item.genre?.trim()?.takeIf { it.isNotEmpty() })
+                        .build(),
+                ).build()
         }
         val targetIndex = playable.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
         if (autoPlay) {

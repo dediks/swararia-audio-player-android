@@ -15,8 +15,10 @@ interface DownloadDao {
     fun observeRecentJobs(): Flow<List<DownloadJob>>
     @Query("SELECT * FROM download_jobs WHERE batchId = (SELECT batchId FROM download_jobs ORDER BY id DESC LIMIT 1) ORDER BY id ASC")
     fun observeLatestBatch(): Flow<List<DownloadJob>>
-    @Query("INSERT INTO download_jobs(batchId,sourceUrl,title,thumbnailUrl,status,progress,stage,error,trackId,authorized,createdAt) SELECT :batchId,:sourceUrl,:title,CASE WHEN instr(:thumbnailUrl, char(0)) = 0 AND length(CAST(:thumbnailUrl AS BLOB)) <= 4096 AND :thumbnailUrl NOT GLOB '*[?#]*' AND (:thumbnailUrl GLOB 'https://i.ytimg.com/*' OR :thumbnailUrl GLOB 'https://i[12349].ytimg.com/*' OR :thumbnailUrl GLOB 'https://yt3.ggpht.com/*' OR :thumbnailUrl GLOB 'https://lh3.googleusercontent.com/*') THEN :thumbnailUrl ELSE NULL END,'QUEUED',NULL,'Menunggu',NULL,NULL,1,:createdAt WHERE length(CAST(:sourceUrl AS BLOB)) = 43 AND instr(:sourceUrl,char(0))=0 AND substr(:sourceUrl,1,32) = 'https://www.youtube.com/watch?v=' AND substr(:sourceUrl,33) NOT GLOB '*[^A-Za-z0-9_-]*'")
+    @Query("INSERT INTO download_jobs(batchId,sourceUrl,title,thumbnailUrl,status,progress,stage,error,trackId,authorized,createdAt) SELECT :batchId,:sourceUrl,:title,CASE WHEN instr(:thumbnailUrl, char(0)) = 0 AND length(CAST(:thumbnailUrl AS BLOB)) <= 4096 AND :thumbnailUrl NOT GLOB '*[?#]*' AND (:thumbnailUrl GLOB 'https://i.ytimg.com/*' OR :thumbnailUrl GLOB 'https://i[12349].ytimg.com/*' OR :thumbnailUrl GLOB 'https://yt3.ggpht.com/*' OR :thumbnailUrl GLOB 'https://lh3.googleusercontent.com/*' OR :thumbnailUrl GLOB 'https://yt3.googleusercontent.com/*') THEN :thumbnailUrl ELSE NULL END,'QUEUED',NULL,'Menunggu',NULL,NULL,1,:createdAt WHERE length(CAST(:sourceUrl AS BLOB)) = 43 AND instr(:sourceUrl,char(0))=0 AND substr(:sourceUrl,1,32) = 'https://www.youtube.com/watch?v=' AND substr(:sourceUrl,33) NOT GLOB '*[^A-Za-z0-9_-]*'")
     suspend fun insertSafe(batchId: String, sourceUrl: String, title: String, thumbnailUrl: String?, createdAt: Long): Long
+    @Query("UPDATE download_jobs SET title = CASE WHEN :title IS NOT NULL AND length(trim(:title)) > 0 AND title IN ('Audio', 'Audio dari link') THEN :title ELSE title END, thumbnailUrl = COALESCE(thumbnailUrl, CASE WHEN instr(:thumbnailUrl, char(0)) = 0 AND length(CAST(:thumbnailUrl AS BLOB)) <= 4096 AND :thumbnailUrl NOT GLOB '*[?#]*' AND (:thumbnailUrl GLOB 'https://i.ytimg.com/*' OR :thumbnailUrl GLOB 'https://i[12349].ytimg.com/*' OR :thumbnailUrl GLOB 'https://yt3.ggpht.com/*' OR :thumbnailUrl GLOB 'https://lh3.googleusercontent.com/*' OR :thumbnailUrl GLOB 'https://yt3.googleusercontent.com/*') THEN :thumbnailUrl ELSE NULL END) WHERE id = :id AND status = 'RUNNING'")
+    suspend fun updateResolvedMetadata(id: Long, title: String?, thumbnailUrl: String?): Int
     suspend fun insert(job: DownloadJob): Long {
         require(job.authorized && job.sourceUrl == DownloadQueueRules.validatedPublicSourceUrl(job.sourceUrl))
         return insertSafe(job.batchId, job.sourceUrl, job.title, DownloadQueueRules.durableThumbnail(job.thumbnailUrl), job.createdAt)
@@ -170,6 +172,13 @@ class RoomDownloadQueueRepository(private val database: AudioDatabase) : Downloa
         var removed = 0
         for (id in ids.distinct()) removed += dao.removeTerminalJob(id)
         removed
+    }
+    override suspend fun updateResolvedMetadata(id: Long, title: String?, thumbnailUrl: String?) {
+        val cleanTitle = title?.trim()?.takeIf { it.isNotEmpty() }?.take(300)
+        val safeThumb = DownloadQueueRules.durableThumbnail(thumbnailUrl)
+        if (cleanTitle != null || safeThumb != null) {
+            dao.updateResolvedMetadata(id, cleanTitle, safeThumb)
+        }
     }
     override suspend fun retryJob(id: Long): String? = database.withTransaction {
         val job = dao.find(id) ?: return@withTransaction null

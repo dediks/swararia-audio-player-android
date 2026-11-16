@@ -1137,7 +1137,12 @@ private fun FinishedJobRow(
         matchedTrack?.let { UiPresentation.highBitrateBadge(it.displayName, it.sizeBytes, it.durationMs) }
     }
     val statusText = when {
-        completed && matchedTrack != null -> UiPresentation.qualitySummary(matchedTrack.displayName, matchedTrack.sizeBytes, matchedTrack.durationMs)
+        completed && matchedTrack != null -> UiPresentation.trackSubtitleWithQuality(
+            matchedTrack.displayName,
+            matchedTrack.artist,
+            matchedTrack.sizeBytes,
+            matchedTrack.durationMs,
+        )
         completed -> "Selesai · dihapus dari Pustaka"
         canceled && job.stage.equals("Dilewati", ignoreCase = true) -> "Dilewati"
         canceled -> "Dibatalkan"
@@ -1182,8 +1187,11 @@ private fun FinishedJobRow(
             }
 
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                val displayTitle = matchedTrack?.let { UiPresentation.title(it.displayName) }
+                    ?.takeIf { job.title == "Audio" || job.title == "Audio dari link" }
+                    ?: job.title
                 Text(
-                    text = job.title,
+                    text = displayTitle,
                     style = MaterialTheme.typography.titleSmall,
                     color = if (isCurrentlyPlayingTrack) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,

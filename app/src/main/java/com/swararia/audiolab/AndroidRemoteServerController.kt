@@ -36,6 +36,9 @@ data class RemoteQueueEntry(
     val numericId: Long,
     val uriString: String,
     val title: String,
+    val artist: String? = null,
+    val album: String? = null,
+    val genre: String? = null,
 )
 
 interface RemoteServicePlaybackHost {
@@ -366,6 +369,9 @@ class AndroidRemoteServerController(
                 numericId = track.id,
                 uriString = track.uri,
                 title = UiPresentation.title(track.displayName),
+                artist = track.artist?.trim()?.takeIf { it.isNotEmpty() },
+                album = track.album?.trim()?.takeIf { it.isNotEmpty() },
+                genre = track.genre?.trim()?.takeIf { it.isNotEmpty() },
             )
         }
         val result = runOnMainBlocking(2200L) {

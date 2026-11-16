@@ -69,7 +69,9 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
                     enriched[index] = hit.copy(channel = full.channel ?: hit.channel,
                         durationSeconds = full.durationSeconds ?: hit.durationSeconds,
                         channelIsVerified = full.channelIsVerified || hit.channelIsVerified,
-                        thumbnailUrl = full.thumbnailUrl ?: hit.thumbnailUrl)
+                        thumbnailUrl = full.thumbnailUrl ?: hit.thumbnailUrl,
+                        artist = full.artist ?: hit.artist,
+                        album = full.album ?: hit.album)
                 }
             } catch (cancel: CancellationException) { throw cancel }
               catch (_: Exception) { /* Incomplete items remain explicitly excluded, not fabricated. */ }

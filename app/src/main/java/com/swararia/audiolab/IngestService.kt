@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
+import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -364,14 +365,25 @@ class IngestService : Service() {
                 if (interruptible) checkJobControls(job.id)
                 interruptible = false
             }
+            val (downloadedMeta, coverFile) = parseDownloadedMetadata(directory)
+            val resolvedThumbnailUrl = downloadedMeta?.thumbnailUrl ?: job.thumbnailUrl
+            runCatching {
+                queue.updateResolvedMetadata(job.id, downloadedMeta?.title, resolvedThumbnailUrl)
+            }
             control.progress(null, "Menyimpan audio")
             report("Menyimpan ke Music/SwarariaAudioLab/...", null, cancelable = false)
             var trackId: Long? = null
             control.commitDurably {
-                trackId = library.addDownloadedFile(downloadedFile, job.id).id
+                trackId = library.addDownloadedFile(downloadedFile, job.id, downloadedMeta).id
             }
             // Optional artwork is strictly AFTER the durable audio + job transaction.
-            runCatching { library.attachArtwork(requireNotNull(trackId), job.thumbnailUrl) }
+            runCatching {
+                library.attachArtwork(
+                    trackId = requireNotNull(trackId),
+                    thumbnailUrl = resolvedThumbnailUrl,
+                    localArtworkFile = coverFile,
+                )
+            }
         } finally {
             skipJobId.compareAndSet(job.id, -1L)
             wipeCookieFile(cookieFile)
@@ -398,6 +410,12 @@ class IngestService : Service() {
         .addOption("-f", "bestaudio/best")
         .addOption("--extract-audio")
         .addOption("--audio-format", "best")
+        .addOption("--write-thumbnail")
+        .addOption("--embed-metadata")
+        .addOption("--no-plugin-dirs")
+        .addOption("--plugin-dirs", downloadPluginDirectory().absolutePath)
+        .addOption("--use-postprocessor", "SwarariaEnrich:when=pre_process")
+        .addOption("--use-postprocessor", "SwarariaEmbedCover:when=after_move")
         .addOption("-o", outputTemplate)
         .apply {
             downloadPrefs.state.value.rateLimit.ytDlpArg?.let { limit ->
@@ -705,9 +723,73 @@ class IngestService : Service() {
         super.onDestroy()
     }
 
+    @Synchronized
+    private fun downloadPluginDirectory(): File {
+        val base = File(applicationContext.filesDir, "download-adapter-plugins")
+        val file = File(base, "swararia/yt_dlp_plugins/postprocessor/swararia_metadata.py")
+        val bytes = applicationContext.assets
+            .open("download_plugins/yt_dlp_plugins/postprocessor/swararia_metadata.py")
+            .use { it.readBytes() }
+        check(bytes.size in 1..512_000)
+        if (!file.isFile || !file.readBytes().contentEquals(bytes)) {
+            check(file.parentFile?.isDirectory == true || file.parentFile?.mkdirs() == true)
+            val staging = File(file.parentFile, "swararia_metadata.tmp")
+            staging.writeBytes(bytes)
+            check(staging.renameTo(file)) { "Plugin metadata unduhan tidak dapat disiapkan." }
+        }
+        return base
+    }
+
+    private fun parseDownloadedMetadata(directory: File): Pair<DownloadedAudioMetadata?, File?> {
+        val metaFile = File(directory, "swararia-meta.json")
+        if (!metaFile.isFile || metaFile.length() !in 1L..MAX_META_JSON_BYTES) return null to null
+        val json = runCatching {
+            val dirCanon = directory.canonicalFile
+            check(metaFile.canonicalFile.parentFile == dirCanon)
+            JSONObject(metaFile.readText(Charsets.UTF_8))
+        }.getOrNull() ?: return null to null
+
+        fun optText(key: String, maxLen: Int): String? {
+            if (json.isNull(key)) return null
+            val raw = json.opt(key) as? String ?: return null
+            return raw.trim().takeIf { it.isNotEmpty() && !it.equals("<unknown>", ignoreCase = true) }?.take(maxLen)
+        }
+
+        val durationMs = if (!json.isNull("durationMs")) {
+            json.optDouble("durationMs", -1.0).takeIf { it.isFinite() && it > 0.0 }?.toLong()
+        } else {
+            null
+        }
+        val thumbnailUrl = optText("thumbnailUrl", 2048)?.let { candidate ->
+            runCatching { DownloadQueueRules.durableThumbnail(candidate) }.getOrNull()
+        }
+        val metadata = DownloadedAudioMetadata(
+            title = optText("track", 240) ?: optText("title", 240),
+            artist = optText("artist", 160),
+            album = optText("album", 160),
+            genre = optText("genre", 80),
+            durationMs = durationMs,
+            thumbnailUrl = thumbnailUrl,
+        )
+        val coverName = optText("coverFile", 120)
+            ?.takeIf { !it.contains('/') && !it.contains('\\') }
+        val coverFile = coverName?.let { name ->
+            val candidate = File(directory, name)
+            runCatching {
+                candidate.takeIf {
+                    it.isFile &&
+                        it.length() in 1L..ArtworkStore.MAX_INPUT_BYTES.toLong() &&
+                        it.canonicalFile.parentFile == directory.canonicalFile
+                }
+            }.getOrNull()
+        }
+        return metadata to coverFile
+    }
+
     companion object {
         private val workerMutex = Mutex()
         private const val MAX_WORK_BYTES = 1024L * 1024 * 1024
+        private const val MAX_META_JSON_BYTES = 64L * 1024L
         private const val MIN_FREE_STORAGE_BYTES = 150L * 1024L * 1024L
         private const val WAKELOCK_SLICE_MS = 30L * 60L * 1000L
         private const val MAX_STALL_MS = 15L * 60L * 1000L

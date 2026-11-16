@@ -24,7 +24,8 @@ data class SearchHit(
     val kind: SearchKind = SearchKind.SONGS,
     val channelIsVerified: Boolean = false,
     val artist: String? = null,
-    val itemCount: Int? = null
+    val itemCount: Int? = null,
+    val album: String? = null,
 )
 
 data class YoutubeSearchState(
@@ -163,7 +164,7 @@ object YoutubeSearchJson {
             val thumbnail = item.get("thumbnail")?.takeIf { it.isTextual }?.asText()?.takeIf(ThumbnailPolicy::allowed)
                 ?: item.path("thumbnails").takeIf { it.isArray }?.asSequence()?.take(32)?.mapNotNull {
                     it.path("url").takeIf { url -> url.isTextual }?.asText()?.takeIf(ThumbnailPolicy::allowed)
-                }?.firstOrNull()
+                }?.lastOrNull()
             hits[id] = SearchHit(
                 videoId = id, title = title, channel = channel,
                 durationSeconds = item.get("duration")?.takeIf { it.isNumber && it.asDouble().isFinite() && it.asDouble() >= 0 && it.asDouble() <= 366.0 * 24 * 60 * 60 }?.asLong(),
@@ -171,10 +172,11 @@ object YoutubeSearchJson {
                 url = if (kind == SearchKind.SONGS) "https://www.youtube.com/watch?v=$id" else "https://www.youtube.com/playlist?list=$id",
                 kind = kind,
                 channelIsVerified = item.path("channel_is_verified").asBoolean(false),
-                artist = item.get("artist")?.takeIf { it.isTextual }?.asText()?.let { displayText(it, 160) },
+                artist = item.get("artist")?.takeIf { it.isTextual }?.asText()?.let { displayText(it, 160) }?.takeIf { it.isNotBlank() },
                 itemCount = sequenceOf("playlist_count", "n_entries").mapNotNull { key ->
                     item.get(key)?.takeIf { it.isIntegralNumber && it.canConvertToInt() }?.asInt()?.takeIf { it in 0..100_000 }
-                }.firstOrNull()
+                }.firstOrNull(),
+                album = item.get("album")?.takeIf { it.isTextual }?.asText()?.let { displayText(it, 160) }?.takeIf { it.isNotBlank() },
             )
             if (hits.size == limit) break
         }

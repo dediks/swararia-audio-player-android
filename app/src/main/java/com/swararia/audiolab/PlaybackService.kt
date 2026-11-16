@@ -631,7 +631,14 @@ class PlaybackService : MediaSessionService() {
         MediaItem.Builder()
             .setMediaId(entry.numericId.toString())
             .setUri(Uri.parse(entry.uriString))
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(entry.title).build())
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(entry.title)
+                    .setArtist(entry.artist?.trim()?.takeIf { it.isNotEmpty() })
+                    .setAlbumTitle(entry.album?.trim()?.takeIf { it.isNotEmpty() })
+                    .setGenre(entry.genre?.trim()?.takeIf { it.isNotEmpty() })
+                    .build(),
+            )
             .build()
     }
 

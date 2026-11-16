@@ -97,4 +97,31 @@ class MusicMetadataTests(unittest.TestCase):
         self.assertNotIn('channel',hit)
         self.assertEqual('Youtube',hit.get('ie_key'))
 
+    def test_song_extracts_album_when_present_in_music_renderer(self):
+        spec=importlib.util.spec_from_file_location('swararia_music_test',PLUGIN)
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        renderer={
+            'playlistItemData':{'videoId':'BaW_jenozKc'},
+            'flexColumns':[
+                {'musicResponsiveListItemFlexColumnRenderer':{'text':{'runs':[{'text':'Song title'}]}}},
+                {'musicResponsiveListItemFlexColumnRenderer':{'text':{'runs':[
+                    {'text':'Artist A','navigationEndpoint':{'browseEndpoint':{'browseId':'UCabcdefghijklmnopqrstuv'}}},
+                    {'text':' • '},
+                    {'text':'Album X','navigationEndpoint':{'browseEndpoint':{'browseId':'MPREb_1234567890'}}},
+                    {'text':' • '},
+                    {'text':'3:42'},
+                ]}}},
+            ],
+            'thumbnail':{'musicThumbnailRenderer':{'thumbnail':{'thumbnails':[
+                {'url':'https://lh3.googleusercontent.com/small=w60-h60'},
+                {'url':'https://yt3.googleusercontent.com/cover=w544-h544'},
+            ]}}},
+        }
+        hit=module.SwarariaMusicSearchIE()._music_reponsive_list_entry(renderer)
+        self.assertEqual('Artist A',hit.get('artist'))
+        self.assertEqual('Album X',hit.get('album'))
+        self.assertEqual(222,hit.get('duration'))
+        self.assertEqual('https://yt3.googleusercontent.com/cover=w544-h544',hit.get('thumbnail'))
+        self.assertNotIn('channel',hit)
+
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -55,4 +55,21 @@ class YoutubeSearchTest {
         assertEquals(42L, hit.javaClass.getMethod("getDurationSeconds").invoke(hit))
         assertEquals("https://www.youtube.com/watch?v=BaW_jenozKc", hit.javaClass.getMethod("getUrl").invoke(hit))
     }
+    @Test fun songSearchPreservesAlbumAndHighestAllowedThumbnail() {
+        val longAlbum = "x".repeat(400)
+        val json = """{"entries":[
+          {"id":"BaW_jenozKc","title":"Song A","artist":"Artist A","album":"$longAlbum","duration":205,
+           "thumbnails":[
+             {"url":"https://i.ytimg.com/vi/BaW_jenozKc/default.jpg","width":120},
+             {"url":"https://yt3.googleusercontent.com/art=w544-h544","width":544},
+             {"url":"http://127.0.0.1/unsafe.jpg","width":999}
+           ]}
+        ]}"""
+        val hit = YoutubeSearchJson.parse(json, SearchKind.SONGS).single()
+        assertEquals("Artist A", hit.artist)
+        assertNotNull(hit.album)
+        assertTrue(hit.album!!.length <= 160)
+        assertEquals("https://yt3.googleusercontent.com/art=w544-h544", hit.thumbnailUrl)
+        assertEquals(205L, hit.durationSeconds)
+    }
 }

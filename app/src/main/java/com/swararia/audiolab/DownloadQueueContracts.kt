@@ -30,6 +30,7 @@ interface DownloadQueueRepository {
     suspend fun requeueJobs(ids: List<Long>): String? = null
     suspend fun cancelQueuedJobs(ids: List<Long>): Int = 0
     suspend fun removeJobs(ids: List<Long>): Int = 0
+    suspend fun updateResolvedMetadata(id: Long, title: String?, thumbnailUrl: String?) {}
     /** Invoke once at service/process startup, never during a live worker. */
     suspend fun recoverInterrupted()
 }

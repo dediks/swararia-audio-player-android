@@ -1432,8 +1432,14 @@ private fun CatalogResult(
                 val channelLabel = hit.channel?.takeIf { it.isNotBlank() }?.let { ch ->
                     if (hit.channelIsVerified) "✓ $ch" else ch
                 }
+                val creatorLabel = if (hit.kind == SearchKind.SONGS) {
+                    hit.artist?.takeIf { it.isNotBlank() } ?: channelLabel
+                } else {
+                    channelLabel
+                }
+                val albumLabel = if (hit.kind == SearchKind.SONGS) hit.album?.takeIf { it.isNotBlank() } else null
                 Text(
-                    text = listOfNotNull(channelLabel, details).joinToString(" · "),
+                    text = listOfNotNull(creatorLabel, albumLabel, details).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

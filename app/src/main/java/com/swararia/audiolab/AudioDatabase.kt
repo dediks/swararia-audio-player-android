@@ -90,7 +90,7 @@ interface TrackDao {
     @Query("UPDATE tracks SET artworkKey = :key WHERE id = :id") suspend fun setArtwork(id: Long, key: String)
     @Query("SELECT * FROM tracks WHERE metadataCheckedAt IS NULL ORDER BY id DESC LIMIT :limit")
     suspend fun unscannedMetadata(limit: Int = 50): List<AudioTrack>
-    @Query("UPDATE tracks SET durationMs = COALESCE(durationMs, :durationMs), artist = :artist, album = :album, genre = :genre, metadataCheckedAt = :checkedAt WHERE id = :id")
+    @Query("UPDATE tracks SET durationMs = COALESCE(durationMs, :durationMs), artist = COALESCE(:artist, artist), album = COALESCE(:album, album), genre = COALESCE(:genre, genre), metadataCheckedAt = :checkedAt WHERE id = :id")
     suspend fun updateMetadata(id: Long, durationMs: Long?, artist: String?, album: String?, genre: String?, checkedAt: Long)
     @Query("SELECT * FROM tracks WHERE sha256 = :sha256 AND sizeBytes = :sizeBytes ORDER BY id ASC LIMIT 1")
     suspend fun findBySha256AndSize(sha256: String, sizeBytes: Long): AudioTrack?

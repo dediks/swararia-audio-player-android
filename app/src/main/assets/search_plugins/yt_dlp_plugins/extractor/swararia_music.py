@@ -14,6 +14,8 @@ class SwarariaMusicSearchIE(YoutubeMusicSearchURLIE, plugin_name='swararia_metad
         fixed = renderer.get('fixedColumns') or []
         texts = []
         artists = []
+        album = None
+        is_song = bool(traverse_obj(renderer, ('playlistItemData', 'videoId')))
         for index, column in enumerate(columns):
             runs = traverse_obj(column, ('musicResponsiveListItemFlexColumnRenderer', 'text', 'runs')) or []
             for run in runs:
@@ -22,8 +24,22 @@ class SwarariaMusicSearchIE(YoutubeMusicSearchURLIE, plugin_name='swararia_metad
                     continue
                 texts.append(text)
                 browse_id = traverse_obj(run, ('navigationEndpoint', 'browseEndpoint', 'browseId'))
-                if index > 0 and isinstance(browse_id, str) and browse_id.startswith('UC'):
+                page_type = traverse_obj(run, (
+                    'navigationEndpoint', 'browseEndpoint', 'browseEndpointContextSupportedConfigs',
+                    'browseEndpointContextMusicConfig', 'pageType',
+                ))
+                if index > 0 and (
+                    page_type == 'MUSIC_PAGE_TYPE_ARTIST'
+                    or (isinstance(browse_id, str) and browse_id.startswith('UC'))
+                ):
                     artists.append(text)
+                elif is_song and index > 0 and album is None and (
+                    page_type == 'MUSIC_PAGE_TYPE_ALBUM'
+                    or (isinstance(browse_id, str) and browse_id.startswith('MPREb_'))
+                ):
+                    cleaned_album = text.strip()
+                    if cleaned_album:
+                        album = cleaned_album
         for column in fixed:
             for run in traverse_obj(column, ('musicResponsiveListItemFixedColumnRenderer', 'text', 'runs')) or []:
                 if isinstance(run, dict) and isinstance(run.get('text'), str):
@@ -33,6 +49,8 @@ class SwarariaMusicSearchIE(YoutubeMusicSearchURLIE, plugin_name='swararia_metad
             info['duration'] = duration
         if artists:
             info['artist'] = ', '.join(dict.fromkeys(artists))
+        if album and is_song:
+            info['album'] = album
         thumbs = traverse_obj(renderer, ('thumbnail', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails')) or []
         if thumbs:
             info['thumbnails'] = thumbs

@@ -66,15 +66,15 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                 reader.setDataSource(context, uri)
             }
             val durationMs = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-            val rawArtist = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
-                ?: reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)
-            val rawAlbum = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
-            val rawGenre = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE)
+            val artist = LibraryRules.sanitizedTag(reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST), 120)
+                ?: LibraryRules.sanitizedTag(reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST), 120)
+            val album = LibraryRules.sanitizedTag(reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM), 120)
+            val genre = LibraryRules.sanitizedTag(reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE), 60)
             ExtractedAudioMetadata(
                 durationMs = durationMs,
-                artist = LibraryRules.sanitizedTag(rawArtist, 120),
-                album = LibraryRules.sanitizedTag(rawAlbum, 120),
-                genre = LibraryRules.sanitizedTag(rawGenre, 60),
+                artist = artist,
+                album = album,
+                genre = genre,
             )
         } finally {
             reader.release()
@@ -82,6 +82,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
     }.getOrDefault(ExtractedAudioMetadata(null, null, null, null))
 
     private val artwork = ArtworkStore(context)
+    private val pendingDownloadMetadata = java.util.concurrent.ConcurrentHashMap<Long, DownloadedAudioMetadata>()
 
     override suspend fun delete(trackId: Long): Unit = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
@@ -146,10 +147,23 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         }
     }
 
-    override suspend fun attachArtwork(trackId: Long, thumbnailUrl: String?): AudioTrack? = withContext(Dispatchers.IO) {
+    override suspend fun attachArtwork(trackId: Long, thumbnailUrl: String?): AudioTrack? =
+        attachArtwork(trackId, thumbnailUrl, localArtworkFile = null)
+
+    suspend fun attachArtwork(
+        trackId: Long,
+        thumbnailUrl: String?,
+        localArtworkFile: File? = null,
+    ): AudioTrack? = withContext(Dispatchers.IO) {
         val snapshot = database.tracks().find(trackId) ?: return@withContext null
         if (ArtworkStore.resolve(context, snapshot.artworkKey) != null) return@withContext snapshot
-        val key = embeddedArtwork(Uri.parse(snapshot.uri))
+        val localKey = localArtworkFile?.takeIf {
+            it.isFile && it.length() in 1L..ArtworkStore.MAX_INPUT_BYTES.toLong()
+        }?.let { file ->
+            runCatching { file.readBytes() }.getOrNull()?.let(artwork::cacheEmbedded)
+        }
+        val key = localKey
+            ?: embeddedArtwork(Uri.parse(snapshot.uri))
             ?: artwork.cacheThumbnail(thumbnailUrl)
             ?: return@withContext snapshot
         mutationMutex.withLock {
@@ -361,7 +375,12 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             } else uri
             val parsedUri = Uri.parse(finalUri)
             val name = if (isLegacyUri(finalUri)) legacyStorage.actualName(finalUri) else actualName(parsedUri)
-            val meta = inspectAudioMetadata(parsedUri)
+            val probed = inspectAudioMetadata(parsedUri)
+            val fallback = pendingDownloadMetadata[id]
+            val durationMs = probed.durationMs ?: fallback?.durationMs?.takeIf { it > 0L }
+            val artist = probed.artist ?: LibraryRules.sanitizedTag(fallback?.artist, 120)
+            val album = probed.album ?: LibraryRules.sanitizedTag(fallback?.album, 120)
+            val genre = probed.genre ?: LibraryRules.sanitizedTag(fallback?.genre, 60)
             val digest = if (isManagedUri(finalUri)) computeUriSha256(parsedUri) else null
             val checkedAt = System.currentTimeMillis()
             val trackId = database.withTransaction {
@@ -369,8 +388,8 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                 check(job.status == "RUNNING" && job.pendingUri == uri && job.publicationBytes == bytes)
                 val insertedId = database.tracks().findByUri(finalUri)?.id ?: database.tracks().insert(
                     AudioTrack(
-                        uri = finalUri, displayName = name, sizeBytes = bytes, durationMs = meta.durationMs,
-                        artist = meta.artist, album = meta.album, genre = meta.genre, metadataCheckedAt = checkedAt,
+                        uri = finalUri, displayName = name, sizeBytes = bytes, durationMs = durationMs,
+                        artist = artist, album = album, genre = genre, metadataCheckedAt = checkedAt,
                         sha256 = digest,
                     )
                 )
@@ -395,28 +414,40 @@ class MediaLibrary(private val context: Context, private val database: AudioData
     }
 
     /** Durable queue path: old one-argument API remains for non-queue callers. */
-    suspend fun addDownloadedFile(file: File, jobId: Long): AudioTrack = withContext(NonCancellable + Dispatchers.IO) {
+    suspend fun addDownloadedFile(file: File, jobId: Long): AudioTrack =
+        addDownloadedFile(file, jobId, fallbackMetadata = null)
+
+    suspend fun addDownloadedFile(
+        file: File,
+        jobId: Long,
+        fallbackMetadata: DownloadedAudioMetadata? = null,
+    ): AudioTrack = withContext(NonCancellable + Dispatchers.IO) {
         mutationMutex.withLock {
             require(file.isFile && file.length() > 0 && file.extension.lowercase(Locale.ROOT) in AUDIO_TYPES)
             val name = "swararia-${java.util.UUID.randomUUID()}.${file.extension.lowercase(Locale.ROOT)}"
-            val id = DownloadQueuePublication(publicationStore).publish(jobId, name) { uri ->
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                    legacyStorage.setPendingTargetName(uri, file.name)
-                    legacyStorage.writePendingFromFile(uri, file)
-                } else {
-                    // URI is journaled before restoring the friendly name; pre-association lookup keeps its unique marker.
-                    check(resolver.update(Uri.parse(uri), ContentValues().apply {
-                        put(MediaStore.Audio.Media.DISPLAY_NAME, file.name)
-                    }, null, null) == 1)
-                    val descriptor = resolver.openFileDescriptor(Uri.parse(uri), "w") ?: error("Salinan tidak dapat ditulis.")
-                    android.os.ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { destination ->
-                        val copied = file.inputStream().use { it.copyTo(destination, 64 * 1024) }
-                        destination.flush()
-                        destination.fd.sync()
-                        check(copied == file.length())
-                        copied
+            if (fallbackMetadata != null) pendingDownloadMetadata[jobId] = fallbackMetadata
+            val id = try {
+                DownloadQueuePublication(publicationStore).publish(jobId, name) { uri ->
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                        legacyStorage.setPendingTargetName(uri, file.name)
+                        legacyStorage.writePendingFromFile(uri, file)
+                    } else {
+                        // URI is journaled before restoring the friendly name; pre-association lookup keeps its unique marker.
+                        check(resolver.update(Uri.parse(uri), ContentValues().apply {
+                            put(MediaStore.Audio.Media.DISPLAY_NAME, file.name)
+                        }, null, null) == 1)
+                        val descriptor = resolver.openFileDescriptor(Uri.parse(uri), "w") ?: error("Salinan tidak dapat ditulis.")
+                        android.os.ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { destination ->
+                            val copied = file.inputStream().use { it.copyTo(destination, 64 * 1024) }
+                            destination.flush()
+                            destination.fd.sync()
+                            check(copied == file.length())
+                            copied
+                        }
                     }
                 }
+            } finally {
+                pendingDownloadMetadata.remove(jobId)
             }
             checkNotNull(database.tracks().find(id))
         }
@@ -645,10 +676,16 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             for (track in pending) {
                 currentCoroutineContext().ensureActive()
                 val uri = runCatching { Uri.parse(track.uri) }.getOrNull()
-                val meta = if (uri != null && isManagedUri(track.uri)) inspectAudioMetadata(uri)
+                val validManaged = uri != null && isManagedUri(track.uri)
+                val meta = if (validManaged) inspectAudioMetadata(uri!!)
                 else ExtractedAudioMetadata(null, null, null, null)
                 val now = System.currentTimeMillis()
                 database.tracks().updateMetadata(track.id, meta.durationMs, meta.artist, meta.album, meta.genre, now)
+                if (validManaged && ArtworkStore.resolve(context, track.artworkKey) == null) {
+                    embeddedArtwork(uri!!)?.let { key ->
+                        database.tracks().setArtwork(track.id, key)
+                    }
+                }
             }
         }
         val attempted = HashSet<Long>()
