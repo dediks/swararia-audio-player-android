@@ -107,4 +107,16 @@ class LocalFohRulesTest {
         assertEquals("Pads", LocalPlayerViewMode.PADS.label)
         assertEquals("Art", LocalPlayerViewMode.ART.label)
     }
+
+    @Test
+    fun playbackModeIconsMapDistinctVectorsForAllModes() {
+        val once = UiIcons.forPlaybackMode(PlaybackMode.ONCE)
+        val cont = UiIcons.forPlaybackMode(PlaybackMode.CONTINUE)
+        val loop = UiIcons.forPlaybackMode(PlaybackMode.LOOP_TRACK)
+
+        assertEquals("ModeOnce", once.name)
+        assertEquals("ModeContinue", cont.name)
+        assertEquals("ModeLoopTrack", loop.name)
+        assertEquals(3, setOf(once, cont, loop).size)
+    }
 }

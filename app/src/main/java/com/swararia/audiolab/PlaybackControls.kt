@@ -427,13 +427,14 @@ fun PlaybackModeBar(
                         stateDescription = state.mode?.label ?: "Unavailable"
                     },
                 ) {
-                    Icon(UiIcons.Loop, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
+                    Icon(state.mode?.let(UiIcons::forPlaybackMode) ?: UiIcons.Loop, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
                     Text(state.mode?.label ?: "Mode")
                     Spacer(Modifier.width(8.dp)); Icon(UiIcons.ChevronDown, null, Modifier.size(18.dp))
                 }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     PlaybackMode.entries.forEach { mode ->
                         DropdownMenuItem(
+                            leadingIcon = { Icon(UiIcons.forPlaybackMode(mode), null, Modifier.size(18.dp)) },
                             text = { Text(mode.label + if (mode == state.mode) " (selected)" else "") },
                             onClick = {
                                 expanded = false

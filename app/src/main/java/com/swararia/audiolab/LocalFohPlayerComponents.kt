@@ -520,18 +520,15 @@ internal fun LocalFohTrackSummaryCard(
                         ),
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 36.dp)
+                            .heightIn(min = 38.dp)
                             .semantics { selected = selectedMode },
                     ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) {
-                            Text(
-                                text = LocalFohRules.modeButtonLabel(mode),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (selectedMode) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selectedMode) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 4.dp, vertical = 7.dp)) {
+                            Icon(
+                                imageVector = UiIcons.forPlaybackMode(mode),
+                                contentDescription = LocalFohRules.modeButtonLabel(mode),
+                                tint = if (selectedMode) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp),
                             )
                         }
                     }

@@ -117,6 +117,31 @@ internal object UiIcons {
         moveTo(4f, 8f); lineTo(19f, 8f); lineTo(16f, 5f)
         moveTo(20f, 16f); lineTo(5f, 16f); lineTo(8f, 19f)
     }
+    val ModeOnce = outline("ModeOnce") {
+        moveTo(3.5f, 12f); lineTo(12.5f, 12f)
+        moveTo(9.5f, 8.5f); lineTo(13f, 12f); lineTo(9.5f, 15.5f)
+        moveTo(15.5f, 9f); lineTo(20.5f, 9f); lineTo(20.5f, 15f); lineTo(15.5f, 15f); close()
+    }
+    val ModeContinue = outline("ModeContinue") {
+        moveTo(4f, 6.5f); lineTo(18f, 6.5f)
+        moveTo(4f, 11.5f); lineTo(18f, 11.5f)
+        moveTo(4f, 16.5f); lineTo(11f, 16.5f)
+        moveTo(14.5f, 14f); lineTo(20f, 17f); lineTo(14.5f, 20f); close()
+    }
+    val ModeLoopTrack = outline("ModeLoopTrack") {
+        moveTo(4f, 11.5f); lineTo(4f, 8.5f); curveTo(4f, 6.2f, 5.5f, 5.5f, 8f, 5.5f); lineTo(19f, 5.5f)
+        moveTo(16.2f, 3f); lineTo(19.2f, 5.5f); lineTo(16.2f, 8f)
+        moveTo(20f, 12.5f); lineTo(20f, 15.5f); curveTo(20f, 17.8f, 18.5f, 18.5f, 16f, 18.5f); lineTo(5f, 18.5f)
+        moveTo(7.8f, 16f); lineTo(4.8f, 18.5f); lineTo(7.8f, 21f)
+        moveTo(10.8f, 10.7f); lineTo(12.2f, 9.5f); lineTo(12.2f, 14.5f)
+        moveTo(10.8f, 14.5f); lineTo(13.6f, 14.5f)
+    }
+
+    fun forPlaybackMode(mode: PlaybackMode): ImageVector = when (mode) {
+        PlaybackMode.ONCE -> ModeOnce
+        PlaybackMode.CONTINUE -> ModeContinue
+        PlaybackMode.LOOP_TRACK -> ModeLoopTrack
+    }
     val Fade = outline("Fade") {
         moveTo(3f, 5f); lineTo(7f, 5f); lineTo(14f, 16f); lineTo(21f, 19f)
         moveTo(3f, 21f); lineTo(21f, 21f)
