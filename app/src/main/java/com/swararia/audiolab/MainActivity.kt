@@ -49,12 +49,12 @@ class MainActivity : ComponentActivity() {
             model.message("Izin penyimpanan diperlukan di Android 8–9 untuk menyimpan file ke Music/SwarariaAudioLab.")
         }
     }
-    private val chooseAudio = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) whenOnlineIdle {
+    private val chooseAudio = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) whenOnlineIdle {
             withIngestPermissions {
                 // The picker/permission dialog can outlive the state seen by the button.
                 whenOnlineIdle {
-                    runCatching { IngestService.importAudio(this, uri) }
+                    runCatching { IngestService.importAudioBatch(this, uris) }
                         .onFailure { model.message(it.message ?: "Impor tidak dapat dimulai.") }
                 }
             }

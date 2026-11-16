@@ -429,7 +429,9 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         file.inputStream().use { publish(it, file.name, mime) }
     }
 
-    suspend fun importAudio(source: Uri): AudioTrack = withContext(Dispatchers.IO) {
+    suspend fun importAudio(source: Uri): AudioTrack = importAudioWithOutcome(source).track
+
+    suspend fun importAudioWithOutcome(source: Uri): UploadImportOutcome = withContext(Dispatchers.IO) {
         var incomingName: String? = null
         resolver.query(source, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) incomingName = cursor.getString(0)
@@ -453,8 +455,15 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             title.append(part); byteCount += size
         }
         val name = LibraryRules.renamedDisplayName("audio.$extension", title.toString().ifBlank { "Audio" })
+        val (sha256, sizeBytes) = computeUriSha256AndSize(source)
+            ?: error("File pilihan tidak dapat dibaca.")
+        require(sizeBytes > 0L) { "Sumber audio kosong; tidak ada file yang ditambahkan." }
+        findTrackBySha256AndSize(sha256, sizeBytes)?.let { existing ->
+            return@withContext UploadImportOutcome.Deduplicated(existing)
+        }
         val input = resolver.openInputStream(source) ?: error("File pilihan tidak dapat dibaca.")
-        input.use { publish(it, name, AUDIO_TYPES.getValue(extension)) }
+        val created = input.use { publish(it, name, AUDIO_TYPES.getValue(extension), expectedSha256 = sha256) }
+        UploadImportOutcome.Created(created)
     }
 
     private suspend fun publish(
@@ -809,6 +818,24 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         }
         require(retrieverOk) { "Metadata audio gagal diverifikasi." }
     }
+
+    private suspend fun computeUriSha256AndSize(uri: Uri): Pair<String, Long>? = runCatching {
+        resolver.openInputStream(uri)?.use { input ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            val buffer = ByteArray(64 * 1024)
+            var total = 0L
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read > 0) {
+                    digest.update(buffer, 0, read)
+                    total += read
+                }
+            }
+            shaHex(digest.digest()) to total
+        }
+    }.getOrNull()
 
     private fun computeUriSha256(uri: Uri): String? = runCatching {
         resolver.openInputStream(uri)?.use { input ->

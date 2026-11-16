@@ -1,6 +1,7 @@
 package com.swararia.audiolab
 
 import android.app.*
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -146,11 +147,53 @@ class IngestService : Service() {
                 cleanAbandonedWorkspaces()
                 when (intent?.action) {
                     ACTION_IMPORT -> {
-                        ensureSufficientStorage()
-                        val uri = intent.data ?: error("File pilihan tidak ditemukan.")
-                        enterProtectedPhase("Menyalin audio pilihan...")
-                        val track = withContext(NonCancellable) { library.importAudio(uri) }
-                        finished("Impor selesai", track.displayName)
+                        val uris = extractImportUris(intent)
+                        require(uris.isNotEmpty()) { "File pilihan tidak ditemukan." }
+                        if (uris.size == 1) {
+                            ensureSufficientStorage()
+                            enterProtectedPhase("Menyalin audio pilihan...")
+                            val outcome = withContext(NonCancellable) { library.importAudioWithOutcome(uris.single()) }
+                            val msg = if (outcome is UploadImportOutcome.Deduplicated) {
+                                "Sudah ada di pustaka: ${outcome.track.displayName}"
+                            } else {
+                                outcome.track.displayName
+                            }
+                            finished("Impor selesai", msg)
+                        } else {
+                            var importedCount = 0
+                            var duplicateCount = 0
+                            var failedCount = 0
+                            for ((idx, uri) in uris.withIndex()) {
+                                currentCoroutineContext().ensureActive()
+                                checkNotCanceled()
+                                ensureSufficientStorage()
+                                report(
+                                    stage = "Mengimpor (${idx + 1}/${uris.size})...",
+                                    progress = idx.toFloat() / uris.size.toFloat(),
+                                    detail = "$importedCount masuk, $duplicateCount sudah ada",
+                                    cancelable = true,
+                                )
+                                try {
+                                    when (library.importAudioWithOutcome(uri)) {
+                                        is UploadImportOutcome.Created -> importedCount++
+                                        is UploadImportOutcome.Deduplicated -> duplicateCount++
+                                    }
+                                } catch (cancel: CancellationException) {
+                                    throw cancel
+                                } catch (_: Exception) {
+                                    failedCount++
+                                }
+                            }
+                            if (importedCount == 0 && duplicateCount == 0 && failedCount > 0) {
+                                throw IngestUserMessageException(IngestFailureMessages.IMPORT_FAILED)
+                            }
+                            val parts = buildList {
+                                add("$importedCount lagu masuk pustaka")
+                                if (duplicateCount > 0) add("$duplicateCount sudah ada")
+                                if (failedCount > 0) add("$failedCount dilewati")
+                            }
+                            finished("Impor selesai", parts.joinToString(", "))
+                        }
                     }
                     ACTION_UPDATE -> {
                         report("Menyiapkan mesin...", null)
@@ -670,6 +713,7 @@ class IngestService : Service() {
         private const val MAX_STALL_MS = 15L * 60L * 1000L
         private const val MAX_TOTAL_SESSION_MS = 120L * 60L * 1000L
         private const val STALE_CACHE_MS = 2L * 60L * 60L * 1000L
+        private const val MAX_IMPORT_BATCH_COUNT = 500
         private const val CHANNEL = "audio_ingest"
         private const val NOTIFICATION_ID = 101
         const val ACTION_DOWNLOAD = "com.swararia.audiolab.INGEST_DOWNLOAD"
@@ -721,8 +765,35 @@ class IngestService : Service() {
                 .putExtra(EXTRA_URL, url).putExtra(EXTRA_AUTHORIZED, authorized))
         }
         fun importAudio(context: Context, uri: Uri) {
-            start(context, Intent(context, IngestService::class.java).setAction(ACTION_IMPORT)
-                .setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            importAudioBatch(context, listOf(uri))
+        }
+        fun importAudioBatch(context: Context, uris: List<Uri>) {
+            val distinct = uris.distinct().take(MAX_IMPORT_BATCH_COUNT)
+            require(distinct.isNotEmpty()) { "Pilih minimal satu file audio." }
+            val intent = Intent(context, IngestService::class.java)
+                .setAction(ACTION_IMPORT)
+                .setData(distinct.first())
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (distinct.size > 1) {
+                val clip = ClipData.newUri(context.contentResolver, "audio", distinct.first())
+                for (i in 1 until distinct.size) {
+                    clip.addItem(ClipData.Item(distinct[i]))
+                }
+                intent.clipData = clip
+            }
+            start(context, intent)
+        }
+        private fun extractImportUris(intent: Intent?): List<Uri> {
+            if (intent == null) return emptyList()
+            val collected = LinkedHashSet<Uri>()
+            val clip = intent.clipData
+            if (clip != null) {
+                for (i in 0 until clip.itemCount) {
+                    clip.getItemAt(i).uri?.let { collected.add(it) }
+                }
+            }
+            intent.data?.let { collected.add(it) }
+            return collected.take(MAX_IMPORT_BATCH_COUNT)
         }
         fun update(context: Context) { start(context, Intent(context, IngestService::class.java).setAction(ACTION_UPDATE)) }
         fun cancel(context: Context) {

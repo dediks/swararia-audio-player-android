@@ -40,10 +40,13 @@ internal object IngestFailureMessages {
         "Perangkat memakai halaman memori 16 KB yang belum didukung mesin unduh bawaan."
     const val INSUFFICIENT_STORAGE =
         "Ruang penyimpanan HP hampir penuh. Kosongkan minimal 150 MB lalu coba lagi."
+    const val IMPORT_FAILED =
+        "File audio tidak dapat diimpor. Pastikan format didukung dan tidak rusak."
 
     private val allowedUserMessages = setOf(
         UNSUPPORTED_16KB_PAGE_SIZE,
         INSUFFICIENT_STORAGE,
+        IMPORT_FAILED,
     )
 
     fun sanitize(rawMessage: String?): String =
