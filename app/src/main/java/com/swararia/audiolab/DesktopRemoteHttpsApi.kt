@@ -6,8 +6,10 @@ import java.io.File
 import java.io.IOException
 import java.net.CookieHandler
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URI
+import java.net.URL
 import java.net.URLDecoder
 import java.security.MessageDigest
 import java.security.cert.CertificateException
@@ -15,7 +17,12 @@ import java.security.cert.X509Certificate
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import javax.net.SocketFactory
 import javax.net.ssl.*
+
+interface RemoteHttpsConnectionOpener {
+    fun open(url: URL, targetHost: String): Pair<HttpsURLConnection, SocketFactory?>
+}
 
 /** Trust is scoped to one OOB certificate and endpoint. Default HTTPS hostname verification remains enabled. */
 class DesktopRemoteTrustManager(private val pin: ByteArray, private val host: String) : X509TrustManager {
@@ -38,20 +45,39 @@ class DesktopRemoteTrustManager(private val pin: ByteArray, private val host: St
 
 private class DesktopRemoteSocketFactory(
     private val delegate: SSLSocketFactory,
+    private val boundSocketFactory: SocketFactory? = null,
+    private val connectTimeoutMs: Int = 4000,
     private val registerSocket: (Socket) -> Unit = {},
 ) : SSLSocketFactory() {
     private fun secure(socket: Socket): Socket = (socket as SSLSocket).apply {
         enabledProtocols = supportedProtocols.filter { it == "TLSv1.2" || it == "TLSv1.3" }.toTypedArray()
         registerSocket(this)
     }
+    private fun connectBound(address: InetSocketAddress, local: InetSocketAddress? = null): Socket {
+        val raw = boundSocketFactory!!.createSocket()
+        return try {
+            if (local != null) raw.bind(local)
+            raw.connect(address, connectTimeoutMs)
+            secure(delegate.createSocket(raw, address.hostString, address.port, true))
+        } catch (t: Throwable) {
+            runCatching { raw.close() }
+            throw t
+        }
+    }
     override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
     override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
     override fun createSocket(): Socket = secure(delegate.createSocket())
     override fun createSocket(s: Socket, h: String, p: Int, close: Boolean): Socket = secure(delegate.createSocket(s, h, p, close))
-    override fun createSocket(h: String, p: Int): Socket = secure(delegate.createSocket(h, p))
-    override fun createSocket(h: String, p: Int, l: InetAddress, lp: Int): Socket = secure(delegate.createSocket(h, p, l, lp))
-    override fun createSocket(h: InetAddress, p: Int): Socket = secure(delegate.createSocket(h, p))
-    override fun createSocket(h: InetAddress, p: Int, l: InetAddress, lp: Int): Socket = secure(delegate.createSocket(h, p, l, lp))
+    override fun createSocket(h: String, p: Int): Socket =
+        if (boundSocketFactory != null) connectBound(InetSocketAddress(h, p)) else secure(delegate.createSocket(h, p))
+    override fun createSocket(h: String, p: Int, l: InetAddress, lp: Int): Socket =
+        if (boundSocketFactory != null) connectBound(InetSocketAddress(h, p), InetSocketAddress(l, lp))
+        else secure(delegate.createSocket(h, p, l, lp))
+    override fun createSocket(h: InetAddress, p: Int): Socket =
+        if (boundSocketFactory != null) connectBound(InetSocketAddress(h, p)) else secure(delegate.createSocket(h, p))
+    override fun createSocket(h: InetAddress, p: Int, l: InetAddress, lp: Int): Socket =
+        if (boundSocketFactory != null) connectBound(InetSocketAddress(h, p), InetSocketAddress(l, lp))
+        else secure(delegate.createSocket(h, p, l, lp))
 }
 
 /** Injected port: state ownership stays testable without Android or a listener. */
@@ -85,6 +111,12 @@ interface DesktopRemoteApi {
 class DesktopRemoteHttpsApi(
     private val clientLabelProvider: () -> String = { defaultAndroidClientLabel() },
 ) : DesktopRemoteApi {
+    @Volatile
+    private var connectionOpener: RemoteHttpsConnectionOpener? = null
+
+    fun withConnectionOpener(opener: RemoteHttpsConnectionOpener): DesktopRemoteHttpsApi = apply {
+        connectionOpener = opener
+    }
     override suspend fun pair(pairing: DesktopRemotePairing) = DesktopRemoteJson.grant(
         request(pairing, pairing.invitation(), "/v1/pair", DesktopRemoteJson.pairBody(clientLabelProvider()), 202))
     override suspend fun session(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
@@ -372,17 +404,21 @@ class DesktopRemoteHttpsApi(
                 try {
                     // Do not participate in a process-global cookie store, or mutate it.
                     if (CookieHandler.getDefault() != null) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.PROTOCOL)
+                    val targetHost = pairing.endpoint.substringBefore(':')
                     val context = SSLContext.getInstance("TLS").apply {
-                        init(null, arrayOf(DesktopRemoteTrustManager(pairing.fingerprint(), pairing.endpoint.substringBefore(':'))), null)
+                        init(null, arrayOf(DesktopRemoteTrustManager(pairing.fingerprint(), targetHost)), null)
                     }
-                    val connection = URI("https://${pairing.endpoint}$path").toURL().openConnection() as HttpsURLConnection
+                    val targetUrl = URI("https://${pairing.endpoint}$path").toURL()
+                    val opened = connectionOpener?.open(targetUrl, targetHost)
+                    val connection = opened?.first ?: (targetUrl.openConnection() as HttpsURLConnection)
+                    val boundFactory = opened?.second
                     active.set(connection)
                     if (!continuation.isActive || cancelled.get()) {
                         abortTransport()
                         return@launch
                     }
                     connection.apply {
-                        sslSocketFactory = DesktopRemoteSocketFactory(context.socketFactory) { socket ->
+                        sslSocketFactory = DesktopRemoteSocketFactory(context.socketFactory, boundFactory) { socket ->
                             activeSocket.set(socket)
                             if (cancelled.get() || !continuation.isActive) {
                                 runCatching { socket.close() }

@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -99,6 +100,7 @@ class PlaybackService : MediaSessionService() {
     private val playbackPrefs by lazy { getSharedPreferences(PREFERENCES, MODE_PRIVATE) }
     private val audioManager by lazy { getSystemService(AudioManager::class.java) }
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var remoteWifiLock: WifiManager.WifiLock? = null
     private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         handleAudioFocusChange(focusChange)
     }
@@ -1499,11 +1501,13 @@ class PlaybackService : MediaSessionService() {
                 val rawEndpoint = intent.getStringExtra(EXTRA_REMOTE_ENDPOINT).orEmpty()
                 remoteEndpointLabel = rawEndpoint.filter { !it.isISOControl() }.take(32).ifBlank { "LAN" }
                 remoteServerForegroundActive = true
+                acquireRemoteWifiLock()
                 ensureRemoteServerForeground()
                 return START_NOT_STICKY
             }
             ACTION_REMOTE_SERVER_STOP -> {
                 remoteServerForegroundActive = false
+                releaseRemoteWifiLock()
                 getSystemService(NotificationManager::class.java).cancel(REMOTE_SERVER_NOTIFICATION_ID)
                 val playerActive = appPlayer?.let {
                     it.isPlaying || it.playWhenReady || it.playbackState == Player.STATE_BUFFERING
@@ -1526,7 +1530,32 @@ class PlaybackService : MediaSessionService() {
         }
     }
     override fun isPlaybackOngoing(): Boolean = remoteServerForegroundActive || savedLocal != null || super.isPlaybackOngoing()
+    private fun acquireRemoteWifiLock() {
+        runCatching {
+            if (remoteWifiLock?.isHeld == true) return
+            val wifiManager = applicationContext.getSystemService(WifiManager::class.java) ?: return
+            val lockMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                @Suppress("DEPRECATION")
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
+            remoteWifiLock = wifiManager.createWifiLock(lockMode, "$packageName:remote-foh").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }
+    }
+
+    private fun releaseRemoteWifiLock() {
+        runCatching {
+            if (remoteWifiLock?.isHeld == true) remoteWifiLock?.release()
+        }
+        remoteWifiLock = null
+    }
+
     override fun onDestroy() {
+        releaseRemoteWifiLock()
         (application as? SwarariaApp)?.container?.remoteServerController?.detachPlaybackHost(remotePlaybackHost)
         playbackPrefs.unregisterOnSharedPreferenceChangeListener(prefListener)
         abandonPlaybackAudioFocus()

@@ -72,10 +72,15 @@ for apk in sorted((ROOT/'app/build/outputs/apk/debug').glob('*.apk')):
     badging = run([str(TOOLS/'aapt2'), 'dump', 'badging', str(apk)])
     tree = run([str(TOOLS/'aapt2'), 'dump', 'xmltree', str(apk), '--file', 'AndroidManifest.xml'])
     assert "package: name='com.swararia.audiolab.spike'" in badging
-    assert re.search(r"(?m)^(?:minSdkVersion|sdkVersion):'29'$", badging)
+    assert re.search(r"(?m)^(?:minSdkVersion|sdkVersion):'26'$", badging)
     assert 'android:extractNativeLibs' in tree
-    forbidden = ['MANAGE_EXTERNAL_STORAGE', 'WRITE_EXTERNAL_STORAGE', 'READ_EXTERNAL_STORAGE', 'READ_MEDIA_AUDIO']
+    forbidden = ['MANAGE_EXTERNAL_STORAGE', 'READ_MEDIA_AUDIO', 'CAMERA']
     assert not any('android.permission.' + permission in tree for permission in forbidden)
+    for legacy_perm in ['WRITE_EXTERNAL_STORAGE', 'READ_EXTERNAL_STORAGE']:
+        perm_name = 'android.permission.' + legacy_perm
+        if perm_name in tree:
+            section = tree.split(perm_name, 1)[1].split('E: ', 1)[0]
+            assert 'maxSdkVersion' in section and ('=28' in section or '0x1c' in section), f'{perm_name} must set maxSdkVersion=28'
     with zipfile.ZipFile(apk) as archive:
         assert archive.testzip() is None
         assert len(archive.namelist()) == len(set(archive.namelist())), 'Duplicate ZIP entries'

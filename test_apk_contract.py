@@ -9,7 +9,7 @@ class AndroidPackageContract(unittest.TestCase):
         aapt = ROOT/'.toolchain/android-sdk/build-tools/36.0.0/aapt2'
         manifest = subprocess.check_output([str(aapt),'dump','badging',str(APK)],text=True)
         self.assertIn("package: name='com.swararia.audiolab.spike'",manifest)
-        self.assertRegex(manifest, r"(?m)^(?:minSdkVersion|sdkVersion):'29'$")
+        self.assertRegex(manifest, r"(?m)^(?:minSdkVersion|sdkVersion):'26'$")
         self.assertIn("targetSdkVersion:'36'",manifest)
         self.assertIn("launchable-activity: name='com.swararia.audiolab.MainActivity'",manifest)
         with zipfile.ZipFile(APK) as z:
@@ -24,8 +24,13 @@ class AndroidPackageContract(unittest.TestCase):
         tree=subprocess.check_output([str(aapt),'dump','xmltree',str(APK),'--file','AndroidManifest.xml'],text=True)
         self.assertIn('com.swararia.audiolab.IngestService',tree)
         self.assertNotIn('android.permission.MANAGE_EXTERNAL_STORAGE',tree)
-        self.assertNotIn('android.permission.WRITE_EXTERNAL_STORAGE',tree)
         self.assertNotIn('android.permission.READ_MEDIA_AUDIO',tree)
+        self.assertNotIn('android.permission.CAMERA',tree)
+        for legacy_perm in ('android.permission.WRITE_EXTERNAL_STORAGE', 'android.permission.READ_EXTERNAL_STORAGE'):
+            if legacy_perm in tree:
+                section = tree.split(legacy_perm, 1)[1].split('E: ', 1)[0]
+                self.assertIn('maxSdkVersion', section)
+                self.assertTrue('=28' in section or '0x1c' in section, f'{legacy_perm} must be capped at maxSdkVersion=28')
     def test_local_playback_service_is_in_the_installable_package(self):
         self.assertTrue(APK.is_file())
         aapt=ROOT/'.toolchain/android-sdk/build-tools/36.0.0/aapt2'

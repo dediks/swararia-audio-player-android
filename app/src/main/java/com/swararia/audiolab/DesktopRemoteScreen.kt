@@ -28,6 +28,17 @@ fun DesktopRemoteScreen(
     session: DesktopRemoteSession,
     modifier: Modifier = Modifier,
     qrScanRequestTick: Int = 0,
+    peerState: RemoteWifiPeerState = RemoteWifiPeerState(),
+    wifiStatus: RemoteWifiTransportStatus = RemoteWifiTransportStatus(),
+    mdnsServers: List<RemoteMdnsServer> = emptyList(),
+    onHandleQrInput: (String, (String) -> Unit) -> Unit = { raw, direct -> direct(raw) },
+    onConfirmLegacyWifiJoin: ((String) -> Unit) -> Unit = {},
+    onCancelLegacyWifiJoin: () -> Unit = {},
+    onReleasePeerNetwork: () -> Unit = {},
+    onDiscoverP2p: () -> Unit = {},
+    onConnectP2p: (String) -> Unit = {},
+    onDisconnectP2p: () -> Unit = {},
+    onRequireLegacyStoragePermission: (() -> Unit) -> Unit = { it() },
 ) {
     val state by session.state.collectAsStateWithLifecycle()
     var input by rememberSaveable { mutableStateOf("") }
@@ -72,7 +83,7 @@ fun DesktopRemoteScreen(
                     session.visible(lease)
                     pendingScanned?.let { scanned ->
                         pendingScanned = null
-                        session.connect(scanned)
+                        onHandleQrInput(scanned) { direct -> session.connect(direct) }
                     }
                 }
                 Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> session.hidden(lease)
@@ -122,7 +133,7 @@ fun DesktopRemoteScreen(
                         input = ""
                         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
                             pendingScanned = null
-                            session.connect(res.rawText)
+                            onHandleQrInput(res.rawText) { direct -> session.connect(direct) }
                         } else {
                             // Scanner overlay may briefly pause the Activity; deliver right after ON_RESUME restores visibility.
                             pendingScanned = res.rawText
@@ -158,8 +169,11 @@ fun DesktopRemoteScreen(
                     scanFeedback = scanFeedback,
                     manualFeedback = manualFeedback,
                     errorMessage = state.message,
+                    peerState = peerState,
+                    wifiStatus = wifiStatus,
+                    mdnsServers = mdnsServers,
                     onInputChange = {
-                        if (it.length <= 256) {
+                        if (it.length <= 512) {
                             input = it
                             scanFeedback = null
                             manualFeedback = null
@@ -170,7 +184,7 @@ fun DesktopRemoteScreen(
                     onPasteManual = {
                         val pasted = readPlainTextFromClipboard(context)
                         if (pasted != null) {
-                            input = pasted.take(256)
+                            input = pasted.take(512)
                             scanFeedback = null
                             manualFeedback = null
                             pendingScanned = null
@@ -182,8 +196,16 @@ fun DesktopRemoteScreen(
                         scanFeedback = null
                         manualFeedback = null
                         pendingScanned = null
-                        session.connect(input)
+                        onHandleQrInput(input) { direct -> session.connect(direct) }
                     },
+                    onConfirmLegacyWifiJoin = {
+                        onConfirmLegacyWifiJoin { direct -> session.connect(direct) }
+                    },
+                    onCancelLegacyWifiJoin = onCancelLegacyWifiJoin,
+                    onReleasePeerNetwork = onReleasePeerNetwork,
+                    onDiscoverP2p = onDiscoverP2p,
+                    onConnectP2p = onConnectP2p,
+                    onDisconnectP2p = onDisconnectP2p,
                 )
             } else {
                 PendingApprovalCard(
@@ -300,7 +322,11 @@ fun DesktopRemoteScreen(
             downloadState = state.downloads[track.id],
             onCueOrSelect = { handleTrackChoice(track, autoPlay = false) },
             onPlayOrPause = { handleTrackChoice(track, autoPlay = true) },
-            onDownload = { session.downloadTrack(track.id) },
+            onDownload = {
+                onRequireLegacyStoragePermission {
+                    session.downloadTrack(track.id)
+                }
+            },
             onCancelDownload = { session.cancelDownload(track.id) },
         )
     }
@@ -479,6 +505,7 @@ fun DesktopRemoteScreen(
             onConfirm = {
                 showDisconnectConfirm = false
                 session.disconnect()
+                onReleasePeerNetwork()
                 input = ""
             },
             onDismiss = { showDisconnectConfirm = false },

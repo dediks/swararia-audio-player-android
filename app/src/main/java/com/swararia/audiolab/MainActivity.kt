@@ -27,6 +27,7 @@ import com.google.common.util.concurrent.ListenableFuture
 class MainActivity : ComponentActivity() {
     private lateinit var model: AppViewModel
     private var pendingPermissionAction: (() -> Unit)? = null
+    private var pendingLegacyStorageAction: (() -> Unit)? = null
     private var controller by mutableStateOf<MediaController?>(null)
     private var deletionPort: PlaybackDeletion.Queue? = null
     private var deletionListener: Player.Listener? = null
@@ -36,9 +37,21 @@ class MainActivity : ComponentActivity() {
         pendingPermissionAction = null
         action?.invoke()
     }
+    private val legacyStoragePermissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { results ->
+        val action = pendingLegacyStorageAction
+        pendingLegacyStorageAction = null
+        val granted = results.values.all { it } || hasLegacyStoragePermission()
+        if (granted) {
+            action?.invoke()
+        } else {
+            model.message("Izin penyimpanan diperlukan di Android 8–9 untuk menyimpan file ke Music/SwarariaAudioLab.")
+        }
+    }
     private val chooseAudio = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) whenOnlineIdle {
-            withNotificationPermission {
+            withIngestPermissions {
                 // The picker/permission dialog can outlive the state seen by the button.
                 whenOnlineIdle {
                     runCatching { IngestService.importAudio(this, uri) }
@@ -124,13 +137,13 @@ class MainActivity : ComponentActivity() {
                         previewSong = { hit -> withNotificationPermission { whenOnlineIdle { if (pauseForPreview()) model.preview(hit) } } },
                         stopPreview = { model.cancelPreview() }, previewError = { model.previewError() }),
                     onDownload = { url, authorized -> whenQueueReady {
-                        withNotificationPermission { whenQueueReady {
+                        withIngestPermissions { whenQueueReady {
                             model.enqueueDownloads(listOf(DownloadRequest(url, "Audio dari link")), authorized) {
                                 IngestService.ensureBatch(this, it)
                             }
                         } }
                     } },
-                    onImport = { whenOnlineIdle { chooseAudio.launch(arrayOf("audio/*")) } },
+                    onImport = { whenOnlineIdle { withLegacyStoragePermission { whenOnlineIdle { chooseAudio.launch(arrayOf("audio/*")) } } } },
                     onUpdate = { whenOnlineIdle {
                         withNotificationPermission { whenOnlineIdle {
                             runCatching { IngestService.update(this) }
@@ -188,7 +201,7 @@ class MainActivity : ComponentActivity() {
                         jobs = jobs, operationBusy = operationBusy,
                         downloadSettings = downloadSettings,
                         onDownloadBatch = { hits, authorized -> whenQueueReady {
-                            withNotificationPermission { whenQueueReady {
+                            withIngestPermissions { whenQueueReady {
                                 model.enqueueDownloads(hits.filter { it.kind == SearchKind.SONGS }.map {
                                     DownloadRequest(it.url, it.title, it.thumbnailUrl)
                                 }, authorized) { IngestService.ensureBatch(this, it) }
@@ -208,7 +221,7 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onContinueQueue = { whenOnlineIdle {
-                            withNotificationPermission { whenOnlineIdle {
+                            withIngestPermissions { whenOnlineIdle {
                                 model.continueDownloadQueue { IngestService.ensureBatch(this, it) }
                             } }
                         } },
@@ -220,27 +233,27 @@ class MainActivity : ComponentActivity() {
                         onMoveQueuedUp = { jobId -> model.moveDownloadJobUp(jobId) },
                         onMoveQueuedToFront = { jobId -> model.moveDownloadJobToFront(jobId) },
                         onRetryFailed = { id -> whenQueueReady {
-                            withNotificationPermission { whenQueueReady {
+                            withIngestPermissions { whenQueueReady {
                                 model.retryDownloads(id) { IngestService.ensureBatch(this, it) }
                             } }
                         } },
                         onRetryAllFailed = { whenQueueReady {
-                            withNotificationPermission { whenQueueReady {
+                            withIngestPermissions { whenQueueReady {
                                 model.retryAllFailedDownloads { IngestService.ensureBatch(this, it) }
                             } }
                         } },
                         onRetryJob = { jobId -> whenQueueReady {
-                            withNotificationPermission { whenQueueReady {
+                            withIngestPermissions { whenQueueReady {
                                 model.retryDownloadJob(jobId) { IngestService.ensureBatch(this, it) }
                             } }
                         } },
                         onRequeueJob = { jobId -> whenQueueReady {
-                            withNotificationPermission { whenQueueReady {
+                            withIngestPermissions { whenQueueReady {
                                 model.retryDownloadJob(jobId) { IngestService.ensureBatch(this, it) }
                             } }
                         } },
                         onRequeueJobs = { jobIds -> whenQueueReady {
-                            withNotificationPermission { whenQueueReady {
+                            withIngestPermissions { whenQueueReady {
                                 model.requeueDownloadJobs(jobIds) { IngestService.ensureBatch(this, it) }
                             } }
                         } },
@@ -389,6 +402,27 @@ class MainActivity : ComponentActivity() {
             pendingPermissionAction = action
             notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else action()
+    }
+
+    private fun hasLegacyStoragePermission(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) return true
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun withLegacyStoragePermission(action: () -> Unit) {
+        if (hasLegacyStoragePermission()) {
+            action()
+        } else {
+            pendingLegacyStorageAction = action
+            legacyStoragePermissions.launch(
+                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE),
+            )
+        }
+    }
+
+    private fun withIngestPermissions(action: () -> Unit) {
+        withLegacyStoragePermission { withNotificationPermission(action) }
     }
 
     private fun deleteTracks(tracksToDelete: List<AudioTrack>, done: () -> Unit) {

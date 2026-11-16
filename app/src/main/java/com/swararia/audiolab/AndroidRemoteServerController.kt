@@ -6,6 +6,7 @@ import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -63,6 +64,7 @@ data class RemoteServerUiState(
 class AndroidRemoteServerController(
     context: Context,
     private val library: AudioLibraryRepository,
+    private val nsdCoordinator: RemoteNsdCoordinator? = null,
 ) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -225,7 +227,11 @@ class AndroidRemoteServerController(
                     engine.issueWebPin()
                     syncPlaybackStateBeforeRead()
                     startPlaybackForegroundService("$bindIp:${http.actualPort}")
+                    if (bindIp != "127.0.0.1") {
+                        nsdCoordinator?.registerServer(http.actualPort, identity.fingerprintBase64Url)
+                    }
                 } catch (err: Exception) {
+                    nsdCoordinator?.unregisterServer()
                     runCatching { listener?.close() }
                     listener = null
                     engine.deactivate()
@@ -246,6 +252,7 @@ class AndroidRemoteServerController(
                 lastError = null
                 publishUiState()
                 try {
+                    nsdCoordinator?.unregisterServer()
                     runCatching { listener?.close() }
                     listener = null
                     engine.deactivate()
@@ -397,7 +404,7 @@ class AndroidRemoteServerController(
             action = PlaybackService.ACTION_REMOTE_SERVER_START
             putExtra(PlaybackService.EXTRA_REMOTE_ENDPOINT, endpointLabel)
         }
-        runCatching { appContext.startForegroundService(intent) }
+        runCatching { ContextCompat.startForegroundService(appContext, intent) }
     }
 
     private fun stopPlaybackForegroundService() {
@@ -478,17 +485,7 @@ class AndroidRemoteServerController(
         ifaceName: String,
     ) {
         if (ip in map) return
-        val lower = ifaceName.lowercase(Locale.ROOT)
-        // Skip cellular/VPN virtual interfaces; keep Wi-Fi, Hotspot AP, Ethernet, USB tethering.
-        if (lower.startsWith("rmnet") || lower.startsWith("ccmni") || lower.startsWith("tun")) return
-        val (label, priority) = when {
-            lower.startsWith("ap") || lower.startsWith("swlan") || lower.startsWith("softap") ||
-                ip.startsWith("192.168.43.") -> "Hotspot HP ($ifaceName)" to 0
-            lower.startsWith("wlan") -> "Wi-Fi ($ifaceName)" to 1
-            lower.startsWith("rndis") || lower.startsWith("usb") -> "USB Tethering ($ifaceName)" to 2
-            lower.startsWith("eth") -> "LAN Ethernet ($ifaceName)" to 3
-            else -> "Jaringan Lokal (${ifaceName.ifBlank { "LAN" }})" to 4
-        }
+        val (label, priority) = RemoteNetworkRoutingRules.classifyInterfaceCandidate(ip, ifaceName) ?: return
         map[ip] = RemoteInterfaceCandidate(ip = ip, label = label, priority = priority)
     }
 

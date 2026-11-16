@@ -11,6 +11,29 @@ object ArtworkRules {
 
 object ManagedCopyRules {
     const val PATH = "Music/SwarariaAudioLab/"
+    private val LEGACY_EXTENSIONS = setOf("mp3", "m4a", "mp4", "opus", "ogg", "webm", "wav", "flac", "aac")
+
     fun validUri(value: String): Boolean = Regex("content://media/external_primary/audio/media/[1-9][0-9]*").matches(value) &&
         value.substringAfterLast('/').toLongOrNull() != null
+
+    fun validLegacyFileUri(value: String): Boolean {
+        if (!value.startsWith("file:///") || value.length > 1024) return false
+        if (value.any { it.code < 0x20 || it.code == 0x7F } || value.contains('?') || value.contains('#') || value.contains('\\')) {
+            return false
+        }
+        val lower = value.lowercase()
+        if (lower.contains("%00") || lower.contains("%2f") || lower.contains("%5c") || lower.contains("%2e")) {
+            return false
+        }
+        val marker = "/Music/SwarariaAudioLab/"
+        val idx = value.indexOf(marker)
+        if (idx <= "file://".length) return false
+        val filePart = value.substring(idx + marker.length)
+        if (filePart.isEmpty() || filePart.contains('/') || filePart == "." || filePart == "..") return false
+        val ext = filePart.substringAfterLast('.', "").lowercase()
+        return ext in LEGACY_EXTENSIONS
+    }
+
+    fun isManagedUri(value: String, sdkInt: Int): Boolean =
+        validUri(value) || (sdkInt < 29 && validLegacyFileUri(value))
 }

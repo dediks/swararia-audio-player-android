@@ -115,7 +115,11 @@ private fun phoneVolumePalette(tier: PhoneMediaVolumeTier): PillPalette {
 private fun readPhoneMediaVolumeSnapshot(audioManager: AudioManager?): PhoneMediaVolumeState {
     val am = audioManager ?: return PhoneMediaVolumeState()
     val max = runCatching { am.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(15)
-    val min = runCatching { am.getStreamMinVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(0)
+    val min = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+        runCatching { am.getStreamMinVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(0)
+    } else {
+        0
+    }
     val current = runCatching { am.getStreamVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(max)
     val muted = runCatching { am.isStreamMute(AudioManager.STREAM_MUSIC) }.getOrDefault(false)
     return PhoneMediaVolumeRules.classify(

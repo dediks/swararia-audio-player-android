@@ -7,6 +7,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
@@ -44,6 +45,11 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         }
     }
 
+    private val legacyStorage = LegacyMusicStorage(context)
+    private fun isManagedUri(value: String): Boolean = ManagedCopyRules.isManagedUri(value, Build.VERSION.SDK_INT)
+    private fun isLegacyUri(value: String): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && ManagedCopyRules.validLegacyFileUri(value)
+
     private data class ExtractedAudioMetadata(
         val durationMs: Long?,
         val artist: String?,
@@ -54,7 +60,11 @@ class MediaLibrary(private val context: Context, private val database: AudioData
     private fun inspectAudioMetadata(uri: Uri): ExtractedAudioMetadata = runCatching {
         val reader = MediaMetadataRetriever()
         try {
-            reader.setDataSource(context, uri)
+            if ("file".equals(uri.scheme, ignoreCase = true) && uri.path != null) {
+                reader.setDataSource(uri.path)
+            } else {
+                reader.setDataSource(context, uri)
+            }
             val durationMs = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
             val rawArtist = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
                 ?: reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)
@@ -76,20 +86,24 @@ class MediaLibrary(private val context: Context, private val database: AudioData
     override suspend fun delete(trackId: Long): Unit = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
             val track = database.tracks().find(trackId) ?: return@withLock
-            require(ManagedCopyRules.validUri(track.uri)) { "Lokasi audio bukan salinan yang dikelola aplikasi." }
+            require(isManagedUri(track.uri)) { "Lokasi audio bukan salinan yang dikelola aplikasi." }
             val uri = Uri.parse(track.uri)
-            // Null cursor/errors are not evidence that a file is gone. Never delete DB state on uncertainty.
-            if (managedItemExists(uri)) {
-                resolver.delete(uri, null, null)
-                check(!managedItemExists(uri)) { "File belum terhapus; library tetap disimpan. Coba lagi." }
-            }
-            // Independently verify the provider can no longer open this item.
-            try {
-                val descriptor = resolver.openAssetFileDescriptor(uri, "r")
-                descriptor?.close()
-                error("File masih dapat diakses atau penghapusan tidak dapat dipastikan. Library tetap disimpan.")
-            } catch (_: java.io.FileNotFoundException) {
-                // Expected only after the item query above confirmed absence.
+            if (isLegacyUri(track.uri)) {
+                legacyStorage.deleteVisible(track.uri)
+            } else {
+                // Null cursor/errors are not evidence that a file is gone. Never delete DB state on uncertainty.
+                if (managedItemExists(uri)) {
+                    resolver.delete(uri, null, null)
+                    check(!managedItemExists(uri)) { "File belum terhapus; library tetap disimpan. Coba lagi." }
+                }
+                // Independently verify the provider can no longer open this item.
+                try {
+                    val descriptor = resolver.openAssetFileDescriptor(uri, "r")
+                    descriptor?.close()
+                    error("File masih dapat diakses atau penghapusan tidak dapat dipastikan. Library tetap disimpan.")
+                } catch (_: java.io.FileNotFoundException) {
+                    // Expected only after the item query above confirmed absence.
+                }
             }
             // File and Room cannot commit atomically. Complete cleanup despite caller cancellation.
             withContext(NonCancellable) {
@@ -115,6 +129,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
 
     /** Requires exact collection/id plus the recorded managed path and owner if exposed. */
     private fun managedItemExists(uri: Uri): Boolean {
+        if (isLegacyUri(uri.toString())) return legacyStorage.isManagedItemExists(uri.toString())
         val cursor = resolver.query(uri, null, null, null, null)
             ?: error("Penyimpanan tidak dapat diverifikasi. Library tidak diubah.")
         return cursor.use {
@@ -157,7 +172,11 @@ class MediaLibrary(private val context: Context, private val database: AudioData
     private fun embeddedArtwork(uri: Uri): String? = runCatching {
         val reader = MediaMetadataRetriever()
         try {
-            reader.setDataSource(context, uri)
+            if ("file".equals(uri.scheme, ignoreCase = true) && uri.path != null) {
+                reader.setDataSource(uri.path)
+            } else {
+                reader.setDataSource(context, uri)
+            }
             reader.embeddedPicture?.let(artwork::cacheEmbedded)
         } finally { reader.release() }
     }.getOrNull()
@@ -165,6 +184,23 @@ class MediaLibrary(private val context: Context, private val database: AudioData
     override suspend fun rename(trackId: Long, requestedTitle: String): String = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
         val track = database.tracks().find(trackId) ?: error("Audio tidak ada di library.")
+        if (isLegacyUri(track.uri)) {
+            val oldName = legacyStorage.actualName(track.uri)
+            val (changed, newUri) = legacyStorage.renameVisible(track.uri, requestedTitle)
+            try {
+                database.withTransaction {
+                    database.tracks().updateTrack(track.copy(displayName = changed, uri = newUri))
+                    database.tracks().insertRename(RenameRecord(trackId = track.id, fromName = oldName, toName = changed))
+                }
+            } catch (failure: Throwable) {
+                val restored = withContext(NonCancellable + Dispatchers.IO) {
+                    legacyStorage.restoreRename(newUri, oldName) != null
+                }
+                if (!restored) throw IllegalStateException("Nama file berubah, tetapi penyimpanan library gagal. Periksa file di Music/SwarariaAudioLab sebelum mengulang.", failure)
+                throw failure
+            }
+            return@withLock changed
+        }
         val uri = Uri.parse(track.uri)
         val oldName = actualName(uri)
         val requested = LibraryRules.renamedDisplayName(oldName, requestedTitle)
@@ -187,6 +223,23 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         mutationMutex.withLock {
         val record = database.tracks().lastRename() ?: error("Belum ada perubahan nama yang dapat dibatalkan.")
         val track = database.tracks().find(record.trackId) ?: error("Audio sudah tidak ada di library.")
+        if (isLegacyUri(track.uri)) {
+            require(legacyStorage.actualName(track.uri) == record.toName) { "Nama file berubah di luar aplikasi. Pembatalan otomatis tidak aman." }
+            val (restored, restoredUri) = legacyStorage.renameVisibleExact(track.uri, record.fromName)
+            try {
+                database.withTransaction {
+                    database.tracks().updateTrack(track.copy(displayName = restored, uri = restoredUri))
+                    database.tracks().removeRename(record.id)
+                }
+            } catch (failure: Throwable) {
+                val reverted = withContext(NonCancellable + Dispatchers.IO) {
+                    legacyStorage.restoreRename(restoredUri, record.toName) != null
+                }
+                if (!reverted) throw IllegalStateException("Nama file berubah, tetapi penyimpanan library gagal. Periksa file di Music/SwarariaAudioLab sebelum mengulang.", failure)
+                throw failure
+            }
+            return@withLock restored
+        }
         val uri = Uri.parse(track.uri)
         require(actualName(uri) == record.toName) { "Nama file berubah di luar aplikasi. Pembatalan otomatis tidak aman." }
         ensureNameAvailable(uri, record.fromName)
@@ -228,19 +281,23 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         throw failure
     }
     private val resolver get() = context.contentResolver
-    private val collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    private val collection by lazy { MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) }
 
     private val publicationStore = object : DownloadQueuePublication.Store {
         override suspend fun begin(id: Long, name: String) { check(database.downloads().beginPublication(id, name) == 1) }
-        override suspend fun create(name: String): String = (resolver.insert(collection, ContentValues().apply {
-            put(MediaStore.Audio.Media.DISPLAY_NAME, name)
-            put(MediaStore.Audio.Media.MIME_TYPE, AUDIO_TYPES.getValue(name.substringAfterLast('.')))
-            put(MediaStore.Audio.Media.RELATIVE_PATH, ManagedCopyRules.PATH)
-            put(MediaStore.Audio.Media.IS_PENDING, 1)
-        }) ?: error("HP menolak pembuatan file audio.")).toString()
+        override suspend fun create(name: String): String {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return legacyStorage.createPending(name)
+            return (resolver.insert(collection, ContentValues().apply {
+                put(MediaStore.Audio.Media.DISPLAY_NAME, name)
+                put(MediaStore.Audio.Media.MIME_TYPE, AUDIO_TYPES.getValue(name.substringAfterLast('.')))
+                put(MediaStore.Audio.Media.RELATIVE_PATH, ManagedCopyRules.PATH)
+                put(MediaStore.Audio.Media.IS_PENDING, 1)
+            }) ?: error("HP menolak pembuatan file audio.")).toString()
+        }
         override suspend fun associate(id: Long, uri: String) { check(database.downloads().associatePublication(id, uri) == 1) }
         override suspend fun ready(id: Long, bytes: Long) { check(database.downloads().readyPublication(id, bytes) == 1) }
         override suspend fun locate(name: String): String? {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return legacyStorage.locatePending(name)
             require(Regex("swararia-[0-9a-f-]{36}\\.[a-z0-9]+").matches(name))
             // API 29-compatible: recovery must also find our hidden insert-before-associate marker.
             @Suppress("DEPRECATION")
@@ -256,6 +313,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             }
         }
         override suspend fun inspect(uri: String): DownloadQueuePublication.Media? {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return legacyStorage.inspect(uri)
             require(ManagedCopyRules.validUri(uri))
             val cursor = resolver.query(Uri.parse(uri), null, null, null, null) ?: error("Penyimpanan tidak dapat diverifikasi.")
             return cursor.use {
@@ -275,6 +333,10 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             }
         }
         override suspend fun discardPending(uri: String) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                legacyStorage.discardPending(uri)
+                return
+            }
             check(inspect(uri)?.pending == true)
             resolver.delete(Uri.parse(uri), null, null)
             check(inspect(uri) == null) { "Salinan sementara belum terhapus." }
@@ -286,28 +348,39 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             }
         }
         override suspend fun makeVisible(uri: String) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                legacyStorage.makeVisible(uri)
+                return
+            }
             check(resolver.update(Uri.parse(uri), ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null) == 1)
             check(inspect(uri)?.pending == false)
         }
         override suspend fun finish(id: Long, uri: String, bytes: Long): Long {
-            val parsedUri = Uri.parse(uri)
-            val name = actualName(parsedUri)
+            val finalUri = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                legacyStorage.resolveFinalUriAndClearMarker(uri)
+            } else uri
+            val parsedUri = Uri.parse(finalUri)
+            val name = if (isLegacyUri(finalUri)) legacyStorage.actualName(finalUri) else actualName(parsedUri)
             val meta = inspectAudioMetadata(parsedUri)
-            val digest = if (ManagedCopyRules.validUri(uri)) computeUriSha256(parsedUri) else null
+            val digest = if (isManagedUri(finalUri)) computeUriSha256(parsedUri) else null
             val checkedAt = System.currentTimeMillis()
-            return database.withTransaction {
+            val trackId = database.withTransaction {
                 val job = checkNotNull(database.downloads().find(id))
                 check(job.status == "RUNNING" && job.pendingUri == uri && job.publicationBytes == bytes)
-                val trackId = database.tracks().findByUri(uri)?.id ?: database.tracks().insert(
+                val insertedId = database.tracks().findByUri(finalUri)?.id ?: database.tracks().insert(
                     AudioTrack(
-                        uri = uri, displayName = name, sizeBytes = bytes, durationMs = meta.durationMs,
+                        uri = finalUri, displayName = name, sizeBytes = bytes, durationMs = meta.durationMs,
                         artist = meta.artist, album = meta.album, genre = meta.genre, metadataCheckedAt = checkedAt,
                         sha256 = digest,
                     )
                 )
-                check(database.downloads().complete(id, trackId) == 1)
-                trackId
+                check(database.downloads().complete(id, insertedId) == 1)
+                insertedId
             }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                legacyStorage.clearPublishedMarker(uri)
+            }
+            return trackId
         }
     }
 
@@ -327,17 +400,22 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             require(file.isFile && file.length() > 0 && file.extension.lowercase(Locale.ROOT) in AUDIO_TYPES)
             val name = "swararia-${java.util.UUID.randomUUID()}.${file.extension.lowercase(Locale.ROOT)}"
             val id = DownloadQueuePublication(publicationStore).publish(jobId, name) { uri ->
-                // URI is journaled before restoring the friendly name; pre-association lookup keeps its unique marker.
-                check(resolver.update(Uri.parse(uri), ContentValues().apply {
-                    put(MediaStore.Audio.Media.DISPLAY_NAME, file.name)
-                }, null, null) == 1)
-                val descriptor = resolver.openFileDescriptor(Uri.parse(uri), "w") ?: error("Salinan tidak dapat ditulis.")
-                android.os.ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { destination ->
-                    val copied = file.inputStream().use { it.copyTo(destination, 64 * 1024) }
-                    destination.flush()
-                    destination.fd.sync()
-                    check(copied == file.length())
-                    copied
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                    legacyStorage.setPendingTargetName(uri, file.name)
+                    legacyStorage.writePendingFromFile(uri, file)
+                } else {
+                    // URI is journaled before restoring the friendly name; pre-association lookup keeps its unique marker.
+                    check(resolver.update(Uri.parse(uri), ContentValues().apply {
+                        put(MediaStore.Audio.Media.DISPLAY_NAME, file.name)
+                    }, null, null) == 1)
+                    val descriptor = resolver.openFileDescriptor(Uri.parse(uri), "w") ?: error("Salinan tidak dapat ditulis.")
+                    android.os.ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { destination ->
+                        val copied = file.inputStream().use { it.copyTo(destination, 64 * 1024) }
+                        destination.flush()
+                        destination.fd.sync()
+                        check(copied == file.length())
+                        copied
+                    }
                 }
             }
             checkNotNull(database.tracks().find(id))
@@ -385,6 +463,31 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         mime: String,
         expectedSha256: String? = null,
     ): AudioTrack = mutationMutex.withLock {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            val (targetFile, actualSha256, copied) = legacyStorage.writeFromStream(input, displayName, expectedSha256)
+            val uri = Uri.fromFile(targetFile)
+            var createdArtworkKey: String? = null
+            try {
+                val meta = inspectAudioMetadata(uri)
+                val embeddedKey = embeddedArtwork(uri)
+                createdArtworkKey = embeddedKey
+                val track = AudioTrack(
+                    uri = uri.toString(), displayName = targetFile.name, sizeBytes = copied, durationMs = meta.durationMs,
+                    artworkKey = embeddedKey, artist = meta.artist, album = meta.album, genre = meta.genre,
+                    metadataCheckedAt = System.currentTimeMillis(), sha256 = actualSha256,
+                )
+                val id = database.tracks().insert(track)
+                return track.copy(id = id)
+            } catch (failure: Throwable) {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    runCatching { legacyStorage.deleteVisible(uri.toString()) }
+                    createdArtworkKey?.let { key ->
+                        runCatching { if (database.tracks().artworkReferences(key) == 0) artwork.remove(key) }
+                    }
+                }
+                throw failure
+            }
+        }
         val values = ContentValues().apply {
             put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
             put(MediaStore.Audio.Media.MIME_TYPE, mime)
@@ -533,7 +636,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             for (track in pending) {
                 currentCoroutineContext().ensureActive()
                 val uri = runCatching { Uri.parse(track.uri) }.getOrNull()
-                val meta = if (uri != null && ManagedCopyRules.validUri(track.uri)) inspectAudioMetadata(uri)
+                val meta = if (uri != null && isManagedUri(track.uri)) inspectAudioMetadata(uri)
                 else ExtractedAudioMetadata(null, null, null, null)
                 val now = System.currentTimeMillis()
                 database.tracks().updateMetadata(track.id, meta.durationMs, meta.artist, meta.album, meta.genre, now)
@@ -547,7 +650,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             for (track in unhashed) {
                 currentCoroutineContext().ensureActive()
                 val uri = runCatching { Uri.parse(track.uri) }.getOrNull() ?: continue
-                if (!ManagedCopyRules.validUri(track.uri)) continue
+                if (!isManagedUri(track.uri)) continue
                 val digest = computeUriSha256(uri) ?: continue
                 database.tracks().updateSha256(track.id, digest)
             }
@@ -558,7 +661,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         val cleanHex = sha256.trim().lowercase(Locale.ROOT)
         if (!SHA256_REGEX.matches(cleanHex) || sizeBytes <= 0L) return@withContext null
         val existing = database.tracks().findBySha256AndSize(cleanHex, sizeBytes) ?: return@withContext null
-        if (!ManagedCopyRules.validUri(existing.uri)) return@withContext null
+        if (!isManagedUri(existing.uri)) return@withContext null
         val exists = runCatching { managedItemExists(Uri.parse(existing.uri)) }.getOrDefault(false)
         if (exists) existing else null
     }
@@ -593,12 +696,16 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         var targetName = cleanDisplayName
         val resolvedExisting = mutationMutex.withLock {
             val existing = database.tracks().findBySha256AndSize(cleanHex, stagedFile.length())
-            if (existing != null && ManagedCopyRules.validUri(existing.uri) &&
+            if (existing != null && isManagedUri(existing.uri) &&
                 runCatching { managedItemExists(Uri.parse(existing.uri)) }.getOrDefault(false)
             ) {
                 existing
             } else {
-                targetName = uniqueAvailableDisplayName(cleanDisplayName)
+                targetName = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                    legacyStorage.uniqueAvailableDisplayName(cleanDisplayName)
+                } else {
+                    uniqueAvailableDisplayName(cleanDisplayName)
+                }
                 null
             }
         }
@@ -617,11 +724,20 @@ class MediaLibrary(private val context: Context, private val database: AudioData
     override suspend fun openReadableTrack(trackId: Long): ReadableManagedMedia? = withContext(Dispatchers.IO) {
         if (trackId <= 0L) return@withContext null
         val track = database.tracks().find(trackId) ?: return@withContext null
-        if (!ManagedCopyRules.validUri(track.uri)) return@withContext null
-        val uri = Uri.parse(track.uri)
-        if (!runCatching { managedItemExists(uri) }.getOrDefault(false)) return@withContext null
+        if (!isManagedUri(track.uri)) return@withContext null
         val ext = track.displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
         val mime = AUDIO_TYPES[ext] ?: return@withContext null
+        if (isLegacyUri(track.uri)) {
+            val (stream, size) = legacyStorage.openReadable(track.uri) ?: return@withContext null
+            return@withContext ReadableManagedMedia(
+                track = track,
+                mimeType = mime,
+                sizeBytes = size.takeIf { it > 0L } ?: track.sizeBytes,
+                inputStream = stream,
+            )
+        }
+        val uri = Uri.parse(track.uri)
+        if (!runCatching { managedItemExists(uri) }.getOrDefault(false)) return@withContext null
         val afd = resolver.openAssetFileDescriptor(uri, "r") ?: return@withContext null
         val size = afd.length.takeIf { it > 0L } ?: track.sizeBytes
         val stream = runCatching { afd.createInputStream() }.getOrElse {

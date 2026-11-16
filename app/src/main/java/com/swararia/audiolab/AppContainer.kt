@@ -50,8 +50,19 @@ class AppContainer(context: Context) {
             onPlatformCookiesCleared = ::clearAndroidWebViewYoutubeSession,
         ).apply { initialize() }
     }
+    val remoteWifiTransport: RemoteWifiTransport by lazy {
+        RemoteWifiTransport(appContext)
+    }
+    val remoteNsdCoordinator: RemoteNsdCoordinator by lazy {
+        RemoteNsdCoordinator(appContext)
+    }
+    val remoteWifiPeerController: RemoteWifiPeerController by lazy {
+        RemoteWifiPeerController(appContext, remoteWifiTransport) {
+            remoteServerController.refreshInterfacesAsync()
+        }
+    }
     fun previewPlayback(): PreviewPlayback = PreviewRemote(appContext)
-    fun desktopRemoteApi(): DesktopRemoteApi = DesktopRemoteHttpsApi()
+    fun desktopRemoteApi(): DesktopRemoteApi = DesktopRemoteHttpsApi().withConnectionOpener(remoteWifiTransport)
     private val rememberedDesktopSession by lazy {
         DesktopRemotePersistence(AndroidKeystoreDesktopRemoteStore(appContext))
     }
@@ -86,7 +97,7 @@ class AppContainer(context: Context) {
         }
     }
     val remoteServerController: AndroidRemoteServerController by lazy {
-        AndroidRemoteServerController(appContext, library)
+        AndroidRemoteServerController(appContext, library, remoteNsdCoordinator)
     }
 }
 

@@ -1,8 +1,14 @@
 package com.swararia.audiolab
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -65,7 +71,15 @@ internal fun RemoteTabScreen(
     var selectedRole by rememberSaveable { mutableStateOf("") }
     var showGuideDialog by rememberSaveable { mutableStateOf(false) }
     var qrScanRequestTick by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
+    val appContainer = remember(context) { (context.applicationContext as? SwarariaApp)?.container }
     val remoteState by desktopRemote.state.collectAsStateWithLifecycle()
+    val peerState by (appContainer?.remoteWifiPeerController?.state
+        ?: remember { kotlinx.coroutines.flow.MutableStateFlow(RemoteWifiPeerState()) }).collectAsStateWithLifecycle()
+    val wifiStatus by (appContainer?.remoteWifiTransport?.status
+        ?: remember { kotlinx.coroutines.flow.MutableStateFlow(RemoteWifiTransportStatus()) }).collectAsStateWithLifecycle()
+    val mdnsServers by (appContainer?.remoteNsdCoordinator?.servers
+        ?: remember { kotlinx.coroutines.flow.MutableStateFlow(emptyList<RemoteMdnsServer>()) }).collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val effectiveRole = when {
         selectedRole.isNotEmpty() -> selectedRole
@@ -75,19 +89,104 @@ internal fun RemoteTabScreen(
     }
     val serverMode = effectiveRole == "server"
 
-    DisposableEffect(lifecycle, serverMode) {
+    var pendingWifiAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var permissionNotice by remember { mutableStateOf<String?>(null) }
+    val wifiPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { results ->
+        val action = pendingWifiAction
+        pendingWifiAction = null
+        val granted = results.values.all { it } || (appContainer?.remoteWifiPeerController?.hasWifiPeerPermissions() == true)
+        if (granted) {
+            permissionNotice = null
+            action?.invoke()
+        } else {
+            permissionNotice = "Izin Perangkat Terdekat / Lokasi diperlukan untuk Hotspot Lokal atau Wi-Fi Direct."
+        }
+    }
+
+    var pendingStorageAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val legacyStorageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { results ->
+        val action = pendingStorageAction
+        pendingStorageAction = null
+        val granted = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q || results.values.all { it } || (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            )
+        if (granted) {
+            permissionNotice = null
+            action?.invoke()
+        } else {
+            permissionNotice = "Izin penyimpanan diperlukan di Android 8–9 untuk menyimpan lagu ke Music/SwarariaAudioLab."
+        }
+    }
+
+    fun runWithWifiPermission(action: () -> Unit) {
+        val controller = appContainer?.remoteWifiPeerController
+        if (controller == null || controller.hasWifiPeerPermissions()) {
+            permissionNotice = null
+            action()
+        } else {
+            pendingWifiAction = action
+            wifiPermissionLauncher.launch(controller.requiredWifiPeerPermissions())
+        }
+    }
+
+    fun runWithLegacyStorage(action: () -> Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            action()
+            return
+        }
+        val readOk = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        val writeOk = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        if (readOk && writeOk) {
+            permissionNotice = null
+            action()
+        } else {
+            pendingStorageAction = action
+            legacyStorageLauncher.launch(
+                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE),
+            )
+        }
+    }
+
+    DisposableEffect(lifecycle, effectiveRole, appContainer) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && serverMode) {
-                serverActions.onRefreshInterfaces()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                appContainer?.remoteWifiTransport?.refreshStatus()
+                if (effectiveRole == "server") {
+                    serverActions.onRefreshInterfaces()
+                } else if (effectiveRole == "controller") {
+                    appContainer?.remoteNsdCoordinator?.startDiscovery()
+                }
+            } else if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                appContainer?.remoteNsdCoordinator?.stopDiscovery()
             }
         }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && effectiveRole == "controller") {
+            appContainer?.remoteNsdCoordinator?.startDiscovery()
+        }
+        onDispose {
+            appContainer?.remoteNsdCoordinator?.stopDiscovery()
+            lifecycle.removeObserver(observer)
+        }
     }
 
     LaunchedEffect(serverMode) {
         if (serverMode) {
             serverActions.onRefreshInterfaces()
+        }
+    }
+
+    LaunchedEffect(effectiveRole, mdnsServers, remoteState.phase, remoteState.fresh, remoteState.endpoint) {
+        if (effectiveRole == "controller" && remoteState.phase == "active" && !remoteState.fresh) {
+            val ep = remoteState.endpoint ?: return@LaunchedEffect
+            if (mdnsServers.any { "${it.hostIp}:${it.port}" == ep }) {
+                desktopRemote.refresh()
+            }
         }
     }
 
@@ -118,6 +217,29 @@ internal fun RemoteTabScreen(
             )
         }
         localAudioBanner()
+        permissionNotice?.let { notice ->
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = FohTheme.colors.alertBg,
+                border = BorderStroke(1.dp, FohTheme.colors.alertBorder),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = notice,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = FohTheme.colors.alertAccent,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { permissionNotice = null }) {
+                        Text("Tutup", color = FohTheme.colors.alertAccent)
+                    }
+                }
+            }
+        }
         if (effectiveRole.isEmpty()) {
             Column(
                 modifier = Modifier
@@ -156,6 +278,16 @@ internal fun RemoteTabScreen(
             RemoteServerScreen(
                 state = serverState,
                 actions = serverActions,
+                peerState = peerState,
+                onStartLocalHotspot = {
+                    runWithWifiPermission { appContainer?.remoteWifiPeerController?.startLocalOnlyHotspot() }
+                },
+                onStopLocalHotspot = { appContainer?.remoteWifiPeerController?.stopLocalOnlyHotspot() },
+                onStartWifiDirect = {
+                    runWithWifiPermission { appContainer?.remoteWifiPeerController?.startWifiDirectGroup() }
+                },
+                onStopWifiDirect = { appContainer?.remoteWifiPeerController?.stopWifiDirectGroup() },
+                onRequireLegacyStoragePermission = ::runWithLegacyStorage,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
@@ -167,6 +299,36 @@ internal fun RemoteTabScreen(
                     .weight(1f)
                     .fillMaxWidth(),
                 qrScanRequestTick = qrScanRequestTick,
+                peerState = peerState,
+                wifiStatus = wifiStatus,
+                mdnsServers = mdnsServers,
+                onHandleQrInput = { rawText, directConnect ->
+                    val peer = appContainer?.remoteWifiPeerController
+                    if (peer != null) {
+                        peer.handleClientQrInput(rawText, directConnect)
+                    } else {
+                        directConnect(rawText)
+                    }
+                },
+                onConfirmLegacyWifiJoin = { directConnect ->
+                    appContainer?.remoteWifiPeerController?.confirmLegacyWifiJoin(directConnect)
+                },
+                onCancelLegacyWifiJoin = {
+                    appContainer?.remoteWifiPeerController?.clearPendingLegacyWifiJoin()
+                },
+                onReleasePeerNetwork = {
+                    appContainer?.remoteWifiPeerController?.releaseClientPeerWifiNetwork()
+                },
+                onDiscoverP2p = {
+                    runWithWifiPermission { appContainer?.remoteWifiPeerController?.discoverWifiDirectPeers() }
+                },
+                onConnectP2p = { addr ->
+                    runWithWifiPermission { appContainer?.remoteWifiPeerController?.connectWifiDirectPeer(addr) }
+                },
+                onDisconnectP2p = {
+                    appContainer?.remoteWifiPeerController?.disconnectWifiDirectClient()
+                },
+                onRequireLegacyStoragePermission = ::runWithLegacyStorage,
             )
         }
     }
@@ -331,6 +493,12 @@ internal fun RemoteServerScreen(
     state: RemoteServerUiState,
     actions: RemoteServerUiActions,
     modifier: Modifier = Modifier,
+    peerState: RemoteWifiPeerState = RemoteWifiPeerState(),
+    onStartLocalHotspot: () -> Unit = {},
+    onStopLocalHotspot: () -> Unit = {},
+    onStartWifiDirect: () -> Unit = {},
+    onStopWifiDirect: () -> Unit = {},
+    onRequireLegacyStoragePermission: (() -> Unit) -> Unit = { it() },
 ) {
     val snapshot = state.snapshot
     val colors = MaterialTheme.colorScheme
@@ -341,13 +509,20 @@ internal fun RemoteServerScreen(
     var portInput by rememberSaveable { mutableStateOf("8443") }
     var copiedNotice by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(state.interfaces, snapshot.enabled, snapshot.bindIp) {
+    LaunchedEffect(state.interfaces, snapshot.enabled, snapshot.bindIp, peerState.serverPeerMode) {
         val activeBindIp = snapshot.bindIp
         if (snapshot.enabled && !activeBindIp.isNullOrBlank()) {
             selectedIp = activeBindIp
         } else {
             val preferred = state.interfaces.firstOrNull { it.ip != "127.0.0.1" } ?: state.interfaces.firstOrNull()
-            if (selectedIp.isBlank() ||
+            val peerModePreferred = when (peerState.serverPeerMode) {
+                RemoteServerPeerMode.LOCAL_HOTSPOT -> state.interfaces.firstOrNull { it.priority == 0 }
+                RemoteServerPeerMode.WIFI_DIRECT_GO -> state.interfaces.firstOrNull { it.priority == 1 }
+                RemoteServerPeerMode.NONE -> null
+            }
+            if (peerModePreferred != null) {
+                selectedIp = peerModePreferred.ip
+            } else if (selectedIp.isBlank() ||
                 state.interfaces.none { it.ip == selectedIp } ||
                 (selectedIp == "127.0.0.1" && preferred != null && preferred.ip != "127.0.0.1")
             ) {
@@ -471,6 +646,7 @@ internal fun RemoteServerScreen(
                 portInput = portInput,
                 validPort = validPort,
                 busy = state.busy,
+                peerState = peerState,
                 onSelectIp = { selectedIp = it },
                 onPortChange = { value -> portInput = value.filter { it.isDigit() }.take(5) },
                 onStart = {
@@ -478,6 +654,12 @@ internal fun RemoteServerScreen(
                     if (selectedIp.isNotBlank()) actions.onStartServer(selectedIp, port)
                 },
                 onStop = actions.onStopServer,
+                onStartLocalHotspot = onStartLocalHotspot,
+                onStopLocalHotspot = onStopLocalHotspot,
+                onStartWifiDirect = onStartWifiDirect,
+                onStopWifiDirect = onStopWifiDirect,
+                onCopySsid = { peerState.serverSsid?.let { copyText("SSID Wi-Fi", it) } },
+                onCopyPassphrase = { peerState.serverPassphrase()?.let { copyText("Password Wi-Fi", it) } },
             )
         }
 
@@ -515,7 +697,9 @@ internal fun RemoteServerScreen(
                     webPin = snapshot.webPin,
                     webExpiresAt = snapshot.webPinExpiresAt,
                     fingerprintHex = snapshot.fingerprintHex,
+                    peerState = peerState,
                     onCopyUri = { snapshot.nativePairingUri?.let { copyText("Kode pairing", it) } },
+                    onCopySmartUri = { smart -> copyText("Kode Smart Join", smart) },
                     onRefreshInvite = actions.onRefreshNativeInvite,
                     onCopyUrl = { snapshot.webUrl?.let { copyText("URL Web", it) } },
                     onCopyPin = { snapshot.webPin?.let { copyText("PIN Web", it) } },
@@ -531,7 +715,13 @@ internal fun RemoteServerScreen(
             TransferPolicyCard(
                 mediaTransferEnabled = snapshot.mediaTransferEnabled,
                 pauseDuringPlayback = snapshot.pauseTransferDuringPlayback,
-                onSetTransferEnabled = actions.onSetMediaTransferEnabled,
+                onSetTransferEnabled = { enable ->
+                    if (enable) {
+                        onRequireLegacyStoragePermission { actions.onSetMediaTransferEnabled(true) }
+                    } else {
+                        actions.onSetMediaTransferEnabled(false)
+                    }
+                },
                 onSetPauseDuringPlayback = actions.onSetPauseTransferDuringPlayback,
             )
         }
@@ -591,10 +781,17 @@ private fun ServerNetworkCard(
     portInput: String,
     validPort: Boolean,
     busy: Boolean,
+    peerState: RemoteWifiPeerState = RemoteWifiPeerState(),
     onSelectIp: (String) -> Unit,
     onPortChange: (String) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onStartLocalHotspot: () -> Unit = {},
+    onStopLocalHotspot: () -> Unit = {},
+    onStartWifiDirect: () -> Unit = {},
+    onStopWifiDirect: () -> Unit = {},
+    onCopySsid: () -> Unit = {},
+    onCopyPassphrase: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
     val foh = FohTheme.colors
@@ -638,8 +835,82 @@ private fun ServerNetworkCard(
                 )
             }
 
-            if (busy) {
+            if (busy || peerState.serverPeerBusy) {
                 FohIndeterminateBar(height = 4.dp)
+            }
+
+            if (peerState.serverPeerMode != RemoteServerPeerMode.NONE || peerState.serverPeerError != null || peerState.serverPeerStatus != null) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (peerState.serverPeerError != null) foh.alertBg else foh.surfaceDeep,
+                    border = BorderStroke(1.dp, if (peerState.serverPeerError != null) foh.alertBorder else foh.borderSubtle),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        val modeTitle = when (peerState.serverPeerMode) {
+                            RemoteServerPeerMode.LOCAL_HOTSPOT -> "Hotspot Lokal Tanpa Kuota Aktif"
+                            RemoteServerPeerMode.WIFI_DIRECT_GO -> "Grup Wi-Fi Direct (P2P) Aktif"
+                            RemoteServerPeerMode.NONE -> "Mode Jaringan Cepat"
+                        }
+                        Text(
+                            text = modeTitle,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (peerState.serverPeerError != null) foh.alertAccent else foh.safeAccent,
+                        )
+                        (peerState.serverPeerError ?: peerState.serverPeerStatus)?.let { msg ->
+                            Text(
+                                text = msg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (peerState.serverPeerError != null) foh.alertAccent else colors.onSurfaceVariant,
+                            )
+                        }
+                        if (peerState.serverSsid != null) {
+                            Text(
+                                text = "SSID: ${peerState.serverSsid}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                color = colors.onSurface,
+                            )
+                        }
+                        if (peerState.serverPassphrase() != null) {
+                            Text(
+                                text = "Sandi Wi-Fi: ${peerState.serverPassphrase()}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                        if (peerState.serverPeerMode != RemoteServerPeerMode.NONE) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                if (peerState.serverSsid != null) {
+                                    OutlinedButton(onClick = onCopySsid, modifier = Modifier.weight(1f)) {
+                                        Text("Salin SSID", maxLines = 1, softWrap = false)
+                                    }
+                                }
+                                if (peerState.serverPassphrase() != null) {
+                                    OutlinedButton(onClick = onCopyPassphrase, modifier = Modifier.weight(1f)) {
+                                        Text("Salin Sandi", maxLines = 1, softWrap = false)
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        if (peerState.serverPeerMode == RemoteServerPeerMode.LOCAL_HOTSPOT) onStopLocalHotspot()
+                                        else onStopWifiDirect()
+                                    },
+                                    border = BorderStroke(1.dp, foh.alertBorder),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("Matikan", color = foh.alertAccent, maxLines = 1, softWrap = false)
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             if (snapshot.enabled) {
@@ -673,6 +944,45 @@ private fun ServerNetworkCard(
                         color = colors.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold,
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                if (peerState.serverPeerMode == RemoteServerPeerMode.LOCAL_HOTSPOT) onStopLocalHotspot()
+                                else onStartLocalHotspot()
+                            },
+                            enabled = !busy && !peerState.serverPeerBusy,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                text = if (peerState.serverPeerMode == RemoteServerPeerMode.LOCAL_HOTSPOT) "Stop Hotspot Lokal" else "Hotspot Lokal",
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                if (peerState.serverPeerMode == RemoteServerPeerMode.WIFI_DIRECT_GO) onStopWifiDirect()
+                                else onStartWifiDirect()
+                            },
+                            enabled = !busy && !peerState.serverPeerBusy,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                text = if (peerState.serverPeerMode == RemoteServerPeerMode.WIFI_DIRECT_GO) "Stop P2P" else "Wi-Fi Direct (P2P)",
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                     if (interfaces.isEmpty()) {
                         Text(
                             text = "Tidak ada IP Wi-Fi atau Hotspot lokal ditemukan. Nyalakan Hotspot atau hubungkan ke router Wi-Fi FOH, lalu ketuk Segarkan IP.",
@@ -796,7 +1106,9 @@ private fun ServerInviteCard(
     webPin: String?,
     webExpiresAt: Double?,
     fingerprintHex: String?,
+    peerState: RemoteWifiPeerState = RemoteWifiPeerState(),
     onCopyUri: () -> Unit,
+    onCopySmartUri: (String) -> Unit = {},
     onRefreshInvite: () -> Unit,
     onCopyUrl: () -> Unit,
     onCopyPin: () -> Unit,
@@ -806,10 +1118,38 @@ private fun ServerInviteCard(
     val colors = MaterialTheme.colorScheme
     val foh = FohTheme.colors
     var inviteTab by rememberSaveable { mutableIntStateOf(0) }
-    val showBothTabs = webUrl != null
-    val effectiveTab = if (showBothTabs) inviteTab else 0
-    val remainingSec = rememberRemainingSeconds(if (effectiveTab == 0) nativeExpiresAt else webExpiresAt)
-    val showStatusPill = (effectiveTab == 0 && pairingUri != null) || (effectiveTab == 1 && webPin != null)
+    var showStandardWifiQr by rememberSaveable { mutableStateOf(false) }
+
+    val smartJoinUri = remember(pairingUri, peerState.serverSsid, peerState.serverPassphrase(), peerState.serverPeerMode) {
+        val ssid = peerState.serverSsid
+        val pass = peerState.serverPassphrase()
+        val kind = when (peerState.serverPeerMode) {
+            RemoteServerPeerMode.LOCAL_HOTSPOT -> RemotePeerTransportKind.LOCAL_HOTSPOT
+            RemoteServerPeerMode.WIFI_DIRECT_GO -> RemotePeerTransportKind.WIFI_DIRECT
+            RemoteServerPeerMode.NONE -> null
+        }
+        if (pairingUri != null && ssid != null && pass != null && kind != null) {
+            runCatching { RemoteSmartQrCodec.encodeSmartJoinQr(ssid, pass, kind, pairingUri) }.getOrNull()
+        } else null
+    }
+    val standardWifiQr = remember(peerState.serverSsid, peerState.serverPassphrase()) {
+        val ssid = peerState.serverSsid
+        val pass = peerState.serverPassphrase()
+        if (ssid != null && pass != null) {
+            runCatching { RemoteSmartQrCodec.encodeStandardWifiQr(ssid, pass) }.getOrNull()
+        } else null
+    }
+    val hasSmartTab = smartJoinUri != null
+    val tabIds = remember(hasSmartTab, webUrl) {
+        buildList {
+            if (hasSmartTab) add(2) // Smart Join
+            add(0) // QR Aplikasi
+            if (webUrl != null) add(1) // Browser
+        }
+    }
+    val effectiveTab = if (inviteTab in tabIds) inviteTab else tabIds.first()
+    val remainingSec = rememberRemainingSeconds(if (effectiveTab == 1) webExpiresAt else nativeExpiresAt)
+    val showStatusPill = ((effectiveTab == 0 || effectiveTab == 2) && pairingUri != null) || (effectiveTab == 1 && webPin != null)
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -832,7 +1172,7 @@ private fun ServerInviteCard(
                 StatusPill(
                     text = when {
                         !showStatusPill -> "Terpakai / Kosong"
-                        remainingSec > 0 -> if (effectiveTab == 0) "${remainingSec}s" else "PIN ${remainingSec}s"
+                        remainingSec > 0 -> if (effectiveTab == 1) "PIN ${remainingSec}s" else "${remainingSec}s"
                         else -> "Kedaluwarsa"
                     },
                     active = showStatusPill && remainingSec > 0,
@@ -840,16 +1180,74 @@ private fun ServerInviteCard(
                 )
             }
 
-            if (showBothTabs) {
+            if (tabIds.size > 1) {
                 FohSegmentedBar(
-                    options = listOf(0, 1),
-                    selected = inviteTab,
-                    label = { if (it == 0) "QR Aplikasi" else "Browser (URL & PIN)" },
+                    options = tabIds,
+                    selected = effectiveTab,
+                    label = {
+                        when (it) {
+                            2 -> "Smart Join"
+                            0 -> "QR Aplikasi"
+                            else -> "Browser"
+                        }
+                    },
                     onSelect = { inviteTab = it },
                 )
             }
 
-            if (effectiveTab == 0 && pairingUri != null) {
+            if (effectiveTab == 2 && smartJoinUri != null) {
+                val activePayload = if (showStandardWifiQr && standardWifiQr != null) standardWifiQr else smartJoinUri
+                QrCodeBox(
+                    payload = activePayload,
+                    modifier = Modifier
+                        .size(200.dp)
+                        .clip(RoundedCornerShape(14.dp)),
+                )
+                Text(
+                    text = if (showStandardWifiQr && standardWifiQr != null) {
+                        "QR Wi-Fi Standar (SSID: ${peerState.serverSsid}) — pindai dari kamera HP/iPhone atau Android 8–9 untuk masuk ke Wi-Fi ini."
+                    } else if (remainingSec > 0) {
+                        "1x pindai dari SWR Player HP lain: Android 10+ langsung konek Wi-Fi lokal + pair tanpa ganggu data seluler; Android 8–9 tampilkan panduan Wi-Fi."
+                    } else {
+                        "Undangan QR kedaluwarsa — ketuk QR Baru"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (remainingSec > 0 || showStandardWifiQr) colors.onSurfaceVariant else foh.alertAccent,
+                    textAlign = TextAlign.Center,
+                )
+                if (standardWifiQr != null) {
+                    OutlinedButton(
+                        onClick = { showStandardWifiQr = !showStandardWifiQr },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (showStandardWifiQr) "Kembali ke QR Smart Join" else "Tampilkan QR Wi-Fi Standar")
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { onCopySmartUri(smartJoinUri) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp),
+                    ) {
+                        Text("Salin Smart", maxLines = 1, softWrap = false)
+                    }
+                    Button(
+                        onClick = onRefreshInvite,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp),
+                    ) {
+                        Text("QR Baru", maxLines = 1, softWrap = false)
+                    }
+                }
+            } else if (effectiveTab == 0 && pairingUri != null) {
                 QrCodeBox(
                     payload = pairingUri,
                     modifier = Modifier
