@@ -402,7 +402,10 @@ internal fun FohSpinningIndicator(
     Canvas(modifier = modifier.size(size)) {
         val strokePx = strokeWidth.toPx()
         val inset = strokePx / 2f
-        val arcSize = Size(this.size.width - strokePx, this.size.height - strokePx)
+        val arcW = this.size.width - strokePx
+        val arcH = this.size.height - strokePx
+        if (arcW <= 0f || arcH <= 0f || strokePx <= 0f) return@Canvas
+        val arcSize = Size(arcW, arcH)
         val topLeft = Offset(inset, inset)
         val outerRadius = arcSize.width / 2f
         drawArc(
@@ -634,6 +637,7 @@ internal fun FohShimmerBox(
     }
     Canvas(modifier = modifier.clip(RoundedCornerShape(cornerRadius))) {
         drawRect(color = baseColor)
+        if (size.width <= 1f || size.height <= 1f || !phase.isFinite()) return@Canvas
         val bandW = size.width * 0.45f
         val startX = -bandW + phase * (size.width + bandW * 2f)
         drawRect(

@@ -200,10 +200,15 @@ class SearchSession(
                 }
             } catch (cancel: CancellationException) {
                 throw cancel
-            } catch (failure: Exception) {
+            } catch (failure: Throwable) {
                 if (searchGeneration.isCurrent(ticket)) {
+                    val userMessage = if (failure is Error) {
+                        "Mesin pencarian tidak kompatibel atau gagal dijalankan di perangkat ini."
+                    } else {
+                        failure.message?.takeIf { it.isNotBlank() } ?: "Pencarian belum berhasil."
+                    }
                     searchState.value = searchState.value.copy(
-                        error = (failure.message ?: "Pencarian belum berhasil.").take(300),
+                        error = userMessage.take(300),
                     )
                 }
             } finally {

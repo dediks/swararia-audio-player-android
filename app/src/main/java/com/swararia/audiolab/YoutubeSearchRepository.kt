@@ -35,7 +35,7 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
     }
 
     private fun activeNetworkKey(): Any? =
-        appContext.getSystemService(ConnectivityManager::class.java)?.activeNetwork?.networkHandle
+        runCatching { appContext.getSystemService(ConnectivityManager::class.java)?.activeNetwork?.networkHandle }.getOrNull()
 
     suspend fun search(query: String, provider: SearchProvider): List<SearchHit> =
         searchPage(query, provider, SearchKind.SONGS).hits
@@ -289,6 +289,8 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
           catch (failure: com.yausername.youtubedl_android.YoutubeDLException) {
               throw IOException(if (prefix == "preview") "Preview belum tersedia dari sumber ini. Sumber dapat membatasi akses; coba lagu lain atau coba lagi nanti."
                   else "Sumber belum dapat diakses. Periksa koneksi lalu coba lagi.", failure)
+          } catch (error: Error) {
+              throw IOException("Mesin pencarian tidak kompatibel atau gagal dijalankan di perangkat ini.", error)
           } finally { runCatching { YoutubeDL.destroyProcessById(processId) } }
     }
 

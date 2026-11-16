@@ -195,6 +195,7 @@ internal fun PrestigeBrandEmblem(
 
             if (shimmerEnabled && shimmerPhase in -0.75f..1.75f) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
+                    if (this.size.width <= 1f || this.size.height <= 1f || !shimmerPhase.isFinite()) return@Canvas
                     val beamW = this.size.width * 0.48f
                     val startX = shimmerPhase * this.size.width
                     drawRect(

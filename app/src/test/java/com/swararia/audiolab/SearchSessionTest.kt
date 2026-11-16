@@ -275,4 +275,57 @@ class SearchSessionTest {
             session.close()
         } finally { scope.cancel() }
     }
+
+    @Test(timeout = 5000) fun searchErrorIsContainedAsRecoverableStateWithoutBreakingNextSearch() = runBlocking {
+        Fixture().use { f ->
+            var failWithError = true
+            f.gateway.page = {
+                if (failWithError) throw UnsatisfiedLinkError("dlopen failed")
+                SearchPage(listOf(hit("bbbbbbbbbbb")), 1, 0)
+            }
+            f.session.search("lagu pertama", SearchProvider.YOUTUBE_MUSIC)
+            assertFalse(f.session.search.value.busy)
+            assertFalse(f.session.search.value.loadingMore)
+            assertEquals(
+                "Mesin pencarian tidak kompatibel atau gagal dijalankan di perangkat ini.",
+                f.session.search.value.error,
+            )
+            assertTrue(f.session.canStartOnlineOperation())
+
+            failWithError = false
+            f.session.search("lagu kedua", SearchProvider.YOUTUBE_MUSIC)
+            assertNull(f.session.search.value.error)
+            assertEquals(listOf(hit("bbbbbbbbbbb")), f.session.search.value.results)
+        }
+    }
+
+    @Test(timeout = 5000) fun previewErrorThrowableIsContainedAsRecoverableState() = runBlocking {
+        Fixture().use { f ->
+            f.gateway.stream = { throw LinkageError("missing symbol") }
+            f.session.preview(hit())
+            assertFalse(f.session.preview.value.loading)
+            assertEquals("Preview tidak tersedia dari sumber ini.", f.session.preview.value.error)
+            assertTrue(f.session.canStartOnlineOperation())
+
+            f.session.cancelPreview()
+            assertEquals(PreviewState(), f.session.preview.value)
+        }
+    }
+
+    @Test(timeout = 5000) fun searchCancellationExceptionClearsBusyWithoutPublishingError() = runBlocking {
+        Fixture().use { f ->
+            val started = CompletableDeferred<Unit>()
+            f.gateway.page = {
+                started.complete(Unit)
+                awaitCancellation()
+            }
+            f.session.search("dibatalkan", SearchProvider.YOUTUBE_MUSIC)
+            started.await()
+            f.session.cancelSearch()
+            yield()
+            assertFalse(f.session.search.value.busy)
+            assertNull(f.session.search.value.error)
+            assertTrue(f.session.canStartOnlineOperation())
+        }
+    }
 }

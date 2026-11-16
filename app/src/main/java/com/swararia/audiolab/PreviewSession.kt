@@ -41,7 +41,7 @@ class PreviewSession(
                     onResolved(media) // Direct dispatch: no Compose collector/lifecycle dependency.
                 }
             } catch (cancel: CancellationException) { throw cancel }
-              catch (_: Exception) {
+              catch (_: Throwable) {
                 if (previewGeneration.isCurrent(ticket)) {
                     searchRepository.invalidatePreview(hit.videoId)
                     previewState.value = PreviewState(hit = hit, error = "Preview tidak tersedia dari sumber ini.")
