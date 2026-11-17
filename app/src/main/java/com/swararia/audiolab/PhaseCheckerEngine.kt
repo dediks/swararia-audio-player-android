@@ -54,10 +54,36 @@ internal data class PhaseCheckerUiState(
 )
 
 /**
+ * Platform-agnostic contract for driving phase measurement, signal generation, and speaker checklist state.
+ */
+internal interface PhaseCheckerController {
+    val state: StateFlow<PhaseCheckerUiState>
+    fun isTransmitterRunning(): Boolean
+    fun refreshOutputRoute()
+    fun setMode(mode: PhaseTestSignalMode)
+    fun setGeneratorGain(gain: Float)
+    fun setSensitivity(sensitivity: PhaseMicSensitivity)
+    fun toggleMicInverted()
+    fun lockCurrentAsReference()
+    fun clearReference()
+    fun recordCurrentSpeaker(speakerName: String)
+    fun removeCheckEntry(id: Long)
+    fun clearChecklist()
+    fun clearError()
+    fun startGenerator()
+    fun stopGenerator()
+    suspend fun shareCurrentSignalWavAsync(): Result<Unit>
+    fun hasMicPermission(): Boolean
+    fun startMicAnalysis()
+    fun stopMicAnalysis()
+    fun release(stopTransmitter: Boolean)
+}
+
+/**
  * Coordinates RX acoustic microphone analysis ([AudioRecord]), A/B speaker checklist records,
  * and delegates TX signal transmission to [PhaseTransmitterService].
  */
-internal class PhaseCheckerEngine(context: Context) {
+internal class PhaseCheckerEngine(context: Context) : PhaseCheckerController {
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -70,7 +96,7 @@ internal class PhaseCheckerEngine(context: Context) {
         PhaseCheckerUiState(outputRoute = resolveCurrentOutputRoute()),
     )
 
-    val state: StateFlow<PhaseCheckerUiState> = combine(
+    override val state: StateFlow<PhaseCheckerUiState> = combine(
         rxState,
         PhaseTransmitterService.state,
     ) { rx, tx ->
@@ -95,11 +121,13 @@ internal class PhaseCheckerEngine(context: Context) {
     @Volatile
     private var stackResetRequested: Boolean = false
 
-    fun refreshOutputRoute() {
+    override fun isTransmitterRunning(): Boolean = PhaseTransmitterService.state.value.running
+
+    override fun refreshOutputRoute() {
         rxState.update { it.copy(outputRoute = resolveCurrentOutputRoute()) }
     }
 
-    fun setMode(mode: PhaseTestSignalMode) {
+    override fun setMode(mode: PhaseTestSignalMode) {
         if (activeMode != mode) {
             activeMode = mode
             stackResetRequested = true
@@ -108,17 +136,17 @@ internal class PhaseCheckerEngine(context: Context) {
         rxState.update { it.copy(errorMessage = null) }
     }
 
-    fun setGeneratorGain(gain: Float) {
+    override fun setGeneratorGain(gain: Float) {
         val clamped = gain.coerceIn(0.15f, 0.90f)
         PhaseTransmitterService.updateParams(appContext, state.value.mode, clamped)
     }
 
-    fun setSensitivity(sensitivity: PhaseMicSensitivity) {
+    override fun setSensitivity(sensitivity: PhaseMicSensitivity) {
         activeSensitivity = sensitivity
         rxState.update { it.copy(sensitivity = sensitivity, errorMessage = null) }
     }
 
-    fun toggleMicInverted() {
+    override fun toggleMicInverted() {
         val next = !invertMicPolarity
         invertMicPolarity = next
         rxState.update { current ->
@@ -137,7 +165,7 @@ internal class PhaseCheckerEngine(context: Context) {
         }
     }
 
-    fun lockCurrentAsReference() {
+    override fun lockCurrentAsReference() {
         rxState.update { current ->
             val v = current.heldEffectiveVerdict
             if (v == PolarityVerdict.POSITIVE || v == PolarityVerdict.NEGATIVE) {
@@ -148,11 +176,11 @@ internal class PhaseCheckerEngine(context: Context) {
         }
     }
 
-    fun clearReference() {
+    override fun clearReference() {
         rxState.update { it.copy(referencePolarity = null, errorMessage = null) }
     }
 
-    fun recordCurrentSpeaker(speakerName: String) {
+    override fun recordCurrentSpeaker(speakerName: String) {
         rxState.update { current ->
             val v = current.heldEffectiveVerdict
             if (v != PolarityVerdict.POSITIVE && v != PolarityVerdict.NEGATIVE) {
@@ -175,27 +203,27 @@ internal class PhaseCheckerEngine(context: Context) {
         }
     }
 
-    fun removeCheckEntry(id: Long) {
+    override fun removeCheckEntry(id: Long) {
         rxState.update { current ->
             current.copy(checkEntries = current.checkEntries.filterNot { it.id == id })
         }
     }
 
-    fun clearChecklist() {
+    override fun clearChecklist() {
         rxState.update { it.copy(checkEntries = emptyList()) }
     }
 
-    fun clearError() {
+    override fun clearError() {
         rxState.update { it.copy(errorMessage = null) }
         PhaseTransmitterService.clearError()
     }
 
-    fun startGenerator() {
+    override fun startGenerator() {
         refreshOutputRoute()
         PhaseTransmitterService.start(appContext, state.value.mode, state.value.generatorGain)
     }
 
-    fun stopGenerator() {
+    override fun stopGenerator() {
         PhaseTransmitterService.stop(appContext)
     }
 
@@ -206,18 +234,18 @@ internal class PhaseCheckerEngine(context: Context) {
             gain = state.value.generatorGain,
         )
 
-    suspend fun shareCurrentSignalWavAsync(): Result<Unit> =
+    override suspend fun shareCurrentSignalWavAsync(): Result<Unit> =
         PhaseWavExporter.sharePhaseTestWavAsync(
             context = appContext,
             mode = state.value.mode,
             gain = state.value.generatorGain,
         )
 
-    fun hasMicPermission(): Boolean =
+    override fun hasMicPermission(): Boolean =
         ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
 
-    fun startMicAnalysis() {
+    override fun startMicAnalysis() {
         if (micJob?.isActive == true) return
         if (!hasMicPermission()) {
             rxState.update {
@@ -247,7 +275,7 @@ internal class PhaseCheckerEngine(context: Context) {
         }
     }
 
-    fun stopMicAnalysis() {
+    override fun stopMicAnalysis() {
         micJob?.cancel()
         micJob = null
         rxState.update {
@@ -258,7 +286,7 @@ internal class PhaseCheckerEngine(context: Context) {
         }
     }
 
-    fun release(stopTransmitter: Boolean) {
+    override fun release(stopTransmitter: Boolean) {
         if (stopTransmitter) stopGenerator()
         stopMicAnalysis()
         scope.cancel()

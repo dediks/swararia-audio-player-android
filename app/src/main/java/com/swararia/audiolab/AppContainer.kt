@@ -99,6 +99,7 @@ class AppContainer(context: Context) {
     val remoteServerController: AndroidRemoteServerController by lazy {
         AndroidRemoteServerController(appContext, library, remoteNsdCoordinator)
     }
+    internal fun createPhaseCheckerEngine(): PhaseCheckerController = PhaseCheckerEngine(appContext)
 }
 
 class SwarariaApp : Application() {

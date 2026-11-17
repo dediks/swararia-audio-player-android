@@ -73,6 +73,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -111,20 +112,27 @@ private data class ComparisonBannerStyle(
 )
 
 @Composable
+private fun rememberPhaseCheckerViewModel(): PhaseCheckerViewModel {
+    val context = LocalContext.current.applicationContext
+    val factory = remember(context) { PhaseCheckerViewModelFactory.fromContext(context) }
+    return viewModel(factory = factory)
+}
+
+@Composable
 internal fun PhaseCheckerScreen(
     onBack: () -> Unit,
     onPauseOtherAudio: () -> Unit,
     modifier: Modifier = Modifier,
+    viewModel: PhaseCheckerViewModel = rememberPhaseCheckerViewModel(),
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val engine = remember(context) { PhaseCheckerEngine(context) }
-    val state by engine.state.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val phoneVolume = rememberPhoneMediaVolumeState()
 
     var topology by rememberSaveable {
         mutableStateOf(
-            if (PhaseTransmitterService.state.value.running) PhasePhoneTopology.TWO_PHONES
+            if (viewModel.isTransmitterActiveAtEntry()) PhasePhoneTopology.TWO_PHONES
             else PhasePhoneTopology.SINGLE_PHONE,
         )
     }
@@ -142,6 +150,9 @@ internal fun PhaseCheckerScreen(
     val preserveTxInBackground by rememberUpdatedState(
         topology == PhasePhoneTopology.TWO_PHONES && twoPhoneRole == PhaseTwoPhoneRole.TRANSMITTER,
     )
+    LaunchedEffect(preserveTxInBackground) {
+        viewModel.setPreserveTxInBackground(preserveTxInBackground)
+    }
 
     val notifPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -173,11 +184,11 @@ internal fun PhaseCheckerScreen(
             if (pendingStartSingleAllInOne) {
                 pendingStartSingleAllInOne = false
                 onPauseOtherAudio()
-                if (!state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
-                engine.startMicAnalysis()
-                engine.startGenerator()
+                if (!state.mode.usesMicPulse) viewModel.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
+                viewModel.startMicAnalysis()
+                viewModel.startGenerator()
             } else {
-                engine.startMicAnalysis()
+                viewModel.startMicAnalysis()
             }
         } else {
             pendingStartSingleAllInOne = false
@@ -185,32 +196,27 @@ internal fun PhaseCheckerScreen(
         }
     }
 
-    DisposableEffect(lifecycle, engine) {
+    DisposableEffect(lifecycle, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> engine.refreshOutputRoute()
-                Lifecycle.Event.ON_STOP -> {
-                    engine.stopMicAnalysis()
-                    if (!preserveTxInBackground) {
-                        engine.stopGenerator()
-                    }
-                }
+                Lifecycle.Event.ON_RESUME -> viewModel.refreshOutputRoute()
+                Lifecycle.Event.ON_STOP -> viewModel.onHostStop(preserveTxInBackground)
                 else -> Unit
             }
         }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
-            engine.release(stopTransmitter = !preserveTxInBackground)
+            viewModel.onScreenDisposed(preserveTxInBackground)
         }
     }
 
     val startSinglePulseAndMic: () -> Unit = {
-        if (!state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
-        if (engine.hasMicPermission()) {
+        if (!state.mode.usesMicPulse) viewModel.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
+        if (viewModel.hasMicPermission()) {
             onPauseOtherAudio()
-            engine.startMicAnalysis()
-            engine.startGenerator()
+            viewModel.startMicAnalysis()
+            viewModel.startGenerator()
         } else {
             pendingStartSingleAllInOne = true
             micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -219,11 +225,11 @@ internal fun PhaseCheckerScreen(
 
     val toggleRxMicOnly: () -> Unit = {
         if (state.micListening) {
-            engine.stopMicAnalysis()
+            viewModel.stopMicAnalysis()
         } else {
-            if (!state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
-            if (engine.hasMicPermission()) {
-                engine.startMicAnalysis()
+            if (!state.mode.usesMicPulse) viewModel.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
+            if (viewModel.hasMicPermission()) {
+                viewModel.startMicAnalysis()
             } else {
                 pendingStartSingleAllInOne = false
                 micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -242,11 +248,10 @@ internal fun PhaseCheckerScreen(
             PhaseCheckerHeader(
                 outputRoute = state.outputRoute,
                 onBack = {
-                    engine.stopMicAnalysis()
-                    if (!preserveTxInBackground) engine.stopGenerator()
+                    viewModel.onScreenDisposed(preserveTxInBackground)
                     onBack()
                 },
-                onRefreshRoute = { engine.refreshOutputRoute() },
+                onRefreshRoute = viewModel::refreshOutputRoute,
                 onOpenGuide = { showGuideDialog = true },
             )
         }
@@ -259,13 +264,13 @@ internal fun PhaseCheckerScreen(
                 onSelect = { next ->
                     topology = next
                     if (next == PhasePhoneTopology.SINGLE_PHONE && singleSubMode == PhaseSingleSubMode.STEREO_EAR) {
-                        engine.stopMicAnalysis()
+                        viewModel.stopMicAnalysis()
                     } else if (next == PhasePhoneTopology.TWO_PHONES) {
                         if (twoPhoneRole == PhaseTwoPhoneRole.RECEIVER) {
-                            engine.stopGenerator()
-                            if (!state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
+                            viewModel.stopGenerator()
+                            if (!state.mode.usesMicPulse) viewModel.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
                         } else {
-                            engine.stopMicAnalysis()
+                            viewModel.stopMicAnalysis()
                         }
                     }
                 },
@@ -280,14 +285,14 @@ internal fun PhaseCheckerScreen(
                     onSelectSubMode = { next ->
                         singleSubMode = next
                         if (next == PhaseSingleSubMode.STEREO_EAR) {
-                            engine.stopMicAnalysis()
-                            if (state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.STEREO_IN_PHASE)
+                            viewModel.stopMicAnalysis()
+                            if (state.mode.usesMicPulse) viewModel.setMode(PhaseTestSignalMode.STEREO_IN_PHASE)
                         } else if (!state.mode.usesMicPulse) {
-                            engine.stopGenerator()
-                            engine.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
+                            viewModel.stopGenerator()
+                            viewModel.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
                         }
                     },
-                    onSelectPulseMode = { engine.setMode(it) },
+                    onSelectPulseMode = viewModel::setMode,
                 )
             }
         } else {
@@ -303,10 +308,10 @@ internal fun PhaseCheckerScreen(
                     onSelect = { role ->
                         twoPhoneRole = role
                         if (role == PhaseTwoPhoneRole.TRANSMITTER) {
-                            engine.stopMicAnalysis()
+                            viewModel.stopMicAnalysis()
                         } else {
-                            engine.stopGenerator()
-                            if (!state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
+                            viewModel.stopGenerator()
+                            if (!state.mode.usesMicPulse) viewModel.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
                         }
                     },
                 )
@@ -321,7 +326,7 @@ internal fun PhaseCheckerScreen(
                     border = foh.alertBorder,
                     accent = foh.alertAccent,
                     actionLabel = "Tutup",
-                    onAction = { engine.clearError() },
+                    onAction = viewModel::clearError,
                 )
             }
         }
@@ -330,7 +335,7 @@ internal fun PhaseCheckerScreen(
             (topology == PhasePhoneTopology.TWO_PHONES && twoPhoneRole == PhaseTwoPhoneRole.RECEIVER)
         val showsTxUi = topology == PhasePhoneTopology.SINGLE_PHONE ||
             (topology == PhasePhoneTopology.TWO_PHONES && twoPhoneRole == PhaseTwoPhoneRole.TRANSMITTER)
-        if (permissionDeniedOnce && !engine.hasMicPermission() && showsMicUi) {
+        if (permissionDeniedOnce && !viewModel.hasMicPermission() && showsMicUi) {
             item(key = "phase-mic-denied") {
                 AlertMessageBanner(
                     message = "Izin mikrofon belum diberikan. Buka setelan aplikasi agar alat dapat mendengar impuls speaker.",
@@ -379,8 +384,8 @@ internal fun PhaseCheckerScreen(
                         idleIcon = UiIcons.Play,
                         onClick = {
                             if (active) {
-                                engine.stopGenerator()
-                                engine.stopMicAnalysis()
+                                viewModel.stopGenerator()
+                                viewModel.stopMicAnalysis()
                             } else {
                                 startSinglePulseAndMic()
                             }
@@ -392,14 +397,11 @@ internal fun PhaseCheckerScreen(
                         state = state,
                         selectedSpeakerSlot = selectedSpeakerSlot,
                         onSelectSpeakerSlot = { selectedSpeakerSlot = it },
-                        onGainChange = { engine.setGeneratorGain(it) },
-                        onSelectSensitivity = { engine.setSensitivity(it) },
-                        onLockOrClearRef = {
-                            if (state.referencePolarity != null) engine.clearReference()
-                            else engine.lockCurrentAsReference()
-                        },
-                        onToggleInvertMic = { engine.toggleMicInverted() },
-                        onSaveResult = { engine.recordCurrentSpeaker(selectedSpeakerSlot) },
+                        onGainChange = viewModel::setGeneratorGain,
+                        onSelectSensitivity = viewModel::setSensitivity,
+                        onLockOrClearRef = viewModel::toggleReferenceLock,
+                        onToggleInvertMic = viewModel::toggleMicInverted,
+                        onSaveResult = { viewModel.recordCurrentSpeaker(selectedSpeakerSlot) },
                     )
                 }
             }
@@ -408,16 +410,16 @@ internal fun PhaseCheckerScreen(
                 item(key = "single-stereo-ear") {
                     StereoEarCheckerCard(
                         state = state,
-                        onSelectStereoMode = { engine.setMode(it) },
-                        onGainChange = { engine.setGeneratorGain(it) },
+                        onSelectStereoMode = viewModel::setMode,
+                        onGainChange = viewModel::setGeneratorGain,
                         onTogglePlay = {
                             if (state.generatorRunning) {
-                                engine.stopGenerator()
+                                viewModel.stopGenerator()
                             } else {
                                 launchTxWithOptionalNotif {
-                                    if (state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.STEREO_IN_PHASE)
+                                    if (state.mode.usesMicPulse) viewModel.setMode(PhaseTestSignalMode.STEREO_IN_PHASE)
                                     onPauseOtherAudio()
-                                    engine.startGenerator()
+                                    viewModel.startGenerator()
                                 }
                             }
                         },
@@ -429,19 +431,19 @@ internal fun PhaseCheckerScreen(
                 item(key = "two-tx-card") {
                     TwoPhoneTransmitterCard(
                         state = state,
-                        onSelectMode = { engine.setMode(it) },
-                        onGainChange = { engine.setGeneratorGain(it) },
+                        onSelectMode = viewModel::setMode,
+                        onGainChange = viewModel::setGeneratorGain,
                         onToggleTransmit = {
                             if (state.generatorRunning) {
-                                engine.stopGenerator()
+                                viewModel.stopGenerator()
                             } else {
                                 launchTxWithOptionalNotif {
                                     onPauseOtherAudio()
-                                    engine.startGenerator()
+                                    viewModel.startGenerator()
                                 }
                             }
                         },
-                        onShareWav = { engine.shareCurrentSignalWavAsync() },
+                        onShareWav = { viewModel.shareCurrentSignalWavAsync() },
                     )
                 }
             }
@@ -464,14 +466,11 @@ internal fun PhaseCheckerScreen(
                         state = state,
                         selectedSpeakerSlot = selectedSpeakerSlot,
                         onSelectSpeakerSlot = { selectedSpeakerSlot = it },
-                        onSelectPulseMode = { engine.setMode(it) },
-                        onSelectSensitivity = { engine.setSensitivity(it) },
-                        onLockOrClearRef = {
-                            if (state.referencePolarity != null) engine.clearReference()
-                            else engine.lockCurrentAsReference()
-                        },
-                        onToggleInvertMic = { engine.toggleMicInverted() },
-                        onSaveResult = { engine.recordCurrentSpeaker(selectedSpeakerSlot) },
+                        onSelectPulseMode = viewModel::setMode,
+                        onSelectSensitivity = viewModel::setSensitivity,
+                        onLockOrClearRef = viewModel::toggleReferenceLock,
+                        onToggleInvertMic = viewModel::toggleMicInverted,
+                        onSaveResult = { viewModel.recordCurrentSpeaker(selectedSpeakerSlot) },
                     )
                 }
             }
@@ -481,8 +480,8 @@ internal fun PhaseCheckerScreen(
             item(key = "phase-checklist") {
                 SpeakerChecklistCard(
                     entries = state.checkEntries,
-                    onRemoveEntry = { engine.removeCheckEntry(it) },
-                    onClearAll = { engine.clearChecklist() },
+                    onRemoveEntry = viewModel::removeCheckEntry,
+                    onClearAll = viewModel::clearChecklist,
                 )
             }
         }
