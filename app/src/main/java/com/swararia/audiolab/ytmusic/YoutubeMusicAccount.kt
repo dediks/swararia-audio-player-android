@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.ytmusic
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
