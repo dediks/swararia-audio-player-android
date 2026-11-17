@@ -1,6 +1,8 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.foh
 
 import android.content.Context
+import com.swararia.audiolab.FohTheme
+import com.swararia.audiolab.UiIcons
 import android.database.ContentObserver
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo

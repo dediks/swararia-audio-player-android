@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.remote
 
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.JsonNode

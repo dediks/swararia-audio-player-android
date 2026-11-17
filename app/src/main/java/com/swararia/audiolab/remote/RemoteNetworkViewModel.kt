@@ -1,8 +1,10 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.remote
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import com.swararia.audiolab.AppContainer
+import com.swararia.audiolab.SwarariaApp
 import kotlinx.coroutines.flow.StateFlow
 
 /**

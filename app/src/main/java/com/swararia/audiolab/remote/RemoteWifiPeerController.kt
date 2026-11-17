@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.remote
 
 import android.Manifest
 import android.annotation.SuppressLint

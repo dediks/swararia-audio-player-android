@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.remote
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.Assert.assertEquals

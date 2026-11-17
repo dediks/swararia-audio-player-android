@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.remote
 
 import com.google.android.gms.common.ConnectionResult
 import com.google.mlkit.common.MlKitException

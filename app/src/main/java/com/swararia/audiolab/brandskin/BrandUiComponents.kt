@@ -5,7 +5,7 @@ import android.graphics.BitmapFactory
 import android.util.LruCache
 import com.swararia.audiolab.FohTheme
 import com.swararia.audiolab.RoyalBrandLogo
-import com.swararia.audiolab.rememberLocalAudioSignal
+import com.swararia.audiolab.foh.rememberLocalAudioSignal
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image

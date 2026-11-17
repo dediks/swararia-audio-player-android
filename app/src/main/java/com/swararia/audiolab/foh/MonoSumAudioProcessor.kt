@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.foh
 
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor

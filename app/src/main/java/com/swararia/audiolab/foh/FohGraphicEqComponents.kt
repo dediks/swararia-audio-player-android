@@ -1,6 +1,8 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.foh
 
 import androidx.compose.foundation.BorderStroke
+import com.swararia.audiolab.FohTheme
+import com.swararia.audiolab.UiIcons
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border

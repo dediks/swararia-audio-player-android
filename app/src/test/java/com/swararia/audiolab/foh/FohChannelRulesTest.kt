@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.foh
 
 import android.media.AudioDeviceInfo
 import org.junit.Assert.assertEquals

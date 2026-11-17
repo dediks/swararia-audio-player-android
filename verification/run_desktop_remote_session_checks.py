@@ -7,8 +7,8 @@ BASE=ROOT
 OUT=Path(os.environ['TMPDIR'])/'swararia-remote-session-checks'
 OUT.mkdir(parents=True, exist_ok=True)
 CACHE=BASE/'.cache/gradle/caches/modules-2/files-2.1'
-SRC=ROOT/'app/src/main/java/com/swararia/audiolab'
-TEST=ROOT/'app/src/test/java/com/swararia/audiolab'
+SRC=ROOT/'app/src/main/java/com/swararia/audiolab/remote'
+TEST=ROOT/'app/src/test/java/com/swararia/audiolab/remote'
 def artifact(g,a,v):
     return next((CACHE/g/a/v).rglob('*.jar'))
 compiler=artifact('org.jetbrains.kotlin','kotlin-compiler-embeddable','2.2.21')
@@ -29,7 +29,7 @@ print(log,flush=True)
 if result.returncode: raise SystemExit(result.returncode)
 failed = False
 for label, tests in [('remote-session-inventory',classes)]:
-    result=subprocess.run([java,'-Xmx256m','-cp',':'.join(map(str,[jar]+cp)),'org.junit.runner.JUnitCore']+['com.swararia.audiolab.'+s for s in tests],capture_output=True,text=True,timeout=60)
+    result=subprocess.run([java,'-Xmx256m','-cp',':'.join(map(str,[jar]+cp)),'org.junit.runner.JUnitCore']+['com.swararia.audiolab.remote.'+s for s in tests],capture_output=True,text=True,timeout=60)
     text=label+' exit='+str(result.returncode)+'\n'+result.stdout+result.stderr
     failed = failed or result.returncode != 0
     log+=text

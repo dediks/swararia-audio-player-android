@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.foh
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.util.Locale

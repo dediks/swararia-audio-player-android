@@ -39,7 +39,7 @@ jar = OUT / 'wire-probe.jar'
 subprocess.run([java, '-Xmx512m', '-cp', ':'.join(map(str, [compiler, annotations] + deps)),
                 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-no-stdlib', '-no-reflect',
                 '-jvm-target', '17', '-classpath', ':'.join(map(str, cp)), '-d', str(jar),
-                str(SRC / 'DesktopRemoteProtocol.kt'), str(SRC / 'DesktopRemoteHttpsApi.kt'),
+                str(SRC / 'remote/DesktopRemoteProtocol.kt'), str(SRC / 'remote/DesktopRemoteHttpsApi.kt'),
                 str(ROOT / 'verification/DesktopRemoteWireProbe.kt')], check=True, cwd=ROOT, timeout=90)
 subprocess.run([java, '-Xmx256m', '-Djava.io.tmpdir=' + str(OUT), '-cp',
                 ':'.join(map(str, [jar] + cp)), 'com.swararia.audiolab.DesktopRemoteWireProbe',

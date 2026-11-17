@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.remote
 
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream

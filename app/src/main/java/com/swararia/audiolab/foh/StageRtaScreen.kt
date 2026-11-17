@@ -1,6 +1,16 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.foh
 
 import androidx.compose.animation.AnimatedVisibility
+import com.swararia.audiolab.AudioTrack
+import com.swararia.audiolab.CompactCircleButton
+import com.swararia.audiolab.FadeRules
+import com.swararia.audiolab.FohTheme
+import com.swararia.audiolab.LocalPlaybackControlUi
+import com.swararia.audiolab.PlaybackModeBar
+import com.swararia.audiolab.SessionPlayback
+import com.swararia.audiolab.UiIcons
+import com.swararia.audiolab.playbackTitle
+import com.swararia.audiolab.toggleSwarariaPlayback
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut

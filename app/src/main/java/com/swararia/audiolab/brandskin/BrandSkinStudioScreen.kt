@@ -7,7 +7,7 @@ import com.swararia.audiolab.CircularProgressIndicatorCompact
 import com.swararia.audiolab.CompactCircleButton
 import com.swararia.audiolab.FohTheme
 import com.swararia.audiolab.UiIcons
-import com.swararia.audiolab.rememberLocalAudioSignal
+import com.swararia.audiolab.foh.rememberLocalAudioSignal
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable

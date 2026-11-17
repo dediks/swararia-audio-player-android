@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.foh
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder

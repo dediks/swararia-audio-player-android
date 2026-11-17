@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.foh
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State

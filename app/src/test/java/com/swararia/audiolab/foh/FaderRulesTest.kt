@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.foh
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

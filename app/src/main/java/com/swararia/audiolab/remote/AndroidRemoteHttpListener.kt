@@ -1,6 +1,7 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.remote
 
 import com.fasterxml.jackson.core.JsonParser
+import com.swararia.audiolab.LibraryRules
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper

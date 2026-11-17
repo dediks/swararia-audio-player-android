@@ -2,6 +2,10 @@ package com.swararia.audiolab
 
 import android.os.Bundle
 import android.os.SystemClock
+import com.swararia.audiolab.foh.FaderRules
+import com.swararia.audiolab.foh.FaderState
+import com.swararia.audiolab.foh.GraphicEqRules
+import com.swararia.audiolab.foh.GraphicEqState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement

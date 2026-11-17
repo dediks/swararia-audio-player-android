@@ -13,13 +13,14 @@ CACHE = ROOT / '.cache/gradle/caches/modules-2/files-2.1'
 OUT = Path(os.environ['TMPDIR']) / 'swararia-android-server-checks'
 OUT.mkdir(parents=True, exist_ok=True)
 SRC = ROOT / 'app/src/main/java/com/swararia/audiolab'
-TEST = ROOT / 'app/src/test/java/com/swararia/audiolab'
+SRC_REMOTE = SRC / 'remote'
+TEST_REMOTE = ROOT / 'app/src/test/java/com/swararia/audiolab/remote'
 classes = ['AndroidRemoteServerEngineTest', 'AndroidRemoteTlsIdentityTest', 'AndroidRemoteHttpLoopbackTest']
-fixture = (TEST / 'AndroidRemoteHttpLoopbackTest.kt').read_text()
+fixture = (TEST_REMOTE / 'AndroidRemoteHttpLoopbackTest.kt').read_text()
 # Fail closed if the approved fixtures gain a nonloopback listener or client.
 assert re.findall(r'bindIp\s*=\s*"([^"]+)"', fixture) == ['127.0.0.1', '127.0.0.1']
 assert 'createSocket("127.0.0.1", port)' in fixture
-listener = (SRC / 'AndroidRemoteHttpListener.kt').read_text()
+listener = (SRC_REMOTE / 'AndroidRemoteHttpListener.kt').read_text()
 assert 'createServerSocket(requestedPort, TOTAL_SLOTS, inet)' in listener
 assert 'InetAddress.getByAddress(bindIp, ipBytes)' in listener
 
@@ -42,13 +43,15 @@ cp = [artifact('org.jetbrains.kotlin', 'kotlin-stdlib', '2.2.21'), annotations,
       ROOT / '.toolchain/gradle/lib/hamcrest-core-1.3.jar']
 java = str(ROOT / '.toolchain/jdk/bin/java')
 jar = OUT / 'android-server.jar'
-sources = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'LibraryRules', 'UiPresentation',
-           'AndroidRemoteServerEngine', 'AndroidRemoteTlsIdentity', 'AndroidRemoteHttpListener']
+root_sources = ['LibraryRules', 'UiPresentation']
+remote_sources = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi',
+                  'AndroidRemoteServerEngine', 'AndroidRemoteTlsIdentity', 'AndroidRemoteHttpListener']
 cmd = [java, '-Xmx512m', '-cp', ':'.join(map(str, [compiler, annotations] + deps)),
        'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-no-stdlib', '-no-reflect',
        '-jvm-target', '17', '-classpath', ':'.join(map(str, cp)), '-d', str(jar)]
-cmd += [str(SRC / (s + '.kt')) for s in sources]
-cmd += [str(TEST / (s + '.kt')) for s in classes]
+cmd += [str(SRC / (s + '.kt')) for s in root_sources]
+cmd += [str(SRC_REMOTE / (s + '.kt')) for s in remote_sources]
+cmd += [str(TEST_REMOTE / (s + '.kt')) for s in classes]
 result = subprocess.run(cmd, capture_output=True, text=True, timeout=100, cwd=ROOT)
 log = 'COMPILER exit=' + str(result.returncode) + '\n' + result.stdout + result.stderr
 print(log, flush=True)
@@ -59,7 +62,7 @@ failed = False
 for test in classes:
     result = subprocess.run([java, '-Xmx256m', '-Djava.io.tmpdir=' + str(OUT), '-cp',
                              ':'.join(map(str, [jar] + cp)), 'org.junit.runner.JUnitCore',
-                             'com.swararia.audiolab.' + test],
+                             'com.swararia.audiolab.remote.' + test],
                             capture_output=True, text=True, timeout=60, cwd=ROOT)
     text = test + ' exit=' + str(result.returncode) + '\n' + result.stdout + result.stderr
     log += text

@@ -24,7 +24,7 @@ class DesktopRemoteWiring(unittest.TestCase):
 
     def test_remote_feature_never_owns_phone_player_or_durable_credentials(self):
         names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteScreen', 'DesktopRemoteComponents', 'DesktopRemoteQrScanner']
-        source = '\n'.join((SRC / (n + '.kt')).read_text() for n in names)
+        source = '\n'.join((SRC / 'remote' / (n + '.kt')).read_text() for n in names)
         for forbidden in ['MediaController', 'ExoPlayer', 'PlaybackService', 'SharedPreferences',
                           'SavedStateHandle', 'rememberSaveable', 'setDefaultSSLSocketFactory',
                           'setDefaultHostnameVerifier', 'setHostnameVerifier']:
@@ -34,7 +34,7 @@ class DesktopRemoteWiring(unittest.TestCase):
         self.assertIn('com.google.mlkit.vision.DEPENDENCIES', manifest)
 
     def test_keystore_store_uses_android_keystore_aes_gcm_without_shared_preferences(self):
-        store = (SRC / 'AndroidKeystoreDesktopRemoteStore.kt').read_text()
+        store = (SRC / 'remote/AndroidKeystoreDesktopRemoteStore.kt').read_text()
         for required in ['AndroidKeyStore', 'AES/GCM/NoPadding', 'noBackupFilesDir']:
             self.assertIn(required, store)
         for forbidden in ['SharedPreferences', 'MODE_PRIVATE', 'MODE_WORLD_READABLE', 'AES/ECB', 'AES/CBC']:
@@ -48,14 +48,14 @@ class DesktopRemoteWiring(unittest.TestCase):
         swararia_ui = (SRC / 'SwarariaUi.kt').read_text()
         self.assertIn('3 -> RemoteTabScreen(', swararia_ui)
 
-        remote_screen = (SRC / 'RemoteServerScreen.kt').read_text()
+        remote_screen = (SRC / 'remote/RemoteServerScreen.kt').read_text()
         for required in ['DesktopRemoteScreen(', 'RemoteServerUiState', 'RemoteServerUiActions', 'QRCodeWriter']:
             self.assertIn(required, remote_screen)
         for forbidden in ['PlaybackService', 'MediaController', 'ExoPlayer', 'AudioDatabase', 'MediaLibrary',
                           'AndroidRemoteTlsIdentity', 'SSLServerSocket', 'SharedPreferences']:
             self.assertNotIn(forbidden, remote_screen)
 
-        server_sources = '\n'.join((SRC / (n + '.kt')).read_text() for n in [
+        server_sources = '\n'.join((SRC / 'remote' / (n + '.kt')).read_text() for n in [
             'AndroidRemoteTlsIdentity', 'AndroidRemoteServerEngine',
             'AndroidRemoteHttpListener', 'AndroidRemoteServerController',
         ])

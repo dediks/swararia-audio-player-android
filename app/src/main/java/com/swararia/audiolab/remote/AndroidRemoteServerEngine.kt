@@ -1,5 +1,6 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.remote
 
+import com.swararia.audiolab.UiPresentation
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64

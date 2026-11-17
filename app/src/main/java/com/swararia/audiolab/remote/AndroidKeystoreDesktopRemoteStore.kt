@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.remote
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
