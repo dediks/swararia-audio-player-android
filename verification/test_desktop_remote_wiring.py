@@ -23,7 +23,7 @@ class DesktopRemoteWiring(unittest.TestCase):
         self.assertIn('desktopRemote.release()', vm)
 
     def test_remote_feature_never_owns_phone_player_or_durable_credentials(self):
-        non_screen_names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteComponents', 'DesktopRemoteQrScanner']
+        non_screen_names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteComponents', 'DesktopRemoteTransportDock', 'DesktopRemotePairingUi', 'DesktopRemoteQrScanner']
         screen_source = (SRC / 'remote/DesktopRemoteScreen.kt').read_text()
         source = '\n'.join([(SRC / 'remote' / (n + '.kt')).read_text() for n in non_screen_names] + [screen_source])
         for forbidden in ['MediaController', 'ExoPlayer', 'PlaybackService', 'SharedPreferences',
@@ -57,11 +57,13 @@ class DesktopRemoteWiring(unittest.TestCase):
         self.assertIn('MoreToolRoute.REMOTE -> RemoteTabScreen(', more_screen)
 
         remote_screen = (SRC / 'remote/RemoteServerScreen.kt').read_text()
+        remote_cards = (SRC / 'remote/RemoteServerCards.kt').read_text()
         for required in ['DesktopRemoteScreen(', 'RemoteServerUiState', 'RemoteServerUiActions', 'QRCodeWriter']:
             self.assertIn(required, remote_screen)
         for forbidden in ['PlaybackService', 'MediaController', 'ExoPlayer', 'AudioDatabase', 'MediaLibrary',
                           'AndroidRemoteTlsIdentity', 'SSLServerSocket', 'SharedPreferences']:
             self.assertNotIn(forbidden, remote_screen)
+            self.assertNotIn(forbidden, remote_cards)
 
         server_sources = '\n'.join((SRC / 'remote' / (n + '.kt')).read_text() for n in [
             'AndroidRemoteTlsIdentity', 'AndroidRemoteServerEngine',
