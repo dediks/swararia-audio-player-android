@@ -109,16 +109,24 @@ interface DesktopRemoteApi {
 }
 
 class DesktopRemoteHttpsApi(
-    private val clientLabelProvider: () -> String = { defaultAndroidClientLabel() },
+    private val clientLabelProvider: () -> String = { "SWR Player Android" },
 ) : DesktopRemoteApi {
     @Volatile
     private var connectionOpener: RemoteHttpsConnectionOpener? = null
 
+    @Volatile
+    private var dynamicClientLabelProvider: () -> String = clientLabelProvider
+
     fun withConnectionOpener(opener: RemoteHttpsConnectionOpener): DesktopRemoteHttpsApi = apply {
         connectionOpener = opener
     }
+
+    /** Injects the platform-provided device label supplier from the composition root. */
+    fun withClientLabelProvider(provider: () -> String): DesktopRemoteHttpsApi = apply {
+        dynamicClientLabelProvider = provider
+    }
     override suspend fun pair(pairing: DesktopRemotePairing) = DesktopRemoteJson.grant(
-        request(pairing, pairing.invitation(), "/v1/pair", DesktopRemoteJson.pairBody(clientLabelProvider()), 202))
+        request(pairing, pairing.invitation(), "/v1/pair", DesktopRemoteJson.pairBody(dynamicClientLabelProvider()), 202))
     override suspend fun session(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
         DesktopRemoteJson.approval(request(pairing, grant.authorization(), "/v1/session"))
     override suspend fun capabilities(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
@@ -456,18 +464,19 @@ class DesktopRemoteHttpsApi(
     }
 }
 
-private fun defaultAndroidClientLabel(): String {
-    val manufacturer = android.os.Build.MANUFACTURER?.trim().orEmpty()
-    val model = android.os.Build.MODEL?.trim().orEmpty()
-    val prettyManufacturer = manufacturer
-        .lowercase(java.util.Locale.ROOT)
-        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }
+/** Formats a sanitized pairing client label from raw manufacturer and model names. */
+fun formatDeviceClientLabel(manufacturer: String?, model: String?): String {
+    val cleanManufacturer = manufacturer?.trim().orEmpty()
+    val cleanModel = model?.trim().orEmpty()
+    val prettyManufacturer = cleanManufacturer
+        .lowercase(Locale.ROOT)
+        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
     val combined = when {
-        model.isBlank() && prettyManufacturer.isBlank() -> "SWR Player Android"
-        model.isBlank() -> prettyManufacturer
-        prettyManufacturer.isBlank() -> model
-        model.startsWith(prettyManufacturer, ignoreCase = true) -> model
-        else -> "$prettyManufacturer $model"
+        cleanModel.isBlank() && prettyManufacturer.isBlank() -> "SWR Player Android"
+        cleanModel.isBlank() -> prettyManufacturer
+        prettyManufacturer.isBlank() -> cleanModel
+        cleanModel.startsWith(prettyManufacturer, ignoreCase = true) -> cleanModel
+        else -> "$prettyManufacturer $cleanModel"
     }
     return DesktopRemoteJson.sanitizePairLabel(combined)
 }

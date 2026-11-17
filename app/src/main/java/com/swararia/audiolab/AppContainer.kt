@@ -2,6 +2,7 @@ package com.swararia.audiolab
 
 import android.app.Application
 import android.content.Context
+import android.os.Build
 import android.os.StatFs
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -21,6 +22,7 @@ import com.swararia.audiolab.remote.DesktopRemotePersistence
 import com.swararia.audiolab.remote.RemoteNsdCoordinator
 import com.swararia.audiolab.remote.RemoteWifiPeerController
 import com.swararia.audiolab.remote.RemoteWifiTransport
+import com.swararia.audiolab.remote.formatDeviceClientLabel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,7 +79,9 @@ class AppContainer(context: Context) {
         }
     }
     fun previewPlayback(): PreviewPlayback = PreviewRemote(appContext)
-    fun desktopRemoteApi(): DesktopRemoteApi = DesktopRemoteHttpsApi().withConnectionOpener(remoteWifiTransport)
+    fun desktopRemoteApi(): DesktopRemoteApi = DesktopRemoteHttpsApi()
+        .withConnectionOpener(remoteWifiTransport)
+        .withClientLabelProvider { formatDeviceClientLabel(Build.MANUFACTURER, Build.MODEL) }
     private val rememberedDesktopSession by lazy {
         DesktopRemotePersistence(AndroidKeystoreDesktopRemoteStore(appContext))
     }

@@ -51,4 +51,14 @@ class DesktopRemoteProtocolTest {
         val json = DesktopRemoteJson.objectValue(body)
         assertEquals("FOH \"Main\"\\Lab", json.get("label")?.asText())
     }
+
+    @Test
+    fun formatDeviceClientLabelNormalizesManufacturerAndModel() {
+        assertEquals("SWR Player Android", formatDeviceClientLabel(null, "  "))
+        assertEquals("Samsung", formatDeviceClientLabel("samsung", ""))
+        assertEquals("Pixel 8", formatDeviceClientLabel(null, "Pixel 8"))
+        assertEquals("Samsung SM-M156B", formatDeviceClientLabel("samsung", "Samsung SM-M156B"))
+        assertEquals("Samsung SM-M156B", formatDeviceClientLabel("samsung", "SM-M156B"))
+        assertEquals("Xiaomi 2312DRA50G", formatDeviceClientLabel("XIAOMI", "2312DRA50G"))
+    }
 }
