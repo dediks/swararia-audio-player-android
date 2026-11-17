@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.phasechecker
 
 import kotlin.math.PI
 import kotlin.math.abs

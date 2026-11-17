@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.phasechecker
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -16,6 +16,8 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.swararia.audiolab.MainActivity
+import com.swararia.audiolab.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

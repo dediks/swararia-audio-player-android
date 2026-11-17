@@ -1,8 +1,11 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.brandskin
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
+import com.swararia.audiolab.FohTheme
+import com.swararia.audiolab.RoyalBrandLogo
+import com.swararia.audiolab.rememberLocalAudioSignal
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image

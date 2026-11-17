@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.phasechecker
 
 import androidx.lifecycle.ViewModelStore
 import kotlinx.coroutines.flow.MutableStateFlow

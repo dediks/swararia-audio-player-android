@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.brandskin
 
 import android.content.Context
 import android.content.SharedPreferences

@@ -1,8 +1,9 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.brandskin
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.swararia.audiolab.AppContainer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel

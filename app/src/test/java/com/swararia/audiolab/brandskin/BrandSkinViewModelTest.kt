@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.brandskin
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope

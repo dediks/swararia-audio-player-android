@@ -1,4 +1,4 @@
-package com.swararia.audiolab
+package com.swararia.audiolab.brandskin
 
 /**
  * Curated FOH dark console skin palettes represented with ARGB Long tokens so pure JVM tests stay
