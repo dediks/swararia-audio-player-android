@@ -3,6 +3,8 @@ package com.swararia.audiolab
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontFamily
@@ -83,6 +88,7 @@ internal fun LibraryPage(
     failedDownloadCount: Int = 0,
     onOpenDownloads: () -> Unit = {},
     playlistActions: PlaylistUiActions = PlaylistUiActions(),
+    onInspectDetails: (AudioTrack) -> Unit = {},
     onRename: (AudioTrack) -> Unit,
     onHistory: () -> Unit,
     onSettings: () -> Unit,
@@ -93,6 +99,7 @@ internal fun LibraryPage(
     val state = rememberLibraryBrowserState(tracks = tracks, playlists = playlists)
     val section = state.section
     val groupMode = state.groupMode
+    val viewType = state.viewType
     val activePlaylist = state.activePlaylist
 
     BackHandler(enabled = state.selectionMode && section == LibrarySectionTab.ALL_TRACKS) {
@@ -110,10 +117,13 @@ internal fun LibraryPage(
     val groupedTracks = state.groupedTracks
     val activeTrackId = remember(currentId) { currentId?.toLongOrNull() }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val gridColumns = remember(screenWidthDp) { UiPresentation.songGridColumnCount(screenWidthDp) }
     val brandManager = remember(context) {
         (context.applicationContext as? SwarariaApp)?.container?.brandSkinManager
     }
     val brand = FohTheme.brand
+    val rowVerticalSpacing = if (viewType == LibrarySongViewType.COMPACT && !state.reorderMode) 5.dp else 8.dp
 
     Column(modifier = modifier.fillMaxSize()) {
         LazyColumn(
@@ -121,7 +131,7 @@ internal fun LibraryPage(
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(rowVerticalSpacing),
         ) {
             if (!(section == LibrarySectionTab.PLAYLISTS && activePlaylist != null)) {
                 item(key = "library-header", contentType = "library-header") {
@@ -132,6 +142,7 @@ internal fun LibraryPage(
                         selectionMode = state.selectionMode,
                         query = state.query,
                         groupMode = groupMode,
+                        viewType = viewType,
                         alphabetical = state.alphabetical,
                         importEnabled = !ingest.busy && !search.busy && !organizerBusy,
                         actionBusy = organizerBusy,
@@ -141,6 +152,7 @@ internal fun LibraryPage(
                         onCreatePlaylist = { state.dialog = LibraryDialog.CreatePlaylist },
                         onQueryChange = { state.query = it },
                         onSelectGroupMode = state::selectGroupMode,
+                        onSelectViewType = state::selectViewType,
                         onToggleSort = { state.alphabetical = it },
                         onHistory = onHistory,
                         onSettings = onSettings,
@@ -211,26 +223,29 @@ internal fun LibraryPage(
                                 )
                             }
                         } else {
-                            items(sortedMatching, key = { it.id }, contentType = { "track-row" }) { track ->
-                                LibraryAudioRow(
-                                    track = track,
-                                    selected = track.id.toString() == currentId,
-                                    wantsPlay = wantsPlay,
-                                    connected = connected,
-                                    renameEnabled = !organizerBusy,
-                                    selectionChecked = if (state.selectionMode) (track.id in state.selectedIds) else null,
-                                    playlistBadge = badgeByTrackId[track.id],
-                                    onToggleSelect = { state.toggleTrackSelection(track.id) },
-                                    onLongPress = { state.startSelectionWith(track.id) },
-                                    onPlay = { onPlayQueue(track, sortedMatching) },
-                                    onCue = { onCueQueue(track, sortedMatching) },
-                                    onTogglePlayPause = onToggleCurrentPlayPause,
-                                    onOpenPlayer = onOpenPlayer,
-                                    onRename = { onRename(track) },
-                                    onAddToPlaylist = { state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
-                                    onDelete = { onDelete(track) },
-                                )
-                            }
+                            libraryTracksItems(
+                                tracks = sortedMatching,
+                                viewType = viewType,
+                                gridColumns = gridColumns,
+                                keyPrefix = "all",
+                                currentId = currentId,
+                                wantsPlay = wantsPlay,
+                                connected = connected,
+                                organizerBusy = organizerBusy,
+                                inSelectionMode = state.selectionMode,
+                                selectedIds = state.selectedIds,
+                                badgeByTrackId = badgeByTrackId,
+                                onToggleSelect = state::toggleTrackSelection,
+                                onLongPress = state::startSelectionWith,
+                                onPlay = { track -> onPlayQueue(track, sortedMatching) },
+                                onCue = { track -> onCueQueue(track, sortedMatching) },
+                                onTogglePlayPause = onToggleCurrentPlayPause,
+                                onOpenPlayer = onOpenPlayer,
+                                onInspectDetails = onInspectDetails,
+                                onRename = onRename,
+                                onAddToPlaylist = { track -> state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
+                                onDelete = onDelete,
+                            )
                         }
                     } else {
                         if (groupedTracks.isEmpty()) {
@@ -256,30 +271,29 @@ internal fun LibraryPage(
                                     )
                                 }
                                 if (!collapsed) {
-                                    items(
-                                        group.items,
-                                        key = { "grp:${groupMode.name}:${group.key}:${it.id}" },
-                                        contentType = { "track-row" },
-                                    ) { track ->
-                                        LibraryAudioRow(
-                                            track = track,
-                                            selected = track.id.toString() == currentId,
-                                            wantsPlay = wantsPlay,
-                                            connected = connected,
-                                            renameEnabled = !organizerBusy,
-                                            selectionChecked = if (state.selectionMode) (track.id in state.selectedIds) else null,
-                                            playlistBadge = badgeByTrackId[track.id],
-                                            onToggleSelect = { state.toggleTrackSelection(track.id) },
-                                            onLongPress = { state.startSelectionWith(track.id) },
-                                            onPlay = { onPlayQueue(track, group.items) },
-                                            onCue = { onCueQueue(track, group.items) },
-                                            onTogglePlayPause = onToggleCurrentPlayPause,
-                                            onOpenPlayer = onOpenPlayer,
-                                            onRename = { onRename(track) },
-                                            onAddToPlaylist = { state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
-                                            onDelete = { onDelete(track) },
-                                        )
-                                    }
+                                    libraryTracksItems(
+                                        tracks = group.items,
+                                        viewType = viewType,
+                                        gridColumns = gridColumns,
+                                        keyPrefix = "grp:${groupMode.name}:${group.key}",
+                                        currentId = currentId,
+                                        wantsPlay = wantsPlay,
+                                        connected = connected,
+                                        organizerBusy = organizerBusy,
+                                        inSelectionMode = state.selectionMode,
+                                        selectedIds = state.selectedIds,
+                                        badgeByTrackId = badgeByTrackId,
+                                        onToggleSelect = state::toggleTrackSelection,
+                                        onLongPress = state::startSelectionWith,
+                                        onPlay = { track -> onPlayQueue(track, group.items) },
+                                        onCue = { track -> onCueQueue(track, group.items) },
+                                        onTogglePlayPause = onToggleCurrentPlayPause,
+                                        onOpenPlayer = onOpenPlayer,
+                                        onInspectDetails = onInspectDetails,
+                                        onRename = onRename,
+                                        onAddToPlaylist = { track -> state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
+                                        onDelete = onDelete,
+                                    )
                                 }
                             }
                         }
@@ -295,6 +309,7 @@ internal fun LibraryPage(
                                 connected = connected,
                                 busy = organizerBusy,
                                 reorderMode = state.reorderMode,
+                                viewType = viewType,
                                 onBack = state::closePlaylist,
                                 onLoadCue = {
                                     if (activePlaylistTracks.isNotEmpty()) {
@@ -308,6 +323,7 @@ internal fun LibraryPage(
                                 },
                                 onAddTracks = { state.dialog = LibraryDialog.AddTracksToPlaylist(activePlaylist.id) },
                                 onToggleReorder = state::toggleReorderMode,
+                                onSelectViewType = state::selectViewType,
                                 onRename = { state.dialog = LibraryDialog.RenamePlaylist(activePlaylist) },
                                 onDelete = { state.dialog = LibraryDialog.DeletePlaylist(activePlaylist) },
                             )
@@ -326,10 +342,10 @@ internal fun LibraryPage(
                                     ) { Text("Add Tracks") }
                                 }
                             }
-                        } else {
+                        } else if (state.reorderMode) {
                             itemsIndexed(
                                 activePlaylistTracks,
-                                key = { _, track -> "pl:${activePlaylist.id}:${track.id}" },
+                                key = { _, track -> "pl:${activePlaylist.id}:reorder:${track.id}" },
                                 contentType = { _, _ -> "track-row" },
                             ) { index, track ->
                                 val moveTrack: (Int) -> Unit = { delta ->
@@ -350,17 +366,18 @@ internal fun LibraryPage(
                                     leadingIndex = index + 1,
                                     highlighted = justMoved,
                                     reorderBadge = if (justMoved) String.format(Locale.ROOT, "Dipindah ke #%02d", index + 1) else null,
-                                    reorderControls = if (state.reorderMode) ReorderRowControls(
+                                    reorderControls = ReorderRowControls(
                                         canMoveUp = index > 0 && !organizerBusy,
                                         canMoveDown = index < activePlaylistTracks.lastIndex && !organizerBusy,
                                         onMoveUp = { moveTrack(-1) },
                                         onMoveDown = { moveTrack(1) },
                                         onRemove = { playlistActions.onRemoveTrackFromPlaylist(activePlaylist.id, track.id) },
-                                    ) else null,
+                                    ),
                                     onPlay = { onPlayQueue(track, activePlaylistTracks) },
                                     onCue = { onCueQueue(track, activePlaylistTracks) },
                                     onTogglePlayPause = onToggleCurrentPlayPause,
                                     onOpenPlayer = onOpenPlayer,
+                                    onInspectDetails = { onInspectDetails(track) },
                                     onRename = { onRename(track) },
                                     onAddToPlaylist = { state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
                                     onRemoveFromPlaylist = {
@@ -369,7 +386,40 @@ internal fun LibraryPage(
                                     onDelete = { onDelete(track) },
                                 )
                             }
-                            if (state.reorderMode || activePlaylistTracks.size > 1) {
+                            if (activePlaylistTracks.size > 1) {
+                                item(key = "rundown-sync-notice", contentType = "banner") {
+                                    RundownSyncNoticeBanner()
+                                }
+                            }
+                        } else {
+                            libraryTracksItems(
+                                tracks = activePlaylistTracks,
+                                viewType = viewType,
+                                gridColumns = gridColumns,
+                                keyPrefix = "pl:${activePlaylist.id}",
+                                currentId = currentId,
+                                wantsPlay = wantsPlay,
+                                connected = connected,
+                                organizerBusy = organizerBusy,
+                                inSelectionMode = false,
+                                selectedIds = emptySet(),
+                                badgeByTrackId = emptyMap(),
+                                showLeadingIndex = true,
+                                onToggleSelect = {},
+                                onLongPress = {},
+                                onPlay = { track -> onPlayQueue(track, activePlaylistTracks) },
+                                onCue = { track -> onCueQueue(track, activePlaylistTracks) },
+                                onTogglePlayPause = onToggleCurrentPlayPause,
+                                onOpenPlayer = onOpenPlayer,
+                                onInspectDetails = onInspectDetails,
+                                onRename = onRename,
+                                onAddToPlaylist = { track -> state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
+                                onRemoveFromPlaylist = { track ->
+                                    playlistActions.onRemoveTrackFromPlaylist(activePlaylist.id, track.id)
+                                },
+                                onDelete = onDelete,
+                            )
+                            if (activePlaylistTracks.size > 1) {
                                 item(key = "rundown-sync-notice", contentType = "banner") {
                                     RundownSyncNoticeBanner()
                                 }
@@ -609,6 +659,631 @@ private fun LibraryGroupHeader(
     }
 }
 
+private fun LazyListScope.libraryTracksItems(
+    tracks: List<AudioTrack>,
+    viewType: LibrarySongViewType,
+    gridColumns: Int,
+    keyPrefix: String,
+    currentId: String?,
+    wantsPlay: Boolean,
+    connected: Boolean,
+    organizerBusy: Boolean,
+    inSelectionMode: Boolean,
+    selectedIds: Set<Long>,
+    badgeByTrackId: Map<Long, String>,
+    showLeadingIndex: Boolean = false,
+    onToggleSelect: (Long) -> Unit,
+    onLongPress: (Long) -> Unit,
+    onPlay: (AudioTrack) -> Unit,
+    onCue: (AudioTrack) -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onOpenPlayer: () -> Unit,
+    onInspectDetails: (AudioTrack) -> Unit,
+    onRename: (AudioTrack) -> Unit,
+    onAddToPlaylist: (AudioTrack) -> Unit,
+    onRemoveFromPlaylist: ((AudioTrack) -> Unit)? = null,
+    onDelete: (AudioTrack) -> Unit,
+) {
+    when (viewType) {
+        LibrarySongViewType.GRID -> {
+            val cols = gridColumns.coerceAtLeast(2)
+            val rows = tracks.chunked(cols)
+            itemsIndexed(
+                rows,
+                key = { rowIndex, row -> "$keyPrefix:grid:$rowIndex:${row.first().id}" },
+                contentType = { _, _ -> "track-grid-row" },
+            ) { rowIndex, rowTracks ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    rowTracks.forEachIndexed { colIndex, track ->
+                        val itemIndex = rowIndex * cols + colIndex
+                        LibraryGridAudioCard(
+                            track = track,
+                            selected = track.id.toString() == currentId,
+                            wantsPlay = wantsPlay,
+                            connected = connected,
+                            renameEnabled = !organizerBusy,
+                            leadingIndex = if (showLeadingIndex) itemIndex + 1 else null,
+                            selectionChecked = if (inSelectionMode) (track.id in selectedIds) else null,
+                            playlistBadge = badgeByTrackId[track.id],
+                            onToggleSelect = { onToggleSelect(track.id) },
+                            onLongPress = { onLongPress(track.id) },
+                            onPlay = { onPlay(track) },
+                            onCue = { onCue(track) },
+                            onTogglePlayPause = onTogglePlayPause,
+                            onOpenPlayer = onOpenPlayer,
+                            onInspectDetails = { onInspectDetails(track) },
+                            onRename = { onRename(track) },
+                            onAddToPlaylist = { onAddToPlaylist(track) },
+                            onRemoveFromPlaylist = onRemoveFromPlaylist?.let { fn -> { fn(track) } },
+                            onDelete = { onDelete(track) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    repeat(cols - rowTracks.size) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+        LibrarySongViewType.COMPACT -> {
+            itemsIndexed(
+                tracks,
+                key = { _, track -> "$keyPrefix:compact:${track.id}" },
+                contentType = { _, _ -> "track-compact-row" },
+            ) { index, track ->
+                LibraryCompactAudioRow(
+                    track = track,
+                    selected = track.id.toString() == currentId,
+                    wantsPlay = wantsPlay,
+                    connected = connected,
+                    renameEnabled = !organizerBusy,
+                    leadingIndex = if (showLeadingIndex) index + 1 else null,
+                    selectionChecked = if (inSelectionMode) (track.id in selectedIds) else null,
+                    playlistBadge = badgeByTrackId[track.id],
+                    onToggleSelect = { onToggleSelect(track.id) },
+                    onLongPress = { onLongPress(track.id) },
+                    onPlay = { onPlay(track) },
+                    onCue = { onCue(track) },
+                    onTogglePlayPause = onTogglePlayPause,
+                    onOpenPlayer = onOpenPlayer,
+                    onInspectDetails = { onInspectDetails(track) },
+                    onRename = { onRename(track) },
+                    onAddToPlaylist = { onAddToPlaylist(track) },
+                    onRemoveFromPlaylist = onRemoveFromPlaylist?.let { fn -> { fn(track) } },
+                    onDelete = { onDelete(track) },
+                )
+            }
+        }
+        LibrarySongViewType.LIST -> {
+            itemsIndexed(
+                tracks,
+                key = { _, track -> "$keyPrefix:list:${track.id}" },
+                contentType = { _, _ -> "track-row" },
+            ) { index, track ->
+                LibraryAudioRow(
+                    track = track,
+                    selected = track.id.toString() == currentId,
+                    wantsPlay = wantsPlay,
+                    connected = connected,
+                    renameEnabled = !organizerBusy,
+                    leadingIndex = if (showLeadingIndex) index + 1 else null,
+                    selectionChecked = if (inSelectionMode) (track.id in selectedIds) else null,
+                    playlistBadge = badgeByTrackId[track.id],
+                    onToggleSelect = { onToggleSelect(track.id) },
+                    onLongPress = { onLongPress(track.id) },
+                    onPlay = { onPlay(track) },
+                    onCue = { onCue(track) },
+                    onTogglePlayPause = onTogglePlayPause,
+                    onOpenPlayer = onOpenPlayer,
+                    onInspectDetails = { onInspectDetails(track) },
+                    onRename = { onRename(track) },
+                    onAddToPlaylist = { onAddToPlaylist(track) },
+                    onRemoveFromPlaylist = onRemoveFromPlaylist?.let { fn -> { fn(track) } },
+                    onDelete = { onDelete(track) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun trackSelectionPalette(
+    selected: Boolean,
+    wantsPlay: Boolean,
+    selectionChecked: Boolean?,
+    highlighted: Boolean = false,
+): Pair<Color, BorderStroke> {
+    val activeContainer = when {
+        highlighted -> FohTheme.colors.safeBg
+        selectionChecked == true -> FohTheme.colors.safeBg
+        selected && wantsPlay -> FohTheme.colors.safeBg
+        selected -> FohTheme.colors.warnBg
+        else -> FohTheme.colors.surfaceCard
+    }
+    val borderStroke = when {
+        highlighted || selectionChecked == true || (selected && wantsPlay) -> BorderStroke(1.dp, FohTheme.colors.safeBorder)
+        selected -> BorderStroke(1.dp, FohTheme.colors.warnBorder)
+        else -> BorderStroke(1.dp, FohTheme.colors.borderSubtle.copy(alpha = 0.7f))
+    }
+    return activeContainer to borderStroke
+}
+
+@Composable
+private fun LibraryTrackActionMenuButton(
+    track: AudioTrack,
+    selected: Boolean,
+    connected: Boolean,
+    renameEnabled: Boolean,
+    compact: Boolean = false,
+    onShowDetails: () -> Unit,
+    onCue: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    onRemoveFromPlaylist: (() -> Unit)?,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    val desc = "Menu audio ${UiPresentation.title(track.displayName)}"
+    Box {
+        if (compact) {
+            CompactCircleButton(
+                icon = UiIcons.More,
+                description = desc,
+                onClick = { menu = true },
+                size = 30.dp,
+                iconSize = 17.dp,
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            GlyphButton(UiIcons.More, desc, { menu = true })
+        }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(
+                text = { Text("Detail lagu") },
+                leadingIcon = { Icon(UiIcons.Info, null) },
+                onClick = { menu = false; onShowDetails() },
+            )
+            if (!selected) {
+                DropdownMenuItem(
+                    text = { Text("Muat ke Standby (Cue)") },
+                    leadingIcon = { Icon(UiIcons.Next, null) },
+                    enabled = connected,
+                    onClick = { menu = false; onCue() },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Masukkan ke playlist…") },
+                leadingIcon = { Icon(UiIcons.Queue, null) },
+                enabled = renameEnabled,
+                onClick = { menu = false; onAddToPlaylist() },
+            )
+            if (onRemoveFromPlaylist != null) {
+                DropdownMenuItem(
+                    text = { Text("Keluarkan dari playlist") },
+                    leadingIcon = { Icon(UiIcons.Close, null) },
+                    enabled = renameEnabled,
+                    onClick = { menu = false; onRemoveFromPlaylist() },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Ubah nama") },
+                leadingIcon = { Icon(UiIcons.Rename, null) },
+                enabled = renameEnabled,
+                onClick = { menu = false; onRename() },
+            )
+            DropdownMenuItem(
+                text = { Text("Hapus", color = MaterialTheme.colorScheme.error) },
+                leadingIcon = { Icon(UiIcons.Delete, null) },
+                enabled = renameEnabled,
+                onClick = { menu = false; onDelete() },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LibraryCompactAudioRow(
+    track: AudioTrack,
+    selected: Boolean,
+    wantsPlay: Boolean,
+    connected: Boolean,
+    renameEnabled: Boolean,
+    leadingIndex: Int? = null,
+    selectionChecked: Boolean? = null,
+    playlistBadge: String? = null,
+    onToggleSelect: () -> Unit = {},
+    onLongPress: () -> Unit = {},
+    onPlay: () -> Unit,
+    onCue: () -> Unit,
+    onTogglePlayPause: () -> Unit = {},
+    onOpenPlayer: () -> Unit = {},
+    onInspectDetails: () -> Unit = {},
+    onRename: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    onRemoveFromPlaylist: (() -> Unit)? = null,
+    onDelete: () -> Unit,
+) {
+    val inSelection = selectionChecked != null
+    val (activeContainer, borderStroke) = trackSelectionPalette(
+        selected = selected,
+        wantsPlay = wantsPlay,
+        selectionChecked = selectionChecked,
+    )
+    val compactSpec = UiPresentation.compactTrackSpec(track.displayName, track.sizeBytes, track.durationMs)
+    val artistOrBadge = track.artist?.takeIf { it.isNotBlank() } ?: playlistBadge
+
+    Surface(
+        shape = RoundedCornerShape(11.dp),
+        color = activeContainer,
+        border = borderStroke,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 46.dp)
+                .semantics { this.selected = selected || selectionChecked == true }
+                .combinedClickable(
+                    enabled = inSelection || connected,
+                    onClickLabel = when {
+                        inSelection -> "Pilih ${UiPresentation.title(track.displayName)}"
+                        selected && wantsPlay -> "Buka pemutar penuh ${UiPresentation.title(track.displayName)}"
+                        selected -> "Lanjutkan ${UiPresentation.title(track.displayName)}"
+                        else -> "Putar ${UiPresentation.title(track.displayName)}"
+                    },
+                    onClick = { if (inSelection) onToggleSelect() else onPlay() },
+                    onLongClick = { onLongPress() },
+                )
+                .padding(start = 8.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (inSelection) {
+                Checkbox(
+                    checked = selectionChecked == true,
+                    onCheckedChange = null,
+                    modifier = Modifier.size(20.dp),
+                )
+            } else if (leadingIndex != null) {
+                Text(
+                    text = String.format(Locale.ROOT, "%02d", leadingIndex),
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                    fontWeight = FontWeight.Bold,
+                    color = if (selected) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            FohAnimatedTrackArtwork(
+                artworkKey = track.artworkKey,
+                active = selected,
+                playing = wantsPlay,
+                size = 30.dp,
+                cornerRadius = 7.dp,
+            )
+
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    text = UiPresentation.title(track.displayName),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                    color = when {
+                        selected && wantsPlay -> FohTheme.colors.safeAccent
+                        selected -> FohTheme.colors.warnAccent
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (artistOrBadge != null) {
+                    Text(
+                        text = artistOrBadge,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            if (selected && !inSelection && wantsPlay) {
+                FohWaveBarsIndicator(width = 11.dp, height = 10.dp)
+            }
+
+            Text(
+                text = compactSpec,
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = if (selected && wantsPlay) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+            )
+
+            if (!inSelection) {
+                if (selected) {
+                    CompactCircleButton(
+                        icon = if (wantsPlay) UiIcons.Pause else UiIcons.Play,
+                        description = if (wantsPlay) "Jeda audio" else "Putar audio",
+                        onClick = onTogglePlayPause,
+                        enabled = connected,
+                        size = 28.dp,
+                        iconSize = 14.dp,
+                        containerColor = if (wantsPlay) FohTheme.colors.safeBg else FohTheme.colors.warnBg,
+                        contentColor = if (wantsPlay) FohTheme.colors.safeAccent else FohTheme.colors.warnAccent,
+                    )
+                }
+                LibraryTrackActionMenuButton(
+                    track = track,
+                    selected = selected,
+                    connected = connected,
+                    renameEnabled = renameEnabled,
+                    compact = true,
+                    onShowDetails = onInspectDetails,
+                    onCue = onCue,
+                    onAddToPlaylist = onAddToPlaylist,
+                    onRemoveFromPlaylist = onRemoveFromPlaylist,
+                    onRename = onRename,
+                    onDelete = onDelete,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LibraryGridAudioCard(
+    track: AudioTrack,
+    selected: Boolean,
+    wantsPlay: Boolean,
+    connected: Boolean,
+    renameEnabled: Boolean,
+    leadingIndex: Int? = null,
+    selectionChecked: Boolean? = null,
+    playlistBadge: String? = null,
+    onToggleSelect: () -> Unit = {},
+    onLongPress: () -> Unit = {},
+    onPlay: () -> Unit,
+    onCue: () -> Unit,
+    onTogglePlayPause: () -> Unit = {},
+    onOpenPlayer: () -> Unit = {},
+    onInspectDetails: () -> Unit = {},
+    onRename: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    onRemoveFromPlaylist: (() -> Unit)? = null,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val inSelection = selectionChecked != null
+    val (activeContainer, borderStroke) = trackSelectionPalette(
+        selected = selected,
+        wantsPlay = wantsPlay,
+        selectionChecked = selectionChecked,
+    )
+    val formatLabel = LibraryRules.audioFormatLabel(track.displayName)
+    val compactSpec = UiPresentation.compactTrackSpec(track.displayName, track.sizeBytes, track.durationMs)
+    val subtitle = playlistBadge?.let { "↳ $it" }
+        ?: track.artist?.takeIf { it.isNotBlank() }
+        ?: UiPresentation.fileSizeLabel(track.sizeBytes).ifEmpty { formatLabel }
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = activeContainer,
+        border = borderStroke,
+        modifier = modifier,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { this.selected = selected || selectionChecked == true }
+                .combinedClickable(
+                    enabled = inSelection || connected,
+                    onClickLabel = when {
+                        inSelection -> "Pilih ${UiPresentation.title(track.displayName)}"
+                        selected && wantsPlay -> "Buka pemutar penuh ${UiPresentation.title(track.displayName)}"
+                        selected -> "Lanjutkan ${UiPresentation.title(track.displayName)}"
+                        else -> "Putar ${UiPresentation.title(track.displayName)}"
+                    },
+                    onClick = { if (inSelection) onToggleSelect() else onPlay() },
+                    onLongClick = { onLongPress() },
+                ),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 6.dp, end = 6.dp, top = 6.dp)
+                    .aspectRatio(1.12f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .let { base ->
+                        if (selected) {
+                            base.border(
+                                width = 1.6.dp,
+                                color = if (wantsPlay) FohTheme.colors.safeAccent else FohTheme.colors.warnAccent,
+                                shape = RoundedCornerShape(10.dp),
+                            )
+                        } else {
+                            base
+                        }
+                    },
+            ) {
+                TrackArtwork(
+                    artworkKey = track.artworkKey,
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                if (inSelection) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xCC080E0B),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp),
+                    ) {
+                        Box(modifier = Modifier.padding(2.dp)) {
+                            Checkbox(
+                                checked = selectionChecked == true,
+                                onCheckedChange = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                } else if (selected && wantsPlay) {
+                    Surface(
+                        shape = RoundedCornerShape(7.dp),
+                        color = Color(0xCC080E0B),
+                        border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            FohWaveBarsIndicator(width = 11.dp, height = 9.dp)
+                            Text(
+                                text = "PLAY",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = FohTheme.colors.safeAccent,
+                            )
+                        }
+                    }
+                } else if (selected) {
+                    Surface(
+                        shape = RoundedCornerShape(7.dp),
+                        color = Color(0xCC080E0B),
+                        border = BorderStroke(1.dp, FohTheme.colors.warnBorder),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp),
+                    ) {
+                        Text(
+                            text = "STANDBY",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = FohTheme.colors.warnAccent,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                } else if (leadingIndex != null) {
+                    Surface(
+                        shape = RoundedCornerShape(7.dp),
+                        color = Color(0xBA080E0B),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp),
+                    ) {
+                        Text(
+                            text = String.format(Locale.ROOT, "#%02d", leadingIndex),
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xBD080E0B))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = compactSpec,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = Color.White.copy(alpha = 0.92f),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+
+                if (!inSelection && connected) {
+                    CompactCircleButton(
+                        icon = if (selected && wantsPlay) UiIcons.Pause else UiIcons.Play,
+                        description = if (selected && wantsPlay) "Jeda audio" else "Putar audio",
+                        onClick = { if (selected) onTogglePlayPause() else onPlay() },
+                        size = 30.dp,
+                        iconSize = 15.dp,
+                        containerColor = if (selected && wantsPlay) FohTheme.colors.safeBg else Color(0xCC0C1310),
+                        contentColor = if (selected && wantsPlay) FohTheme.colors.safeAccent else Color.White,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp),
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 9.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = UiPresentation.title(track.displayName),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = when {
+                        selected && wantsPlay -> FohTheme.colors.safeAccent
+                        selected -> FohTheme.colors.warnAccent
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                    maxLines = 2,
+                    minLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (!inSelection) {
+                        if (selected) {
+                            CompactCircleButton(
+                                icon = UiIcons.ChevronUp,
+                                description = "Buka pemutar lengkap",
+                                onClick = onOpenPlayer,
+                                enabled = connected,
+                                size = 28.dp,
+                                iconSize = 15.dp,
+                                containerColor = FohTheme.colors.surfaceDeep,
+                                contentColor = FohTheme.colors.safeAccent,
+                            )
+                        }
+                        LibraryTrackActionMenuButton(
+                            track = track,
+                            selected = selected,
+                            connected = connected,
+                            renameEnabled = renameEnabled,
+                            compact = true,
+                            onShowDetails = onInspectDetails,
+                            onCue = onCue,
+                            onAddToPlaylist = onAddToPlaylist,
+                            onRemoveFromPlaylist = onRemoveFromPlaylist,
+                            onRename = onRename,
+                            onDelete = onDelete,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryAudioRow(
@@ -629,25 +1304,19 @@ private fun LibraryAudioRow(
     onCue: () -> Unit,
     onTogglePlayPause: () -> Unit = {},
     onOpenPlayer: () -> Unit = {},
+    onInspectDetails: () -> Unit = {},
     onRename: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onRemoveFromPlaylist: (() -> Unit)? = null,
     onDelete: () -> Unit,
 ) {
-    var menu by remember { mutableStateOf(false) }
     val inSelection = selectionChecked != null
-    val activeContainer = when {
-        highlighted -> FohTheme.colors.safeBg
-        selectionChecked == true -> FohTheme.colors.safeBg
-        selected && wantsPlay -> FohTheme.colors.safeBg
-        selected -> FohTheme.colors.warnBg
-        else -> FohTheme.colors.surfaceCard
-    }
-    val borderStroke = when {
-        highlighted || selectionChecked == true || (selected && wantsPlay) -> BorderStroke(1.dp, FohTheme.colors.safeBorder)
-        selected -> BorderStroke(1.dp, FohTheme.colors.warnBorder)
-        else -> BorderStroke(1.dp, FohTheme.colors.borderSubtle.copy(alpha = 0.7f))
-    }
+    val (activeContainer, borderStroke) = trackSelectionPalette(
+        selected = selected,
+        wantsPlay = wantsPlay,
+        selectionChecked = selectionChecked,
+        highlighted = highlighted,
+    )
 
     Surface(
         shape = RoundedCornerShape(14.dp),
@@ -705,22 +1374,30 @@ private fun LibraryAudioRow(
                         selected -> FohTheme.colors.warnAccent
                         else -> MaterialTheme.colorScheme.onSurface
                     },
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                val creatorLine = listOfNotNull(
+                    LibraryRules.sanitizedTag(track.artist),
+                    LibraryRules.sanitizedTag(track.album),
+                ).joinToString(" · ")
+                if (creatorLine.isNotEmpty()) {
+                    Text(
+                        text = creatorLine,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
-                    text = UiPresentation.trackSubtitleWithQuality(
-                        track.displayName,
-                        track.artist,
-                        track.sizeBytes,
-                        track.durationMs,
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
+                    text = UiPresentation.qualitySummary(track.displayName, track.sizeBytes, track.durationMs),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 2,
                 )
-                if (playlistBadge != null || reorderBadge != null) {
+                val qualityBadge = UiPresentation.highBitrateBadge(track.displayName, track.sizeBytes, track.durationMs)
+                if (playlistBadge != null || reorderBadge != null || qualityBadge != null) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -737,6 +1414,14 @@ private fun LibraryAudioRow(
                                 label = "↳ $playlistBadge",
                                 containerColor = FohTheme.colors.surfaceDeep,
                                 borderColor = FohTheme.colors.borderSubtle,
+                                contentColor = FohTheme.colors.safeAccent,
+                            )
+                        }
+                        if (qualityBadge != null) {
+                            LibraryMiniBadge(
+                                label = qualityBadge,
+                                containerColor = FohTheme.colors.safeBg,
+                                borderColor = FohTheme.colors.safeBorder,
                                 contentColor = FohTheme.colors.safeAccent,
                             )
                         }
@@ -804,45 +1489,19 @@ private fun LibraryAudioRow(
                             contentColor = FohTheme.colors.safeAccent,
                         )
                     }
-                    Box {
-                        GlyphButton(UiIcons.More, "Menu audio ${UiPresentation.title(track.displayName)}", { menu = true })
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            if (!selected) {
-                                DropdownMenuItem(
-                                    text = { Text("Muat ke Standby (Cue)") },
-                                    leadingIcon = { Icon(UiIcons.Next, null) },
-                                    enabled = connected,
-                                    onClick = { menu = false; onCue() },
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text("Masukkan ke playlist…") },
-                                leadingIcon = { Icon(UiIcons.Queue, null) },
-                                enabled = renameEnabled,
-                                onClick = { menu = false; onAddToPlaylist() },
-                            )
-                            if (onRemoveFromPlaylist != null) {
-                                DropdownMenuItem(
-                                    text = { Text("Keluarkan dari playlist") },
-                                    leadingIcon = { Icon(UiIcons.Close, null) },
-                                    enabled = renameEnabled,
-                                    onClick = { menu = false; onRemoveFromPlaylist() },
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text("Ubah nama") },
-                                leadingIcon = { Icon(UiIcons.Rename, null) },
-                                enabled = renameEnabled,
-                                onClick = { menu = false; onRename() },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Hapus", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon = { Icon(UiIcons.Delete, null) },
-                                enabled = renameEnabled,
-                                onClick = { menu = false; onDelete() },
-                            )
-                        }
-                    }
+                    LibraryTrackActionMenuButton(
+                        track = track,
+                        selected = selected,
+                        connected = connected,
+                        renameEnabled = renameEnabled,
+                        compact = false,
+                        onShowDetails = onInspectDetails,
+                        onCue = onCue,
+                        onAddToPlaylist = onAddToPlaylist,
+                        onRemoveFromPlaylist = onRemoveFromPlaylist,
+                        onRename = onRename,
+                        onDelete = onDelete,
+                    )
                 }
             }
         }

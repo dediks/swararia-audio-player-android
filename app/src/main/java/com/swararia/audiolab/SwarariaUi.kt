@@ -33,6 +33,7 @@ fun SwarariaUi(
     playlistActions: PlaylistUiActions = PlaylistUiActions(),
     onRename: (Long, String, () -> Unit) -> Unit,
     onUndo: () -> Unit,
+    onInspectTrack: suspend (AudioTrack) -> TrackTechnicalDetails? = { null },
     onSearch: (String, SearchProvider) -> Unit,
     onCancelSearch: () -> Unit,
     upgrade: UpgradeUiActions,
@@ -68,6 +69,7 @@ fun SwarariaUi(
     }
     val previewActive = searchActions.preview.let { it.hit != null || it.loading || it.media != null || it.error != null }
     val queueBusy = upgrade.operationBusy || search.busy || searchActions.preview.loading
+    val searchBusyBlocked = ingest.engineBusy || queueBusy
     val onlineBusy = ingest.busy || queueBusy
     val context = androidx.compose.ui.platform.LocalContext.current
     val brandManager = remember(context) {
@@ -227,7 +229,7 @@ fun SwarariaUi(
                     // One slot: preview always replaces, never accompanies, local audio.
                     if (previewActive) SearchPreviewPlayer(searchActions.preview, controller,
                         searchActions.stopPreview, searchActions.previewError,
-                        onRetry = { if (!onlineBusy) searchActions.preview.hit?.let(searchActions.previewSong) })
+                        onRetry = { if (!searchBusyBlocked) searchActions.preview.hit?.let(searchActions.previewSong) })
                     else if (playback.mediaId != null) {
                         val onRemoteTool = activeTab == MainRootTab.TOOLS && moreToolRoute == MoreToolRoute.REMOTE
                         if (activeTab != MainRootTab.LIVE_DECK && activeTab != MainRootTab.STAGE_RTA && !onRemoteTool) {
@@ -342,6 +344,7 @@ fun SwarariaUi(
                             failedDownloadCount = failedDownloadCount,
                             onOpenDownloads = { downloadsSheetOpen = true },
                             playlistActions = playlistActions,
+                            onInspectDetails = { activeModal = SwarariaModal.TrackDetails(it) },
                             onRename = { activeModal = SwarariaModal.RenameTrack(it) },
                             onHistory = { activeModal = SwarariaModal.RenameHistory },
                             onSettings = { activeModal = SwarariaModal.EngineSettings },
@@ -452,6 +455,28 @@ fun SwarariaUi(
             onDismiss = { activeModal = null },
             onDeleteBatch = upgrade.onDeleteBatch,
         )
+        is SwarariaModal.TrackDetails -> key(modal.track.id, modal.track.displayName) {
+            val playlistNames = remember(playlists, modal.track.id) {
+                playlists.filter { modal.track.id in it.trackIds }.map { it.name }
+            }
+            TrackDetailDialog(
+                track = modal.track,
+                playlistNames = playlistNames,
+                connected = playback.connected,
+                renameEnabled = !(organizerBusy || upgrade.operationBusy),
+                onInspect = onInspectTrack,
+                onPlay = {
+                    activeModal = null
+                    playQueuedTrack(modal.track, tracks, false)
+                },
+                onCue = {
+                    activeModal = null
+                    playQueuedTrack(modal.track, tracks, true)
+                },
+                onRename = { activeModal = SwarariaModal.RenameTrack(modal.track) },
+                onDismiss = { activeModal = null },
+            )
+        }
         is SwarariaModal.SwitchQueueGuard -> {
             val activeTitle = current?.let { UiPresentation.title(it.displayName) }
                 ?: playback.title?.takeIf { it.isNotBlank() }?.let(UiPresentation::title)
@@ -548,6 +573,7 @@ internal enum class PustakaSubRoute {
 private sealed interface SwarariaModal {
     data class RenameTrack(val track: AudioTrack) : SwarariaModal
     data class DeleteTrack(val track: AudioTrack) : SwarariaModal
+    data class TrackDetails(val track: AudioTrack) : SwarariaModal
     data class DeleteBatch(val tracks: List<AudioTrack>) : SwarariaModal
     data class SwitchQueueGuard(
         val targetTitle: String,

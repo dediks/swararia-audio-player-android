@@ -103,4 +103,14 @@ class DataRulesTest {
         assertFalse(DownloadQueueRules.canAutoUpdateEngine(1_000L, 1_000L + DownloadQueueRules.AUTO_HEAL_COOLDOWN_MS - 1L))
         assertTrue(DownloadQueueRules.canAutoUpdateEngine(1_000L, 1_000L + DownloadQueueRules.AUTO_HEAL_COOLDOWN_MS))
     }
+
+    @Test fun ingestDownloadStateDoesNotFlagEngineBusyByDefault() {
+        val downloadRunning = IngestState(busy = true, batchId = "batch-1")
+        assertTrue(downloadRunning.busy)
+        assertFalse(downloadRunning.engineBusy)
+
+        val engineUpdating = IngestState(busy = true, engineBusy = true)
+        assertTrue(engineUpdating.busy)
+        assertTrue(engineUpdating.engineBusy)
+    }
 }

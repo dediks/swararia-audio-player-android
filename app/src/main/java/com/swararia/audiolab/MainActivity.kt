@@ -50,10 +50,10 @@ class MainActivity : ComponentActivity() {
         }
     }
     private val chooseAudio = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) whenOnlineIdle {
+        if (uris.isNotEmpty()) whenIngestIdle {
             withIngestPermissions {
                 // The picker/permission dialog can outlive the state seen by the button.
-                whenOnlineIdle {
+                whenIngestIdle {
                     runCatching { IngestService.importAudioBatch(this, uris) }
                         .onFailure { model.message(it.message ?: "Impor tidak dapat dimulai.") }
                 }
@@ -70,9 +70,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun whenQueueStartReady(action: () -> Unit) {
-        if (!model.canStartOnlineOperation()) {
+        if (!model.canStartExclusiveIngestOperation()) {
             model.message("Tunggu pencarian atau proses audio selesai terlebih dahulu."); return
         }
+        action()
+    }
+
+    private fun whenIngestIdle(action: () -> Unit) {
+        if (!model.canStartExclusiveIngestOperation()) {
+            model.message("Tunggu proses unduh atau pencarian selesai terlebih dahulu."); return
+        }
+        model.cancelPreview()
         action()
     }
 
@@ -149,7 +157,7 @@ class MainActivity : ComponentActivity() {
                         preview = preview,
                         search = { query, provider, kind, sort -> whenOnlineIdle { model.search(query, provider, kind, sort) } },
                         switchSearch = { query, provider, kind, sort ->
-                            if (!ingest.busy && !operationBusy) model.switchSearch(query, provider, kind, sort)
+                            if (!ingest.engineBusy && !operationBusy) model.switchSearch(query, provider, kind, sort)
                         },
                         sort = { model.sortSearch(it) }, loadMore = { whenOnlineIdle { model.loadMore() } },
                         retry = { whenOnlineIdle { model.retrySearch() } },
@@ -164,9 +172,9 @@ class MainActivity : ComponentActivity() {
                             }
                         } }
                     } },
-                    onImport = { whenOnlineIdle { withLegacyStoragePermission { whenOnlineIdle { chooseAudio.launch(arrayOf("audio/*")) } } } },
-                    onUpdate = { whenOnlineIdle {
-                        withNotificationPermission { whenOnlineIdle {
+                    onImport = { whenIngestIdle { withLegacyStoragePermission { whenIngestIdle { chooseAudio.launch(arrayOf("audio/*")) } } } },
+                    onUpdate = { whenIngestIdle {
+                        withNotificationPermission { whenIngestIdle {
                             runCatching { IngestService.update(this) }
                                 .onFailure { model.message(it.message ?: "Pembaruan tidak dapat dimulai.") }
                         } }
@@ -196,6 +204,7 @@ class MainActivity : ComponentActivity() {
                     ),
                     onRename = { id, title, done -> model.rename(id, title, done) },
                     onUndo = { model.undoRename() },
+                    onInspectTrack = model::inspectTrackTechnicalDetails,
                     onSearch = { query, provider -> whenOnlineIdle { model.search(query, provider) } },
                     onCancelSearch = { model.cancelSearch() },
                     desktopRemote = model.desktopRemote,
@@ -367,7 +376,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun deleteTrack(track: AudioTrack, done: () -> Unit) {
-        if (!model.canStartOnlineOperation()) { model.message("Tunggu proses yang sedang berjalan."); return }
+        if (!model.canStartExclusiveIngestOperation()) { model.message("Tunggu proses yang sedang berjalan."); return }
         val player = controller
         if (player == null || !player.isConnected) { model.message("Player belum terhubung. Coba lagi."); return }
         val queued = (0 until player.mediaItemCount).any { player.getMediaItemAt(it).mediaId == track.id.toString() }
@@ -456,7 +465,7 @@ class MainActivity : ComponentActivity() {
     private fun deleteTracks(tracksToDelete: List<AudioTrack>, done: () -> Unit) {
         val distinct = tracksToDelete.distinctBy { it.id }
         if (distinct.isEmpty()) return
-        if (!model.canStartOnlineOperation()) { model.message("Tunggu proses yang sedang berjalan."); return }
+        if (!model.canStartExclusiveIngestOperation()) { model.message("Tunggu proses yang sedang berjalan."); return }
         val player = controller
         if (player == null || !player.isConnected) { model.message("Player belum terhubung. Coba lagi."); return }
         val targetIds = distinct.map { it.id.toString() }.toSet()

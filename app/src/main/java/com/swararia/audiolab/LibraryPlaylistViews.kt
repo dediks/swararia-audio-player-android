@@ -63,6 +63,7 @@ internal fun LibraryCompactHeader(
     selectionMode: Boolean,
     query: String,
     groupMode: LibraryGroupMode,
+    viewType: LibrarySongViewType = LibrarySongViewType.LIST,
     alphabetical: Boolean,
     importEnabled: Boolean,
     actionBusy: Boolean,
@@ -72,6 +73,7 @@ internal fun LibraryCompactHeader(
     onCreatePlaylist: () -> Unit,
     onQueryChange: (String) -> Unit,
     onSelectGroupMode: (LibraryGroupMode) -> Unit,
+    onSelectViewType: (LibrarySongViewType) -> Unit = {},
     onToggleSort: (Boolean) -> Unit,
     onHistory: () -> Unit,
     onSettings: () -> Unit,
@@ -345,6 +347,114 @@ internal fun LibraryCompactHeader(
                         )
                     }
                 }
+                LibraryViewTypeButton(
+                    viewType = viewType,
+                    onSelectViewType = onSelectViewType,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun LibraryViewTypeButton(
+    viewType: LibrarySongViewType,
+    onSelectViewType: (LibrarySongViewType) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    compact: Boolean = false,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val foh = FohTheme.colors
+    val nonDefault = viewType != LibrarySongViewType.LIST
+    Box(modifier = modifier) {
+        Surface(
+            onClick = { menuOpen = true },
+            enabled = enabled,
+            shape = RoundedCornerShape(10.dp),
+            color = if (nonDefault) foh.safeBg else foh.surfaceCard,
+            border = BorderStroke(1.dp, if (nonDefault) foh.safeBorder else foh.borderSubtle),
+            modifier = Modifier
+                .heightIn(min = if (compact) 38.dp else 34.dp)
+                .semantics { contentDescription = "Tampilan daftar lagu: ${viewType.label}" },
+        ) {
+            Row(
+                modifier = Modifier.padding(
+                    horizontal = if (compact) 10.dp else 8.dp,
+                    vertical = 6.dp,
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    imageVector = UiIcons.forSongViewType(viewType),
+                    contentDescription = null,
+                    tint = if (!enabled) {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    } else if (nonDefault) {
+                        foh.safeAccent
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    modifier = Modifier.size(16.dp),
+                )
+                if (!compact) {
+                    Text(
+                        text = viewType.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (!enabled) {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        } else if (nonDefault) {
+                            foh.safeAccent
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+                Icon(
+                    imageVector = UiIcons.ChevronDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            LibrarySongViewType.entries.forEach { option ->
+                val selected = option == viewType
+                DropdownMenuItem(
+                    leadingIcon = {
+                        Icon(
+                            imageVector = UiIcons.forSongViewType(option),
+                            contentDescription = null,
+                            tint = if (selected) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    text = {
+                        Column {
+                            Text(
+                                text = option.label,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) foh.safeAccent else MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = option.subtitle,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    trailingIcon = if (selected) {
+                        { Icon(UiIcons.Check, contentDescription = null, tint = foh.safeAccent) }
+                    } else null,
+                    onClick = {
+                        menuOpen = false
+                        onSelectViewType(option)
+                    },
+                )
             }
         }
     }
@@ -642,11 +752,13 @@ internal fun PlaylistRundownHeader(
     connected: Boolean,
     busy: Boolean,
     reorderMode: Boolean,
+    viewType: LibrarySongViewType = LibrarySongViewType.LIST,
     onBack: () -> Unit,
     onLoadCue: () -> Unit,
     onPlayShow: () -> Unit,
     onAddTracks: () -> Unit,
     onToggleReorder: () -> Unit,
+    onSelectViewType: (LibrarySongViewType) -> Unit = {},
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -809,6 +921,14 @@ internal fun PlaylistRundownHeader(
                             softWrap = false,
                         )
                     }
+                }
+                if (!reorderMode) {
+                    LibraryViewTypeButton(
+                        viewType = viewType,
+                        enabled = !busy,
+                        compact = true,
+                        onSelectViewType = onSelectViewType,
+                    )
                 }
             }
         }

@@ -328,4 +328,40 @@ class SearchSessionTest {
             assertTrue(f.session.canStartOnlineOperation())
         }
     }
+
+    @Test(timeout = 5000) fun loadMoreDispatchesWhileDownloadRunsUnlessEngineLocked() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val gateway = Gateway()
+        var engineUpdating = false
+        val messages = mutableListOf<String>()
+        val session = SearchSession(gateway, scope, { engineUpdating }, { messages.add(it) })
+        try {
+            var pageCalls = 0
+            gateway.page = { req ->
+                pageCalls++
+                val id = String.format("%011d", pageCalls)
+                SearchPage(listOf(hit(id)), YoutubeSearchRules.RESULT_LIMIT, 0)
+            }
+            session.search("lagu live", SearchProvider.YOUTUBE_MUSIC)
+            assertEquals(10, session.search.value.loadedThrough)
+            assertTrue(session.search.value.hasMore)
+
+            // Active download (engineUpdating stays false) must not block loadMore().
+            engineUpdating = false
+            session.loadMore()
+            assertEquals(listOf(0, 10), gateway.calls.map { it.offset })
+            assertEquals(20, session.search.value.loadedThrough)
+            assertEquals(2, session.search.value.results.size)
+
+            // Engine binary update still guards search dispatch cleanly.
+            engineUpdating = true
+            session.loadMore()
+            assertEquals(listOf(0, 10), gateway.calls.map { it.offset })
+            assertFalse(session.search.value.busy)
+            assertFalse(session.search.value.loadingMore)
+        } finally {
+            session.close()
+            scope.cancel()
+        }
+    }
 }

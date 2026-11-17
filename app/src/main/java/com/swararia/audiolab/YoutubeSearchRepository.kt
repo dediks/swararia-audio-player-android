@@ -46,7 +46,7 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
         val plugin = withContext(Dispatchers.IO) { pluginDirectory() }
         val args = base.dropLast(1) + listOf("--no-plugin-dirs", "--plugin-dirs", plugin.absolutePath, base.last())
         val output = executeMetadata(args, "search", 30_000L)
-        val raw = YoutubeSearchJson.parse(output, kind)
+        val raw = withContext(Dispatchers.Default) { YoutubeSearchJson.parse(output, kind) }
         val permits = Semaphore(6)
         val enriched = coroutineScope {
             raw.map { hit -> async {
@@ -65,7 +65,7 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
             try {
                 val info = executeMetadata(listOf("--ignore-config", "--no-cache-dir", "--no-plugin-dirs", "--skip-download",
                     "--no-playlist", "--dump-single-json", "--socket-timeout", "6", "--retries", "0", "--extractor-retries", "0", hit.url), "metadata", 12_000L)
-                YoutubeSearchJson.metadata(info, hit.videoId)?.let { full ->
+                withContext(Dispatchers.Default) { YoutubeSearchJson.metadata(info, hit.videoId) }?.let { full ->
                     enriched[index] = hit.copy(channel = full.channel ?: hit.channel,
                         durationSeconds = full.durationSeconds ?: hit.durationSeconds,
                         channelIsVerified = full.channelIsVerified || hit.channelIsVerified,
@@ -78,7 +78,8 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
         }
         val complete = enriched.filter(YoutubeSearchRules::complete)
         if (complete.any { it.kind == SearchKind.SONGS }) warmVisitorSessionAsync()
-        SearchPage(complete, YoutubeSearchJson.entryCount(output), enriched.size - complete.size)
+        val entryCount = withContext(Dispatchers.Default) { YoutubeSearchJson.entryCount(output) }
+        SearchPage(complete, entryCount, enriched.size - complete.size)
     } ?: throw IOException("Pencarian terlalu lama. Coba lagi saat koneksi lebih stabil.")
 
     override suspend fun preview(hit: SearchHit): PreviewMedia {
@@ -269,16 +270,20 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
     }
 
     private suspend fun executeMetadata(args: List<String>, prefix: String, timeout: Long): String {
-        check(!ingestBusy()) { "Tunggu proses audio selesai terlebih dahulu." }
+        check(!ingestBusy()) { "Tunggu proses pembaruan mesin selesai terlebih dahulu." }
         val processId = "$prefix-${UUID.randomUUID()}"
+        var completionHandle: DisposableHandle? = null
         try {
             return withTimeoutOrNull(timeout) {
+                completionHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+                    if (cause != null) runCatching { YoutubeDL.destroyProcessById(processId) }
+                }
                 runInterruptible(Dispatchers.IO) {
                     val initStarted = System.nanoTime()
                     YoutubeDL.init(appContext)
                     android.util.Log.d("SwarariaTiming", "metadata_engine_init_ms=${((System.nanoTime() - initStarted) / 1_000_000L).coerceAtLeast(0)}")
                     if (Thread.currentThread().isInterrupted) throw InterruptedException()
-                    check(!ingestBusy()) { "Tunggu proses audio selesai terlebih dahulu." }
+                    check(!ingestBusy()) { "Tunggu proses pembaruan mesin selesai terlebih dahulu." }
                     val request = YoutubeDLRequest(args.last()).addCommands(args.dropLast(1))
                     val executeStarted = System.nanoTime()
                     try { YoutubeDL.execute(request, processId).out }
@@ -293,7 +298,10 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
                   else "Sumber belum dapat diakses. Periksa koneksi lalu coba lagi.", failure)
           } catch (error: Error) {
               throw IOException("Mesin pencarian tidak kompatibel atau gagal dijalankan di perangkat ini.", error)
-          } finally { runCatching { YoutubeDL.destroyProcessById(processId) } }
+          } finally {
+              completionHandle?.dispose()
+              runCatching { YoutubeDL.destroyProcessById(processId) }
+          }
     }
 
     @Synchronized private fun pluginDirectory(): java.io.File {

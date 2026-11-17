@@ -3,6 +3,7 @@ package com.swararia.audiolab
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.media.AudioFormat
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
@@ -791,6 +792,98 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             return@withContext null
         }
         ReadableManagedMedia(track = track, mimeType = mime, sizeBytes = size, inputStream = stream)
+    }
+
+    override suspend fun inspectTechnicalDetails(track: AudioTrack): TrackTechnicalDetails? = withContext(Dispatchers.IO) {
+        if (!isManagedUri(track.uri) && !isLegacyUri(track.uri)) return@withContext null
+        val uri = Uri.parse(track.uri)
+        var mimeType: String? = null
+        var sampleRateHz: Int? = null
+        var channelCount: Int? = null
+        var extractorBitrateBps: Long? = null
+        var bitsPerSample: Int? = null
+        var durationMs: Long? = null
+
+        val extractor = MediaExtractor()
+        try {
+            if ("file".equals(uri.scheme, ignoreCase = true) && uri.path != null) {
+                extractor.setDataSource(uri.path!!)
+            } else {
+                extractor.setDataSource(context, uri, null)
+            }
+            for (idx in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(idx)
+                val mime = if (format.containsKey(MediaFormat.KEY_MIME)) format.getString(MediaFormat.KEY_MIME) else null
+                if (mime?.startsWith("audio/", ignoreCase = true) == true) {
+                    mimeType = mime
+                    if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                        sampleRateHz = format.getInteger(MediaFormat.KEY_SAMPLE_RATE).takeIf { it > 0 }
+                    }
+                    if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                        channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).takeIf { it > 0 }
+                    }
+                    if (format.containsKey(MediaFormat.KEY_BIT_RATE)) {
+                        extractorBitrateBps = format.getInteger(MediaFormat.KEY_BIT_RATE).toLong().takeIf { it > 0L }
+                    }
+                    if (format.containsKey(MediaFormat.KEY_DURATION)) {
+                        durationMs = (format.getLong(MediaFormat.KEY_DURATION) / 1000L).takeIf { it > 0L }
+                    }
+                    if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                        bitsPerSample = when (format.getInteger(MediaFormat.KEY_PCM_ENCODING)) {
+                            AudioFormat.ENCODING_PCM_8BIT -> 8
+                            AudioFormat.ENCODING_PCM_16BIT -> 16
+                            AudioFormat.ENCODING_PCM_24BIT_PACKED -> 24
+                            AudioFormat.ENCODING_PCM_32BIT,
+                            AudioFormat.ENCODING_PCM_FLOAT,
+                            -> 32
+                            else -> null
+                        }
+                    }
+                    break
+                }
+            }
+        } catch (_: Exception) {
+        } finally {
+            runCatching { extractor.release() }
+        }
+
+        var retrieverBitrateBps: Long? = null
+        var retrieverDurationMs: Long? = null
+        var retrieverMime: String? = null
+        var retrieverSampleRate: Int? = null
+        var retrieverBitsPerSample: Int? = null
+        val reader = MediaMetadataRetriever()
+        try {
+            if ("file".equals(uri.scheme, ignoreCase = true) && uri.path != null) {
+                reader.setDataSource(uri.path)
+            } else {
+                reader.setDataSource(context, uri)
+            }
+            retrieverBitrateBps = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
+                ?.toLongOrNull()?.takeIf { it > 0L }
+            retrieverDurationMs = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()?.takeIf { it > 0L }
+            retrieverMime = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+                ?.trim()?.takeIf { it.isNotEmpty() }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                retrieverSampleRate = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)
+                    ?.toIntOrNull()?.takeIf { it > 0 }
+                retrieverBitsPerSample = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITS_PER_SAMPLE)
+                    ?.toIntOrNull()?.takeIf { it > 0 }
+            }
+        } catch (_: Exception) {
+        } finally {
+            runCatching { reader.release() }
+        }
+
+        TrackTechnicalDetails(
+            mimeType = mimeType ?: retrieverMime,
+            bitrateBps = extractorBitrateBps ?: retrieverBitrateBps,
+            sampleRateHz = sampleRateHz ?: retrieverSampleRate,
+            channelCount = channelCount,
+            bitsPerSample = bitsPerSample ?: retrieverBitsPerSample,
+            durationMs = durationMs ?: retrieverDurationMs ?: track.durationMs,
+        )
     }
 
     private suspend fun ensurePlaylistAndLink(playlistName: String, trackId: Long): Long = mutationMutex.withLock {

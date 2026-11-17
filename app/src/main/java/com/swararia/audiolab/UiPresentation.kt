@@ -14,6 +14,12 @@ enum class LibraryGroupMode(val label: String) {
     FORMAT("Format"),
 }
 
+enum class LibrarySongViewType(val label: String, val subtitle: String) {
+    LIST("List", "Daftar lengkap dengan cover & kualitas"),
+    COMPACT("Compact", "Baris padat lebih banyak lagu"),
+    GRID("Grid", "Kartu cover multi-kolom"),
+}
+
 enum class DownloadFilterTab(val label: String) {
     ALL("Semua"),
     ACTIVE("Aktif"),
@@ -113,6 +119,78 @@ object UiPresentation {
         val kbps = effectiveBitrateKbps(sizeBytes, durationMs) ?: return null
         return if (kbps >= 192 && ext in audioExtensions) "HQ ${kbps}k" else null
     }
+    fun compactTrackSpec(displayName: String, sizeBytes: Long, durationMs: Long?): String {
+        val ext = LibraryRules.audioFormatLabel(displayName)
+        val kbps = effectiveBitrateKbps(sizeBytes, durationMs)
+        val dur = LibraryRules.durationLabel(durationMs)
+        return listOfNotNull(
+            ext,
+            kbps?.let { "${it}k" },
+            dur,
+        ).joinToString(" · ")
+    }
+    fun codecDisplayLabel(displayName: String, mimeType: String?): String {
+        val container = LibraryRules.audioFormatLabel(displayName)
+        val mime = mimeType?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val codecName = when {
+            mime == "audio/opus" -> "Opus"
+            mime == "audio/vorbis" -> "Vorbis"
+            mime == "audio/ogg" -> "Ogg"
+            mime == "audio/mp4a-latm" || mime == "audio/aac" -> "AAC"
+            mime == "audio/flac" -> "FLAC (Lossless)"
+            mime == "audio/mpeg" -> "MP3"
+            mime == "audio/raw" -> "PCM (Uncompressed)"
+            mime.isNotEmpty() -> mime.substringAfter("audio/").uppercase(Locale.ROOT)
+            else -> container
+        }
+        return if (mime.isNotEmpty() && !codecName.contains(container, ignoreCase = true)) {
+            "$codecName ($container)"
+        } else {
+            codecName
+        }
+    }
+    fun sampleRateLabel(sampleRateHz: Int?): String {
+        if (sampleRateHz == null || sampleRateHz <= 0) return "—"
+        val formattedHz = java.text.NumberFormat.getIntegerInstance(Locale.US).format(sampleRateHz)
+        val khz = if (sampleRateHz % 1000 == 0) {
+            "${sampleRateHz / 1000} kHz"
+        } else {
+            String.format(Locale.US, "%.1f kHz", sampleRateHz / 1000.0)
+        }
+        return "$khz ($formattedHz Hz)"
+    }
+    fun channelLayoutLabel(channelCount: Int?): String = when {
+        channelCount == null || channelCount <= 0 -> "—"
+        channelCount == 1 -> "Mono (1 ch)"
+        channelCount == 2 -> "Stereo (2 ch)"
+        else -> "$channelCount channel"
+    }
+    fun bitrateDetailLabel(
+        sizeBytes: Long,
+        durationMs: Long?,
+        extractedBitrateBps: Long?,
+    ): String {
+        val streamKbps = extractedBitrateBps?.takeIf { it > 0L }?.let { ((it + 500L) / 1_000L).toInt() }
+        val effectiveKbps = effectiveBitrateKbps(sizeBytes, durationMs)
+        return when {
+            streamKbps != null && effectiveKbps != null && kotlin.math.abs(streamKbps - effectiveKbps) >= 8 ->
+                "$streamKbps kbps (stream) · ~$effectiveKbps kbps (rata-rata)"
+            streamKbps != null -> "$streamKbps kbps"
+            effectiveKbps != null -> "~$effectiveKbps kbps (rata-rata file)"
+            else -> "—"
+        }
+    }
+    fun exactFileSizeLabel(sizeBytes: Long): String {
+        if (sizeBytes <= 0L) return "—"
+        val human = fileSizeLabel(sizeBytes)
+        val formattedBytes = java.text.NumberFormat.getIntegerInstance(Locale.US).format(sizeBytes)
+        return "$human ($formattedBytes byte)"
+    }
+    fun addedDateTimeLabel(addedAtMs: Long): String {
+        if (addedAtMs <= 0L) return "—"
+        val fmt = java.text.SimpleDateFormat("d MMM yyyy · HH:mm", Locale.forLanguageTag("id-ID"))
+        return fmt.format(java.util.Date(addedAtMs))
+    }
     fun groupSummary(count: Int, totalDurationMs: Long): String =
         if (totalDurationMs > 0L) "$count lagu · ${LibraryRules.durationLabel(totalDurationMs)}"
         else "$count lagu"
@@ -163,6 +241,20 @@ object UiPresentation {
                 )
             }
     }
+    fun parseSongViewType(raw: String?): LibrarySongViewType =
+        LibrarySongViewType.entries.firstOrNull { it.name == raw } ?: LibrarySongViewType.LIST
+
+    fun nextSongViewType(current: LibrarySongViewType): LibrarySongViewType {
+        val entries = LibrarySongViewType.entries
+        return entries[(current.ordinal + 1) % entries.size]
+    }
+
+    fun songGridColumnCount(screenWidthDp: Int): Int = when {
+        screenWidthDp >= 840 -> 4
+        screenWidthDp >= 580 -> 3
+        else -> 2
+    }
+
     fun artworkIndex(id: Long): Int = Math.floorMod(id, 5L).toInt()
 
     /** Maps low-level search/network exception messages into plain, non-technical Indonesian guidance. */

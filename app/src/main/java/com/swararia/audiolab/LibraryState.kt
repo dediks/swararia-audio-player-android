@@ -1,5 +1,6 @@
 package com.swararia.audiolab
 
+import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -11,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -37,9 +39,11 @@ internal class LibraryBrowserState(
     private val queryState: MutableState<String>,
     private val alphabeticalState: MutableState<Boolean>,
     private val groupModeNameState: MutableState<String>,
+    private val viewTypeNameState: MutableState<String>,
     private val selectedPlaylistIdState: MutableState<Long?>,
     private val reorderModeState: MutableState<Boolean>,
     private val selectionModeState: MutableState<Boolean>,
+    private val onPersistViewType: (LibrarySongViewType) -> Unit = {},
 ) {
     var tracks by mutableStateOf(initialTracks)
     var playlists by mutableStateOf(initialPlaylists)
@@ -83,6 +87,10 @@ internal class LibraryBrowserState(
     val groupMode: LibraryGroupMode by derivedStateOf {
         val currentName = groupModeNameState.value
         LibraryGroupMode.entries.firstOrNull { it.name == currentName } ?: LibraryGroupMode.ALL
+    }
+
+    val viewType: LibrarySongViewType by derivedStateOf {
+        UiPresentation.parseSongViewType(viewTypeNameState.value)
     }
 
     val activePlaylist: LibraryPlaylist? by derivedStateOf {
@@ -171,6 +179,11 @@ internal class LibraryBrowserState(
         groupModeNameState.value = mode.name
     }
 
+    fun selectViewType(type: LibrarySongViewType) {
+        viewTypeNameState.value = type.name
+        onPersistViewType(type)
+    }
+
     fun toggleSelectionMode() {
         if (selectionMode) exitSelectionMode() else selectionMode = true
     }
@@ -248,10 +261,18 @@ internal fun rememberLibraryBrowserState(
     tracks: List<AudioTrack>,
     playlists: List<LibraryPlaylist>,
 ): LibraryBrowserState {
+    val context = LocalContext.current.applicationContext
+    val prefs = remember(context) {
+        context.getSharedPreferences(LIBRARY_PREFS_NAME, Context.MODE_PRIVATE)
+    }
+    val initialViewType = remember(prefs) {
+        UiPresentation.parseSongViewType(prefs.getString(KEY_SONG_VIEW_TYPE, null))
+    }
     val sectionNameState = rememberSaveable { mutableStateOf(LibrarySectionTab.ALL_TRACKS.name) }
     val queryState = rememberSaveable { mutableStateOf("") }
     val alphabeticalState = rememberSaveable { mutableStateOf(false) }
     val groupModeNameState = rememberSaveable { mutableStateOf(LibraryGroupMode.ALL.name) }
+    val viewTypeNameState = rememberSaveable { mutableStateOf(initialViewType.name) }
     val selectedPlaylistIdState = rememberSaveable { mutableStateOf<Long?>(null) }
     val reorderModeState = rememberSaveable { mutableStateOf(false) }
     val selectionModeState = rememberSaveable { mutableStateOf(false) }
@@ -264,9 +285,13 @@ internal fun rememberLibraryBrowserState(
             queryState = queryState,
             alphabeticalState = alphabeticalState,
             groupModeNameState = groupModeNameState,
+            viewTypeNameState = viewTypeNameState,
             selectedPlaylistIdState = selectedPlaylistIdState,
             reorderModeState = reorderModeState,
             selectionModeState = selectionModeState,
+            onPersistViewType = { selected ->
+                prefs.edit().putString(KEY_SONG_VIEW_TYPE, selected.name).apply()
+            },
         )
     }
     if (state.tracks !== tracks) state.tracks = tracks
@@ -321,5 +346,8 @@ internal fun sortLibraryTracks(tracks: List<AudioTrack>, alphabetical: Boolean):
         UiPresentation.title(it.displayName).lowercase(Locale.ROOT)
     }.thenBy { it.id })
     else tracks.sortedWith(compareByDescending<AudioTrack> { it.addedAt }.thenByDescending { it.id })
+
+private const val LIBRARY_PREFS_NAME = "swararia_library_prefs"
+private const val KEY_SONG_VIEW_TYPE = "song_view_type"
 
 internal fun List<AudioTrack>.totalDurationMs(): Long = sumOf { (it.durationMs ?: 0L).coerceAtLeast(0L) }

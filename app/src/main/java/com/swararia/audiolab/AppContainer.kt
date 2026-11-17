@@ -41,7 +41,7 @@ class AppContainer(context: Context) {
     val soundboardEngine: FohSoundboardEngine by lazy { FohSoundboardEngine(appContext) }
     val brandSkinManager: BrandSkinManager by lazy { BrandSkinManager(appContext) }
     val searchRepository: AudioSearchRepository by lazy {
-        YoutubeSearchRepository(appContext, { ingestState.value.busy })
+        YoutubeSearchRepository(appContext, { ingestState.value.engineBusy })
     }
     val ytMusicAccount: YoutubeMusicAccountManager by lazy {
         YoutubeMusicAccountManager(

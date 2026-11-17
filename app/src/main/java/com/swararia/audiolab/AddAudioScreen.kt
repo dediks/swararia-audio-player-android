@@ -98,8 +98,9 @@ fun AddAudioScreen(
     val sourceTab = AddAudioSourceTab.entries.firstOrNull { it.name == sourceTabName } ?: AddAudioSourceTab.YOUTUBE_MUSIC
     val provider = if (sourceTab == AddAudioSourceTab.YOUTUBE) SearchProvider.YOUTUBE else SearchProvider.YOUTUBE_MUSIC
     val kind = SearchKind.entries.firstOrNull { it.name == kindName } ?: SearchKind.SONGS
-    val controlsEnabled = !ingest.busy && !upgrade.operationBusy
+    val controlsEnabled = !ingest.engineBusy && !upgrade.operationBusy
     val idle = controlsEnabled && !search.busy && !actions.preview.loading
+    val importIdle = idle && !ingest.busy
     val queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading
     val validQuery = remember(query) { runCatching { YoutubeSearchRules.validatedQuery(query) }.isSuccess }
     val detectedUrl = remember(query) { runCatching { DownloadQueueRules.validatedPublicSourceUrl(query) }.getOrNull() }
@@ -181,7 +182,7 @@ fun AddAudioScreen(
     }
     val triggerLocalImport: () -> Unit = {
         sourceTabName = AddAudioSourceTab.LOCAL_FILE.name
-        if (idle) onImport()
+        if (importIdle) onImport()
     }
     val enqueueSingleHit: (SearchHit) -> Unit = { hit ->
         if (queueIdle) {
@@ -233,6 +234,7 @@ fun AddAudioScreen(
                     selectedCount = selectedSongs.size,
                     hasSongs = loadedSongs.isNotEmpty() && (inPlaylist || sourceTab != AddAudioSourceTab.LOCAL_FILE),
                     idle = idle,
+                    importIdle = importIdle,
                     queueIdle = queueIdle,
                     activeDownloadCount = activeDownloadCount,
                     failedDownloadCount = failedDownloadCount,
@@ -325,7 +327,7 @@ fun AddAudioScreen(
             if (!inPlaylist && sourceTab == AddAudioSourceTab.LOCAL_FILE) {
                 item(key = "local-import-cta", contentType = "local-import") {
                     LocalImportActionBanner(
-                        enabled = idle,
+                        enabled = importIdle,
                         onPickFiles = triggerLocalImport,
                     )
                 }
@@ -381,7 +383,7 @@ fun AddAudioScreen(
                     }
                 }
             } else {
-                if (search.busy) item(key = "loading", contentType = "banner") {
+                if (search.busy && !search.loadingMore) item(key = "loading", contentType = "banner") {
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = FohTheme.colors.surfaceCard,
@@ -460,6 +462,7 @@ fun AddAudioScreen(
                             hasSearched = search.hasSearched,
                             provider = provider,
                             idle = idle,
+                            importIdle = importIdle,
                             queueIdle = queueIdle,
                             onOpenLink = { openLinkModal("") },
                             onOpenImport = triggerLocalImport,
@@ -538,30 +541,51 @@ fun AddAudioScreen(
 
                 if (search.hasMore) item(key = "more", contentType = "more") {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = actions.loadMore,
-                            enabled = idle,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                            shape = RoundedCornerShape(14.dp),
-                        ) {
-                            if (search.loadingMore) {
-                                FohSpinningIndicator(
-                                    size = 18.dp,
-                                    strokeWidth = 2.2.dp,
-                                    color = FohTheme.colors.safeAccent,
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text("Memuat hasil berikutnya…")
-                            } else {
-                                Text("Tampilkan lebih banyak")
-                            }
-                        }
                         if (search.loadingMore) {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = FohTheme.colors.surfaceCard,
+                                border = BorderStroke(1.dp, FohTheme.colors.safeBorder.copy(alpha = 0.7f)),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    FohSpinningIndicator(
+                                        size = 18.dp,
+                                        strokeWidth = 2.2.dp,
+                                        color = FohTheme.colors.safeAccent,
+                                    )
+                                    Text(
+                                        text = "Memuat hasil berikutnya…",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(onClick = onCancelSearch) {
+                                        Text("Batalkan")
+                                    }
+                                }
+                            }
                             FohIndeterminateBar(
                                 color = FohTheme.colors.safeAccent,
                                 trackColor = FohTheme.colors.surfaceDeep,
                                 height = 4.dp,
                             )
+                        } else {
+                            OutlinedButton(
+                                onClick = actions.loadMore,
+                                enabled = idle,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                                shape = RoundedCornerShape(14.dp),
+                            ) {
+                                Text("Tampilkan lebih banyak")
+                            }
                         }
                     }
                 }
@@ -651,6 +675,7 @@ private fun SearchTopHeader(
     selectedCount: Int,
     hasSongs: Boolean,
     idle: Boolean,
+    importIdle: Boolean = idle,
     queueIdle: Boolean = idle,
     activeDownloadCount: Int = 0,
     failedDownloadCount: Int = 0,
@@ -785,7 +810,7 @@ private fun SearchTopHeader(
                 )
                 DropdownMenuItem(
                     text = { Text("Impor File HP") },
-                    enabled = idle,
+                    enabled = importIdle,
                     leadingIcon = { Icon(UiIcons.Import, null) },
                     onClick = { menu = false; onOpenImport() },
                 )
@@ -1253,6 +1278,7 @@ private fun SearchEmptyState(
     hasSearched: Boolean,
     provider: SearchProvider,
     idle: Boolean,
+    importIdle: Boolean = idle,
     queueIdle: Boolean,
     onOpenLink: () -> Unit,
     onOpenImport: () -> Unit,
@@ -1302,7 +1328,7 @@ private fun SearchEmptyState(
             subtitle = "MP3 · WAV · FLAC",
             accent = MaterialTheme.colorScheme.onSurface,
             iconBg = FohTheme.colors.surfaceDeep,
-            enabled = idle,
+            enabled = importIdle,
             onClick = onOpenImport,
             modifier = Modifier.weight(1f).fillMaxHeight(),
         )

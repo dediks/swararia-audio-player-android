@@ -161,4 +161,45 @@ class UiPresentationTest {
         assertEquals("dQw4w9WgXcQ", UiPresentation.sourceVideoId("Gugatan Rakyat Semesta [dQw4w9WgXcQ].opus"))
         assertEquals(null, UiPresentation.sourceVideoId("Lagu Tanpa ID.mp3"))
     }
+
+    @Test fun songViewTypeModesParseCycleAndScaleColumnsCleanly() {
+        assertEquals(listOf("List", "Compact", "Grid"), LibrarySongViewType.entries.map { it.label })
+        assertEquals(LibrarySongViewType.LIST, UiPresentation.parseSongViewType(null))
+        assertEquals(LibrarySongViewType.LIST, UiPresentation.parseSongViewType("UNKNOWN"))
+        assertEquals(LibrarySongViewType.COMPACT, UiPresentation.parseSongViewType("COMPACT"))
+        assertEquals(LibrarySongViewType.GRID, UiPresentation.parseSongViewType("GRID"))
+
+        assertEquals(LibrarySongViewType.COMPACT, UiPresentation.nextSongViewType(LibrarySongViewType.LIST))
+        assertEquals(LibrarySongViewType.GRID, UiPresentation.nextSongViewType(LibrarySongViewType.COMPACT))
+        assertEquals(LibrarySongViewType.LIST, UiPresentation.nextSongViewType(LibrarySongViewType.GRID))
+
+        assertEquals(2, UiPresentation.songGridColumnCount(360))
+        assertEquals(2, UiPresentation.songGridColumnCount(412))
+        assertEquals(3, UiPresentation.songGridColumnCount(600))
+        assertEquals(4, UiPresentation.songGridColumnCount(840))
+    }
+
+    @Test fun technicalTrackDetailFormattersCoverCodecSampleRateChannelAndBitrate() {
+        assertEquals("AAC (M4A)", UiPresentation.codecDisplayLabel("Song.m4a", "audio/mp4a-latm"))
+        assertEquals("Opus (WEBM)", UiPresentation.codecDisplayLabel("Song.webm", "audio/opus"))
+        assertEquals("FLAC (Lossless)", UiPresentation.codecDisplayLabel("Master.flac", "audio/flac"))
+        assertEquals("MP3", UiPresentation.codecDisplayLabel("Track.mp3", "audio/mpeg"))
+
+        assertEquals("44.1 kHz (44,100 Hz)", UiPresentation.sampleRateLabel(44_100))
+        assertEquals("48 kHz (48,000 Hz)", UiPresentation.sampleRateLabel(48_000))
+        assertEquals("—", UiPresentation.sampleRateLabel(null))
+
+        assertEquals("Mono (1 ch)", UiPresentation.channelLayoutLabel(1))
+        assertEquals("Stereo (2 ch)", UiPresentation.channelLayoutLabel(2))
+        assertEquals("—", UiPresentation.channelLayoutLabel(0))
+
+        assertEquals("320 kbps", UiPresentation.bitrateDetailLabel(4_000_000L, 100_000L, 320_000L))
+        assertEquals(
+            "320 kbps (stream) · ~256 kbps (rata-rata)",
+            UiPresentation.bitrateDetailLabel(3_200_000L, 100_000L, 320_000L),
+        )
+        assertEquals("~256 kbps (rata-rata file)", UiPresentation.bitrateDetailLabel(3_200_000L, 100_000L, null))
+        assertEquals("11.2 MB (11,712,000 byte)", UiPresentation.exactFileSizeLabel(11_712_000L))
+        assertEquals("M4A · 256k · 6:06", UiPresentation.compactTrackSpec("I_Will_Remember.m4a", 11_712_000L, 366_000L))
+    }
 }

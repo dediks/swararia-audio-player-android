@@ -30,10 +30,11 @@ class AppViewModel(
         mediaImporter = desktopRemoteMediaImporter,
     )
     private val session: SearchSession = SearchSession(searchRepository, viewModelScope,
-        { ingest.value.busy || busy.value || operations.busy.value }, ::message, previewPlayback)
+        { ingest.value.engineBusy || busy.value || operations.busy.value }, ::message, previewPlayback)
     val search = session.search
     val preview = session.preview
     fun canStartOnlineOperation() = session.canStartOnlineOperation()
+    fun canStartExclusiveIngestOperation() = session.canStartOnlineOperation() && !ingest.value.busy
     fun search(query: String, provider: SearchProvider, kind: SearchKind = SearchKind.SONGS,
         sort: SearchSort = SearchSort.RELEVANCE) = session.search(query, provider, kind, sort)
     fun switchSearch(query: String, provider: SearchProvider, kind: SearchKind = SearchKind.SONGS,
@@ -72,7 +73,7 @@ class AppViewModel(
     val jobs = downloadQueue.jobs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val playbackDeletion = PlaybackDeletion()
     private val operations: UpgradeOperations = UpgradeOperations(downloadQueue, viewModelScope,
-        { session.canStartOnlineOperation() }, { ingest.value.busy }, { jobs.value },
+        { canStartExclusiveIngestOperation() }, { ingest.value.busy }, { jobs.value },
         { id ->
             playbackDeletion.delete(id) { library.delete(id) }
             remoteServer?.notifyLibraryDeletionsChanged()
@@ -231,7 +232,7 @@ class AppViewModel(
         }
     }
     fun continueDownloadQueue(start: (String) -> Unit) {
-        if (!canStartOnlineOperation()) { message("Tunggu proses yang sedang berjalan."); return }
+        if (!canStartExclusiveIngestOperation()) { message("Tunggu proses yang sedang berjalan."); return }
         if (!canDownloadOnNetworkNow()) {
             message("Hubungkan ke Wi-Fi terlebih dahulu (Mode Hanya Wi-Fi aktif).")
             return
@@ -248,6 +249,8 @@ class AppViewModel(
     fun clearFinishedDownloads() = operations.clearFinished()
     fun delete(trackId: Long, onSuccess: () -> Unit) = operations.delete(trackId, onSuccess)
     fun deleteBatch(trackIds: List<Long>, onSuccess: () -> Unit) = operations.deleteBatch(trackIds, onSuccess)
+    suspend fun inspectTrackTechnicalDetails(track: AudioTrack): TrackTechnicalDetails? =
+        library.inspectTechnicalDetails(track)
     fun message(text: String) { viewModelScope.launch { messageChannel.send(text) } }
     fun rename(trackId: Long, title: String, onSuccess: () -> Unit) {
         if (busy.value || operations.busy.value) return

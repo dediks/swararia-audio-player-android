@@ -293,6 +293,32 @@ internal object UiIcons {
         moveTo(10f, 15f); lineTo(14f, 15f)
         moveTo(16f, 11f); lineTo(20f, 11f)
     }
+    val ViewList = outline("ViewList") {
+        moveTo(3.5f, 5f); lineTo(8.5f, 5f); lineTo(8.5f, 10f); lineTo(3.5f, 10f); close()
+        moveTo(11f, 6.2f); lineTo(20.5f, 6.2f)
+        moveTo(11f, 9.2f); lineTo(17.5f, 9.2f)
+        moveTo(3.5f, 14f); lineTo(8.5f, 14f); lineTo(8.5f, 19f); lineTo(3.5f, 19f); close()
+        moveTo(11f, 15.2f); lineTo(20.5f, 15.2f)
+        moveTo(11f, 18.2f); lineTo(17.5f, 18.2f)
+    }
+    val ViewCompact = outline("ViewCompact") {
+        moveTo(4f, 5.5f); lineTo(20f, 5.5f)
+        moveTo(4f, 9.8f); lineTo(20f, 9.8f)
+        moveTo(4f, 14.2f); lineTo(20f, 14.2f)
+        moveTo(4f, 18.5f); lineTo(20f, 18.5f)
+    }
+    val ViewGrid = outline("ViewGrid") {
+        moveTo(4f, 4f); lineTo(10.2f, 4f); lineTo(10.2f, 10.2f); lineTo(4f, 10.2f); close()
+        moveTo(13.8f, 4f); lineTo(20f, 4f); lineTo(20f, 10.2f); lineTo(13.8f, 10.2f); close()
+        moveTo(4f, 13.8f); lineTo(10.2f, 13.8f); lineTo(10.2f, 20f); lineTo(4f, 20f); close()
+        moveTo(13.8f, 13.8f); lineTo(20f, 13.8f); lineTo(20f, 20f); lineTo(13.8f, 20f); close()
+    }
+
+    fun forSongViewType(viewType: LibrarySongViewType): ImageVector = when (viewType) {
+        LibrarySongViewType.LIST -> ViewList
+        LibrarySongViewType.COMPACT -> ViewCompact
+        LibrarySongViewType.GRID -> ViewGrid
+    }
 
     private fun outline(name: String, draw: PathBuilder.() -> Unit) =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {

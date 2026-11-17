@@ -36,7 +36,8 @@ data class IngestState(
     val cancelable: Boolean = false,
     val error: Boolean = false,
     val engineVersion: String = "bawaan APK",
-    val batchId: String? = null
+    val batchId: String? = null,
+    val engineBusy: Boolean = false,
 )
 
 object IngestStatus {
@@ -261,7 +262,7 @@ class IngestService : Service() {
                 releaseResources(startId)
                 task = null
                 // Release reservation last: another start cannot race native/foreground teardown.
-                IngestStatus.mutable.update { it.copy(busy = false, cancelable = false) }
+                IngestStatus.mutable.update { it.copy(busy = false, cancelable = false, engineBusy = false) }
             }
         }
         return START_NOT_STICKY
@@ -429,9 +430,14 @@ class IngestService : Service() {
             if (tryClaimAutoHealSlot()) {
                 control.progress(null, "Memperbarui mesin yt-dlp")
                 report("Memperbarui mesin yt-dlp...", null)
-                runCatching {
-                    updateEnginePreferringNightly()
-                    updateVersion()
+                IngestStatus.mutable.update { it.copy(engineBusy = true) }
+                try {
+                    runCatching {
+                        updateEnginePreferringNightly()
+                        updateVersion()
+                    }
+                } finally {
+                    IngestStatus.mutable.update { it.copy(engineBusy = false) }
                 }
             }
             directory.listFiles().orEmpty().forEach { it.deleteRecursively() }
@@ -793,7 +799,7 @@ class IngestService : Service() {
         forceStop()
         scope.cancel()
         releaseWakeLock()
-        if (task == null) IngestStatus.mutable.update { it.copy(busy = false, cancelable = false) }
+        if (task == null) IngestStatus.mutable.update { it.copy(busy = false, cancelable = false, engineBusy = false) }
         super.onDestroy()
     }
 
@@ -886,10 +892,15 @@ class IngestService : Service() {
         private const val EXTRA_URL = "url"
         private const val EXTRA_AUTHORIZED = "authorized"
         /** Reserve before Android launch, not asynchronously inside the service. */
-        private fun start(context: Context, intent: Intent, batchId: String? = null) {
+        private fun start(
+            context: Context,
+            intent: Intent,
+            batchId: String? = null,
+            engineBusy: Boolean = false,
+        ) {
             val previous = IngestStatus.mutable.value
             check(!previous.busy && IngestStatus.mutable.compareAndSet(previous, previous.copy(
-                busy = true, stage = "Menyiapkan...", progress = null, detail = "", cancelable = true, error = false, batchId = batchId))) {
+                busy = true, stage = "Menyiapkan...", progress = null, detail = "", cancelable = true, error = false, batchId = batchId, engineBusy = engineBusy))) {
                 "Tunggu proses audio yang sedang berjalan."
             }
             try { ContextCompat.startForegroundService(context, intent) }
@@ -952,7 +963,9 @@ class IngestService : Service() {
             intent.data?.let { collected.add(it) }
             return collected.take(MAX_IMPORT_BATCH_COUNT)
         }
-        fun update(context: Context) { start(context, Intent(context, IngestService::class.java).setAction(ACTION_UPDATE)) }
+        fun update(context: Context) {
+            start(context, Intent(context, IngestService::class.java).setAction(ACTION_UPDATE), engineBusy = true)
+        }
         fun cancel(context: Context) {
             if (IngestStatus.state.value.busy) context.startService(Intent(context, IngestService::class.java).setAction(ACTION_CANCEL))
         }

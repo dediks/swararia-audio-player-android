@@ -28,6 +28,15 @@ data class DownloadedAudioMetadata(
     val thumbnailUrl: String? = null,
 )
 
+data class TrackTechnicalDetails(
+    val mimeType: String? = null,
+    val bitrateBps: Long? = null,
+    val sampleRateHz: Int? = null,
+    val channelCount: Int? = null,
+    val bitsPerSample: Int? = null,
+    val durationMs: Long? = null,
+)
+
 /** Only the library capabilities required by presentation; storage retains ownership of file I/O. */
 interface AudioLibraryRepository {
     val tracks: Flow<List<AudioTrack>>
@@ -53,4 +62,5 @@ interface AudioLibraryRepository {
         playlistName: String? = null,
     ): UploadImportOutcome = error("Upload tidak tersedia pada repository ini.")
     suspend fun openReadableTrack(trackId: Long): ReadableManagedMedia? = null
+    suspend fun inspectTechnicalDetails(track: AudioTrack): TrackTechnicalDetails? = null
 }
