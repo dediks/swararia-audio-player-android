@@ -202,7 +202,7 @@ class IngestService : Service() {
                         YoutubeDL.init(applicationContext)
                         currentCoroutineContext().ensureActive()
                         enterProtectedPhase("Mengambil pembaruan yt-dlp dari GitHub resmi...")
-                        YoutubeDL.updateYoutubeDL(applicationContext, YoutubeDL.UpdateChannel.STABLE)
+                        updateEnginePreferringNightly()
                         updateVersion()
                         finished("Mesin siap", "yt-dlp: ${IngestStatus.state.value.engineVersion}")
                     }
@@ -304,32 +304,45 @@ class IngestService : Service() {
             var usedCookies = cookieFile != null
             control.progress(null, "Mengunduh audio")
             var budgetExceeded = false
-            try {
-                budgetExceeded = runYtDlpAttempt(
-                    jobId = job.id,
-                    request = buildDownloadRequest(targetUrl, outputTemplate, cookieFile),
-                    directory = directory,
-                    control = control,
-                )
-            } catch (failure: Exception) {
-                if (canceled.get()) throw CancellationException("Dibatalkan")
-                if (paused.get() || failure is PauseQueueException) throw PauseQueueException()
-                if (skipJobId.get() == job.id || failure is SkipCurrentJobException) throw SkipCurrentJobException()
-                val activeCookieFile = cookieFile
-                if (activeCookieFile == null || budgetExceeded) throw failure
-                val updatedText = runCatching { activeCookieFile.takeIf { it.isFile }?.readText() }.getOrNull()
-                val stillValid = updatedText?.let {
-                    runCatching { YoutubeMusicCookieRules.sanitizeNetscapeCookies(it) }.getOrNull()
+            if (cookieFile != null) {
+                try {
+                    budgetExceeded = runYtDlpAttempt(
+                        jobId = job.id,
+                        request = buildDownloadRequest(targetUrl, outputTemplate, cookieFile),
+                        directory = directory,
+                        control = control,
+                    )
+                } catch (failure: Exception) {
+                    if (canceled.get()) throw CancellationException("Dibatalkan")
+                    if (paused.get() || failure is PauseQueueException) throw PauseQueueException()
+                    if (skipJobId.get() == job.id || failure is SkipCurrentJobException) throw SkipCurrentJobException()
+                    val activeCookieFile = cookieFile
+                    val dirExceeded = budgetExceeded ||
+                        directory.walkTopDown().filter { it.isFile }.sumOf { it.length() } > MAX_WORK_BYTES
+                    if (activeCookieFile == null || dirExceeded) throw failure
+                    val updatedText = runCatching { activeCookieFile.takeIf { it.isFile }?.readText() }.getOrNull()
+                    val stillValid = updatedText?.let {
+                        runCatching { YoutubeMusicCookieRules.sanitizeNetscapeCookies(it) }.getOrNull()
+                    }
+                    wipeCookieFile(activeCookieFile)
+                    cookieFile = null
+                    if (stillValid == null) ytMusicAccount.markNeedsReauth()
+                    directory.listFiles().orEmpty().forEach { it.deleteRecursively() }
+                    usedCookies = false
+                    control.progress(null, "Mengulang tanpa akun")
+                    budgetExceeded = runPublicWithEngineRecovery(
+                        jobId = job.id,
+                        url = url,
+                        outputTemplate = outputTemplate,
+                        directory = directory,
+                        control = control,
+                    )
                 }
-                wipeCookieFile(activeCookieFile)
-                cookieFile = null
-                if (stillValid == null) ytMusicAccount.markNeedsReauth()
-                directory.listFiles().orEmpty().forEach { it.deleteRecursively() }
-                usedCookies = false
-                control.progress(null, "Mengulang tanpa akun")
-                budgetExceeded = runYtDlpAttempt(
+            } else {
+                budgetExceeded = runPublicWithEngineRecovery(
                     jobId = job.id,
-                    request = buildDownloadRequest(url, outputTemplate, cookieFile = null),
+                    url = url,
+                    outputTemplate = outputTemplate,
                     directory = directory,
                     control = control,
                 )
@@ -392,10 +405,57 @@ class IngestService : Service() {
         }
     }
 
+    private suspend fun runPublicWithEngineRecovery(
+        jobId: Long,
+        url: String,
+        outputTemplate: String,
+        directory: File,
+        control: BatchDownloadRunner.Control,
+    ): Boolean {
+        try {
+            return runYtDlpAttempt(
+                jobId = jobId,
+                request = buildDownloadRequest(url, outputTemplate, cookieFile = null),
+                directory = directory,
+                control = control,
+            )
+        } catch (failure: Exception) {
+            if (canceled.get()) throw CancellationException("Dibatalkan")
+            if (paused.get() || failure is PauseQueueException) throw PauseQueueException()
+            if (skipJobId.get() == jobId || failure is SkipCurrentJobException) throw SkipCurrentJobException()
+            val dirExceeded = directory.walkTopDown().filter { it.isFile }.sumOf { it.length() } > MAX_WORK_BYTES
+            if (dirExceeded || !DownloadQueueRules.shouldAttemptEngineRecovery(failure.message)) throw failure
+            checkJobControls(jobId)
+            if (tryClaimAutoHealSlot()) {
+                control.progress(null, "Memperbarui mesin yt-dlp")
+                report("Memperbarui mesin yt-dlp...", null)
+                runCatching {
+                    updateEnginePreferringNightly()
+                    updateVersion()
+                }
+            }
+            directory.listFiles().orEmpty().forEach { it.deleteRecursively() }
+            checkJobControls(jobId)
+            control.progress(null, "Mengulang dengan klien cadangan")
+            return runYtDlpAttempt(
+                jobId = jobId,
+                request = buildDownloadRequest(
+                    url = url,
+                    outputTemplate = outputTemplate,
+                    cookieFile = null,
+                    useFallbackClients = true,
+                ),
+                directory = directory,
+                control = control,
+            )
+        }
+    }
+
     private fun buildDownloadRequest(
         url: String,
         outputTemplate: String,
         cookieFile: File?,
+        useFallbackClients: Boolean = false,
     ): YoutubeDLRequest = YoutubeDLRequest(url)
         .addOption("--no-playlist")
         .addOption("--ignore-config")
@@ -407,6 +467,7 @@ class IngestService : Service() {
         .addOption("--retries", 2)
         .addOption("--fragment-retries", 2)
         .addOption("--max-filesize", "512M")
+        .addOption("--remote-components", DownloadQueueRules.REMOTE_COMPONENTS_EJS)
         .addOption("-f", "bestaudio/best")
         .addOption("--extract-audio")
         .addOption("--audio-format", "best")
@@ -423,12 +484,9 @@ class IngestService : Service() {
             }
             if (cookieFile != null) {
                 addOption("--cookies", cookieFile.absolutePath)
-                if (ytMusicAccount.state.value.tier == YoutubeMusicPremiumTier.PREMIUM) {
-                    addOption(
-                        "--extractor-args",
-                        "youtube:player_client=web_music,web_creator,tv_samsung,web;formats=missing_pot",
-                    )
-                }
+                addOption("--extractor-args", DownloadQueueRules.AUTH_YOUTUBE_EXTRACTOR_ARGS)
+            } else if (useFallbackClients) {
+                addOption("--extractor-args", DownloadQueueRules.FALLBACK_YOUTUBE_EXTRACTOR_ARGS)
             }
         }
 
@@ -582,6 +640,22 @@ class IngestService : Service() {
         synchronized(phaseLock) { checkNotCanceled(); interruptible = false }
         report(stage, null, cancelable = false)
     }
+    private fun updateEnginePreferringNightly(): YoutubeDL.UpdateStatus? =
+        try {
+            YoutubeDL.updateYoutubeDL(applicationContext, YoutubeDL.UpdateChannel.NIGHTLY)
+        } catch (_: Exception) {
+            YoutubeDL.updateYoutubeDL(applicationContext, YoutubeDL.UpdateChannel.STABLE)
+        }
+
+    private fun tryClaimAutoHealSlot(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        while (true) {
+            val previous = lastAutoHealElapsedMs.get()
+            if (!DownloadQueueRules.canAutoUpdateEngine(previous, now)) return false
+            if (lastAutoHealElapsedMs.compareAndSet(previous, now)) return true
+        }
+    }
+
     private fun updateVersion() {
         val version = YoutubeDL.versionName(applicationContext) ?: "bawaan APK"
         IngestStatus.mutable.update { it.copy(engineVersion = version) }
@@ -788,6 +862,7 @@ class IngestService : Service() {
 
     companion object {
         private val workerMutex = Mutex()
+        private val lastAutoHealElapsedMs = AtomicLong(0L)
         private const val MAX_WORK_BYTES = 1024L * 1024 * 1024
         private const val MAX_META_JSON_BYTES = 64L * 1024L
         private const val MIN_FREE_STORAGE_BYTES = 150L * 1024L * 1024L

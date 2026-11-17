@@ -2,6 +2,51 @@ package com.swararia.audiolab
 
 /** Pure queue validation; never includes private source URLs in errors. */
 object DownloadQueueRules {
+    const val REMOTE_COMPONENTS_EJS = "ejs:github"
+    const val AUTH_YOUTUBE_EXTRACTOR_ARGS =
+        "youtube:player_client=web_music,web_creator,tv_samsung,web;formats=missing_pot"
+    const val FALLBACK_YOUTUBE_EXTRACTOR_ARGS =
+        "youtube:player_client=tv_embedded,web_creator,mweb,android_vr,web;formats=missing_pot"
+    const val AUTO_HEAL_COOLDOWN_MS = 6L * 60L * 60L * 1000L
+
+    private val permanentFailureMarkers = listOf(
+        "private video",
+        "video unavailable",
+        "has been removed",
+        "copyright",
+        "not available in your country",
+        "premieres in",
+        "live event will begin",
+    )
+
+    private val recoverableEngineMarkers = listOf(
+        "http error 403",
+        "403: forbidden",
+        "signature",
+        "nsig",
+        "n challenge",
+        "js challenge",
+        "sabr",
+        "po token",
+        "missing_pot",
+        "requested format is not available",
+        "only images are available",
+        "unable to extract",
+        "player api json",
+        "initial data",
+        "sign in to confirm",
+        "reload the page",
+    )
+
+    fun shouldAttemptEngineRecovery(errorText: String?): Boolean {
+        val normalized = errorText?.trim()?.takeIf { it.isNotEmpty() }?.lowercase() ?: return false
+        if (permanentFailureMarkers.any { it in normalized }) return false
+        return recoverableEngineMarkers.any { it in normalized }
+    }
+
+    fun canAutoUpdateEngine(lastAttemptElapsedMs: Long, nowElapsedMs: Long): Boolean =
+        lastAttemptElapsedMs <= 0L || (nowElapsedMs - lastAttemptElapsedMs) >= AUTO_HEAL_COOLDOWN_MS
+
     fun validate(urls: List<String>, authorized: Boolean): List<String> {
         require(authorized) { "Konfirmasi hak unduh terlebih dahulu." }
         require(urls.size in 1..50) { "Pilih 1–50 audio per batch." }

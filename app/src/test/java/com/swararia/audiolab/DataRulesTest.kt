@@ -65,4 +65,42 @@ class DataRulesTest {
         assertEquals("1M", DownloadPolicyRules.ytDlpRateLimitArg(DownloadRateLimit.LIMIT_1M))
         assertEquals("500K", DownloadPolicyRules.ytDlpRateLimitArg(DownloadRateLimit.LIMIT_500K))
     }
+
+    @Test fun engineRecoveryClassifiesYoutubeCipherPotSabrAndCooldownRules() {
+        assertEquals("ejs:github", DownloadQueueRules.REMOTE_COMPONENTS_EJS)
+        assertTrue(DownloadQueueRules.AUTH_YOUTUBE_EXTRACTOR_ARGS.contains("web_music"))
+        assertTrue(DownloadQueueRules.AUTH_YOUTUBE_EXTRACTOR_ARGS.contains("formats=missing_pot"))
+        assertTrue(DownloadQueueRules.FALLBACK_YOUTUBE_EXTRACTOR_ARGS.contains("tv_embedded"))
+        assertTrue(DownloadQueueRules.FALLBACK_YOUTUBE_EXTRACTOR_ARGS.contains("android_vr"))
+        assertTrue(DownloadQueueRules.FALLBACK_YOUTUBE_EXTRACTOR_ARGS.contains("formats=missing_pot"))
+
+        listOf(
+            "ERROR: [youtube] dQw4w9WgXcQ: Signature extraction failed",
+            "ERROR: [youtube] dQw4w9WgXcQ: nsig extraction failed: Some formats may be missing",
+            "WARNING: [youtube] dQw4w9WgXcQ: Some web client https formats have been skipped as they are missing a url. YouTube is forcing SABR streaming",
+            "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+            "ERROR: Requested format is not available. Missing_pot",
+            "ERROR: Sign in to confirm you’re not a bot",
+            "ERROR: [youtube] abcdefgh_12: Unable to extract player API JSON",
+        ).forEach { msg ->
+            assertTrue(msg, DownloadQueueRules.shouldAttemptEngineRecovery(msg))
+        }
+
+        listOf(
+            null,
+            "",
+            "   ",
+            "ERROR: [youtube] abcdefgh_12: Private video. Sign in if you've been granted access",
+            "ERROR: [youtube] abcdefgh_12: Video unavailable. This video has been removed by the uploader",
+            "ERROR: This video contains content from X, who has blocked it on copyright grounds",
+            "ERROR: Network connection timed out",
+        ).forEach { msg ->
+            assertFalse(msg.orEmpty(), DownloadQueueRules.shouldAttemptEngineRecovery(msg))
+        }
+
+        assertTrue(DownloadQueueRules.canAutoUpdateEngine(0L, 1_000L))
+        assertTrue(DownloadQueueRules.canAutoUpdateEngine(-1L, 1_000L))
+        assertFalse(DownloadQueueRules.canAutoUpdateEngine(1_000L, 1_000L + DownloadQueueRules.AUTO_HEAL_COOLDOWN_MS - 1L))
+        assertTrue(DownloadQueueRules.canAutoUpdateEngine(1_000L, 1_000L + DownloadQueueRules.AUTO_HEAL_COOLDOWN_MS))
+    }
 }
