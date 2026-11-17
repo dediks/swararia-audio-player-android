@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 
 private data class PendingTrackChoice(val track: DesktopRemoteTrack, val preferredAutoPlay: Boolean)
 
-/** No saved state, automatic clipboard reads, camera permission, discovery, or playback ownership. */
+/** No saved credentials, automatic clipboard reads, camera permission, discovery, or playback ownership. */
 @Composable
 fun DesktopRemoteScreen(
     session: DesktopRemoteSession,
@@ -41,7 +41,7 @@ fun DesktopRemoteScreen(
     onRequireLegacyStoragePermission: (() -> Unit) -> Unit = { it() },
 ) {
     val state by session.state.collectAsStateWithLifecycle()
-    var input by rememberSaveable { mutableStateOf("") }
+    var input by remember { mutableStateOf("") }
     var scanning by remember { mutableStateOf(false) }
     var scanFeedback by remember { mutableStateOf<String?>(null) }
     var manualFeedback by remember { mutableStateOf<String?>(null) }

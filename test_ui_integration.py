@@ -19,7 +19,9 @@ class UiIntegrationContracts(unittest.TestCase):
         self.assertIn('model.canStartOnlineOperation()',code)
         self.assertIn('model.ingest.collectAsStateWithLifecycle()',code)
         self.assertIn('AppViewModelFactory(',code)
-        self.assertGreaterEqual(code.count('whenOnlineIdle {'),7)
+        self.assertGreaterEqual(code.count('whenOnlineIdle {'), 6)
+        self.assertIn('whenQueueReady {', code)
+        self.assertIn('whenIngestIdle {', code)
         self.assertNotIn('Scaffold(',code)
 
     def test_brand_logo_and_font_preserve_approved_asset_bytes(self):

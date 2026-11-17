@@ -23,12 +23,18 @@ class DesktopRemoteWiring(unittest.TestCase):
         self.assertIn('desktopRemote.release()', vm)
 
     def test_remote_feature_never_owns_phone_player_or_durable_credentials(self):
-        names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteScreen', 'DesktopRemoteComponents', 'DesktopRemoteQrScanner']
-        source = '\n'.join((SRC / 'remote' / (n + '.kt')).read_text() for n in names)
+        non_screen_names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteComponents', 'DesktopRemoteQrScanner']
+        screen_source = (SRC / 'remote/DesktopRemoteScreen.kt').read_text()
+        source = '\n'.join([(SRC / 'remote' / (n + '.kt')).read_text() for n in non_screen_names] + [screen_source])
         for forbidden in ['MediaController', 'ExoPlayer', 'PlaybackService', 'SharedPreferences',
-                          'SavedStateHandle', 'rememberSaveable', 'setDefaultSSLSocketFactory',
+                          'SavedStateHandle', 'setDefaultSSLSocketFactory',
                           'setDefaultHostnameVerifier', 'setHostnameVerifier']:
             self.assertNotIn(forbidden, source)
+        for name in non_screen_names:
+            self.assertNotIn('rememberSaveable', (SRC / 'remote' / (name + '.kt')).read_text())
+        # Pairing invitation/QR input must stay ephemeral in memory, never serialized to SavedState Bundle.
+        self.assertIn('var input by remember {', screen_source)
+        self.assertNotIn('var input by rememberSaveable', screen_source)
         manifest = (ROOT / 'app/src/main/AndroidManifest.xml').read_text()
         self.assertNotIn('android.permission.CAMERA', manifest)
         self.assertIn('com.google.mlkit.vision.DEPENDENCIES', manifest)
@@ -46,7 +52,9 @@ class DesktopRemoteWiring(unittest.TestCase):
         self.assertIn('container.remoteServerController', container)
 
         swararia_ui = (SRC / 'SwarariaUi.kt').read_text()
-        self.assertIn('3 -> RemoteTabScreen(', swararia_ui)
+        more_screen = (SRC / 'MoreScreen.kt').read_text()
+        self.assertIn('MainRootTab.TOOLS -> MoreScreen(', swararia_ui)
+        self.assertIn('MoreToolRoute.REMOTE -> RemoteTabScreen(', more_screen)
 
         remote_screen = (SRC / 'remote/RemoteServerScreen.kt').read_text()
         for required in ['DesktopRemoteScreen(', 'RemoteServerUiState', 'RemoteServerUiActions', 'QRCodeWriter']:

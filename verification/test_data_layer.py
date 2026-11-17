@@ -50,11 +50,12 @@ class MigrationSqlTest(unittest.TestCase):
         self.assertIn('database.downloadPublicationRecovery =', library, 'Existing startup queue recovery must reconcile physical publications too')
         self.assertIn('database.downloadPublicationRecovery?.invoke()', queue)
         self.assertIn('control.commitDurably', service)
-        self.assertIn('addDownloadedFile(output.single(), job.id)', service)
+        self.assertIn('val downloadedFile = output.single()', service)
+        self.assertIn('addDownloadedFile(downloadedFile, job.id,', service)
         self.assertNotIn('control.commit {', service)
-        transaction = library[library.index('return database.withTransaction {'):library.index('init { database.downloadPublicationRecovery')]
+        transaction = library[library.index('val trackId = database.withTransaction {'):library.index('init { database.downloadPublicationRecovery')]
         self.assertIn('database.tracks().insert(', transaction)
-        self.assertIn('database.downloads().complete(id, trackId)', transaction)
+        self.assertIn('database.downloads().complete(id, insertedId)', transaction)
 
     def test_queue_sql_guards_sequential_work_and_preserves_running_on_batch_cancel(self):
         migration = (SOURCE / 'AudioMigrations.kt').read_text()

@@ -318,10 +318,10 @@ class IngestService : Service() {
                     if (canceled.get()) throw CancellationException("Dibatalkan")
                     if (paused.get() || failure is PauseQueueException) throw PauseQueueException()
                     if (skipJobId.get() == job.id || failure is SkipCurrentJobException) throw SkipCurrentJobException()
-                    val activeCookieFile = cookieFile
                     val dirExceeded = budgetExceeded ||
                         directory.walkTopDown().filter { it.isFile }.sumOf { it.length() } > MAX_WORK_BYTES
-                    if (activeCookieFile == null || dirExceeded) throw failure
+                    if (dirExceeded) throw failure
+                    val activeCookieFile = cookieFile
                     val updatedText = runCatching { activeCookieFile.takeIf { it.isFile }?.readText() }.getOrNull()
                     val stillValid = updatedText?.let {
                         runCatching { YoutubeMusicCookieRules.sanitizeNetscapeCookies(it) }.getOrNull()
