@@ -32,11 +32,19 @@ class PlaybackPreferences(context: Context) {
         const val PREFS_NAME = "native_playback"
         const val KEY_FADE_IN_MS = "playback_fade_in_ms"
         const val KEY_FADE_OUT_MS = "playback_fade_out_ms"
+        const val KEY_GRAPHIC_EQ_JSON = "foh_graphic_eq_31_v1"
 
         fun readState(prefs: SharedPreferences): PlaybackSettingsState =
             PlaybackSettingsState(
                 fadeInMs = FadeRules.clampDurationMs(prefs.getLong(KEY_FADE_IN_MS, 0L)),
                 fadeOutMs = FadeRules.clampDurationMs(prefs.getLong(KEY_FADE_OUT_MS, 0L)),
             )
+
+        internal fun readGraphicEq(prefs: SharedPreferences): GraphicEqState =
+            GraphicEqRules.decodeJson(prefs.getString(KEY_GRAPHIC_EQ_JSON, null))
+
+        internal fun writeGraphicEq(prefs: SharedPreferences, state: GraphicEqState) {
+            prefs.edit().putString(KEY_GRAPHIC_EQ_JSON, GraphicEqRules.encodeJson(state)).apply()
+        }
     }
 }

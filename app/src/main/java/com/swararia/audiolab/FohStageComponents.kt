@@ -72,6 +72,7 @@ internal fun FohSoundboardPanel(
     onOpenEditSlot: (SoundPadSlot) -> Unit,
     onTogglePadDuck: (Boolean) -> Unit,
     onStopAllPads: () -> Unit,
+    onFillDefaultPresets: (onlyEmpty: Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = FohTheme.colors
@@ -81,6 +82,9 @@ internal fun FohSoundboardPanel(
             .sortedBy { it.slotIndex }
     }
     val hasActivePads = soundboardState.activeSlots.isNotEmpty()
+    val hasEmptyBankSlots = remember(bankSlots, tracksById) {
+        bankSlots.any { !SoundboardRules.isSlotPlayable(it, tracksById.keys) }
+    }
 
     Column(
         modifier = modifier
@@ -114,7 +118,7 @@ internal fun FohSoundboardPanel(
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                             color = if (active) colors.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
                         )
                     }
                 }
@@ -124,6 +128,23 @@ internal fun FohSoundboardPanel(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (hasEmptyBankSlots) {
+                    Surface(
+                        onClick = { onFillDefaultPresets(true) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = colors.safeBg,
+                        border = BorderStroke(1.dp, colors.safeBorder),
+                    ) {
+                        Text(
+                            text = "Isi Preset",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.safeAccent,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                        )
+                    }
+                }
+
                 Surface(
                     onClick = { onTogglePadDuck(!soundboardState.padDuckEnabled) },
                     shape = RoundedCornerShape(10.dp),
@@ -138,7 +159,7 @@ internal fun FohSoundboardPanel(
                         style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                         fontWeight = FontWeight.SemiBold,
                         color = if (soundboardState.padDuckEnabled) colors.warnAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
                     )
                 }
 
@@ -186,20 +207,23 @@ internal fun FohSoundboardPanel(
                             ?: SoundPadSlot(bankIndex = selectedBank, slotIndex = slotIdx)
                         val key = PadKey(selectedBank, slotIdx)
                         val track = slot.trackId?.let { tracksById[it] }
+                        val preset = SoundboardRules.presetById(slot.presetId)
+                        val playable = slot.isAssigned && (track != null || preset != null)
                         SoundPadTile(
                             slot = slot,
                             track = track,
+                            preset = preset,
                             playing = key in soundboardState.activeSlots,
                             loading = key in soundboardState.loadingSlots,
                             onTap = {
-                                if (slot.isAssigned && track != null) {
+                                if (playable) {
                                     onTriggerPad(selectedBank, slotIdx)
                                 } else {
                                     onOpenAssignSlot(selectedBank, slotIdx)
                                 }
                             },
                             onLongPress = {
-                                if (slot.isAssigned && track != null) {
+                                if (playable) {
                                     onOpenEditSlot(slot)
                                 } else {
                                     onOpenAssignSlot(selectedBank, slotIdx)
@@ -219,6 +243,7 @@ internal fun FohSoundboardPanel(
 private fun SoundPadTile(
     slot: SoundPadSlot,
     track: AudioTrack?,
+    preset: SoundPadMomentPreset? = null,
     playing: Boolean,
     loading: Boolean,
     onTap: () -> Unit,
@@ -226,7 +251,7 @@ private fun SoundPadTile(
     modifier: Modifier = Modifier,
 ) {
     val colors = FohTheme.colors
-    val assigned = slot.isAssigned && track != null
+    val assigned = slot.isAssigned && (track != null || preset != null)
     val bgColor = when {
         playing -> colors.safeBg
         assigned -> colors.surfaceCard
@@ -277,7 +302,10 @@ private fun SoundPadTile(
                 )
             }
         } else {
-            val title = slot.label.ifBlank { SoundboardRules.defaultPadLabel(track!!.displayName) }
+            val title = slot.label.ifBlank {
+                preset?.label ?: SoundboardRules.defaultPadLabel(track!!.displayName)
+            }
+            val durationMs = track?.durationMs ?: preset?.durationMs
             val trimActive = abs(SoundboardRules.clampTrimDb(slot.trimDb)) >= 0.5f
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -298,6 +326,17 @@ private fun SoundPadTile(
                             fontWeight = FontWeight.Bold,
                             color = if (playing) colors.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        if (preset != null) {
+                            Text(
+                                text = "WAV",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 9.sp,
+                                    fontFeatureSettings = "tnum",
+                                ),
+                                fontWeight = FontWeight.Bold,
+                                color = colors.safeAccent.copy(alpha = 0.85f),
+                            )
+                        }
                         if (trimActive) {
                             Text(
                                 text = SoundboardRules.formatTrimDb(slot.trimDb),
@@ -335,7 +374,7 @@ private fun SoundPadTile(
                             )
                         } else {
                             Text(
-                                text = LocalFohRules.formatCountdown(track?.durationMs),
+                                text = LocalFohRules.formatCountdown(durationMs),
                                 style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
                             )
@@ -357,7 +396,7 @@ private fun SoundPadTile(
 }
 
 /**
- * Bottom sheet track selector so operators can assign any Library track onto a soundboard slot.
+ * Bottom sheet selector so operators can assign any built-in WAV moment preset or Library track onto a soundboard slot.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -365,10 +404,24 @@ internal fun SoundPadTrackPickerSheet(
     slotNumber: Int,
     tracks: List<AudioTrack>,
     onPickTrack: (AudioTrack) -> Unit,
+    onPickPreset: (SoundPadMomentPreset) -> Unit = {},
+    onFillAllDefaultPresets: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     val colors = FohTheme.colors
     var query by remember { mutableStateOf("") }
+    val filteredPresets = remember(query) {
+        val needle = query.trim().lowercase()
+        if (needle.isEmpty()) {
+            SoundboardRules.MOMENT_PRESETS
+        } else {
+            SoundboardRules.MOMENT_PRESETS.filter { preset ->
+                preset.label.lowercase().contains(needle) ||
+                    preset.subtitle.lowercase().contains(needle) ||
+                    SoundboardRules.bankLabel(preset.bankIndex).lowercase().contains(needle)
+            }
+        }
+    }
     val filteredTracks = remember(tracks, query) {
         val needle = query.trim().lowercase()
         val matched = if (needle.isEmpty()) {
@@ -416,12 +469,48 @@ internal fun SoundPadTrackPickerSheet(
                 value = query,
                 onValueChange = { query = it },
                 singleLine = true,
-                placeholder = { Text("Cari audio...") },
+                placeholder = { Text("Cari efek momen atau audio...") },
                 leadingIcon = { Icon(UiIcons.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            if (filteredTracks.isEmpty()) {
+            Surface(
+                onClick = onFillAllDefaultPresets,
+                shape = RoundedCornerShape(10.dp),
+                color = colors.safeBg,
+                border = BorderStroke(1.dp, colors.safeBorder),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Isi Semua 16 Pad Momen",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.safeAccent,
+                        )
+                        Text(
+                            text = "Reset bank Event & Kuis / MC ke preset WAV bawaan",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        imageVector = UiIcons.ChevronRight,
+                        contentDescription = null,
+                        tint = colors.safeAccent,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+
+            if (filteredPresets.isEmpty() && filteredTracks.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -429,7 +518,7 @@ internal fun SoundPadTrackPickerSheet(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = if (tracks.isEmpty()) "Belum ada file di Library" else "Tidak ditemukan",
+                        text = "Tidak ditemukan",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -442,68 +531,151 @@ internal fun SoundPadTrackPickerSheet(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     contentPadding = PaddingValues(vertical = 4.dp),
                 ) {
-                    items(filteredTracks, key = { it.id }) { track ->
-                        val isFast = SoundboardRules.shouldUseSoundPool(track.durationMs)
-                        Surface(
-                            onClick = { onPickTrack(track) },
-                            shape = RoundedCornerShape(10.dp),
-                            color = colors.surfaceDeep,
-                            border = BorderStroke(1.dp, colors.borderSubtle),
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
+                    if (filteredPresets.isNotEmpty()) {
+                        item(key = "header_presets") {
+                            Text(
+                                text = "PRESET MOMEN WAV",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.safeAccent,
+                                modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
+                            )
+                        }
+                        items(filteredPresets, key = { "preset_${it.id}" }) { preset ->
+                            Surface(
+                                onClick = { onPickPreset(preset) },
+                                shape = RoundedCornerShape(10.dp),
+                                color = colors.surfaceDeep,
+                                border = BorderStroke(1.dp, colors.borderSubtle),
                             ) {
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(
-                                        text = UiPresentation.title(track.displayName),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    val sub = track.artist?.takeIf { it.isNotBlank() }
-                                    if (sub != null) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    ) {
                                         Text(
-                                            text = sub,
+                                            text = preset.label,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = "${SoundboardRules.bankLabel(preset.bankIndex)} · ${preset.subtitle}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
                                     }
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    if (isFast) {
+                                    Spacer(Modifier.width(8.dp))
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
                                         Surface(
                                             shape = RoundedCornerShape(6.dp),
                                             color = colors.safeBg,
                                             border = BorderStroke(1.dp, colors.safeBorder),
                                         ) {
                                             Text(
-                                                text = "FAST",
+                                                text = "WAV · FAST",
                                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                                 fontWeight = FontWeight.Bold,
                                                 color = colors.safeAccent,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                             )
                                         }
+                                        Text(
+                                            text = LocalFohRules.formatCountdown(preset.durationMs),
+                                            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
                                     }
-                                    Text(
-                                        text = LocalFohRules.formatCountdown(track.durationMs),
-                                        style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (filteredTracks.isNotEmpty()) {
+                        item(key = "header_tracks") {
+                            Text(
+                                text = "AUDIO DI PUSTAKA",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+                            )
+                        }
+                        items(filteredTracks, key = { "track_${it.id}" }) { track ->
+                            val isFast = SoundboardRules.shouldUseSoundPool(track.durationMs)
+                            Surface(
+                                onClick = { onPickTrack(track) },
+                                shape = RoundedCornerShape(10.dp),
+                                color = colors.surfaceDeep,
+                                border = BorderStroke(1.dp, colors.borderSubtle),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    ) {
+                                        Text(
+                                            text = UiPresentation.title(track.displayName),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        val sub = track.artist?.takeIf { it.isNotBlank() }
+                                        if (sub != null) {
+                                            Text(
+                                                text = sub,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        if (isFast) {
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = colors.safeBg,
+                                                border = BorderStroke(1.dp, colors.safeBorder),
+                                            ) {
+                                                Text(
+                                                    text = "FAST",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = colors.safeAccent,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = LocalFohRules.formatCountdown(track.durationMs),
+                                            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                         }

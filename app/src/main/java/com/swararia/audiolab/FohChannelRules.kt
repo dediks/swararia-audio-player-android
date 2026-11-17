@@ -103,6 +103,17 @@ internal object MonoSumMath {
     }
 }
 
+/** Built-in synthesized WAV preset available on FOH soundboard pads. */
+data class SoundPadMomentPreset(
+    val id: String,
+    val bankIndex: Int,
+    val slotIndex: Int,
+    val label: String,
+    val subtitle: String,
+    val durationMs: Long,
+    val defaultTrimDb: Float = 0f,
+)
+
 /** Configuration for a single Soundboard pad slot inside a bank. */
 data class SoundPadSlot(
     val bankIndex: Int,
@@ -110,8 +121,9 @@ data class SoundPadSlot(
     val trackId: Long? = null,
     val label: String = "",
     val trimDb: Float = 0f,
+    val presetId: String? = null,
 ) {
-    val isAssigned: Boolean get() = trackId != null && trackId > 0L
+    val isAssigned: Boolean get() = (trackId != null && trackId > 0L) || !presetId.isNullOrBlank()
 }
 
 /** Pure Soundboard rules, gain math, and JSON serialization. */
@@ -123,7 +135,147 @@ internal object SoundboardRules {
     const val TRIM_MAX_DB = 0f
     const val AUTO_DUCK_GAIN = 0.25f
 
+    val MOMENT_PRESETS: List<SoundPadMomentPreset> = listOf(
+        // Bank 0: Event
+        SoundPadMomentPreset(
+            id = "applause",
+            bankIndex = 0,
+            slotIndex = 0,
+            label = "Tepuk Tangan",
+            subtitle = "Tepuk tangan meriah penonton",
+            durationMs = 3_200L,
+        ),
+        SoundPadMomentPreset(
+            id = "laughter",
+            bankIndex = 0,
+            slotIndex = 1,
+            label = "Tertawa Ramai",
+            subtitle = "Efek tawa penonton & suasana cair",
+            durationMs = 2_600L,
+        ),
+        SoundPadMomentPreset(
+            id = "tense_suspense",
+            bankIndex = 0,
+            slotIndex = 2,
+            label = "Momen Tegang",
+            subtitle = "Detak jantung & atmosfer deg-degan",
+            durationMs = 3_800L,
+        ),
+        SoundPadMomentPreset(
+            id = "drumroll",
+            bankIndex = 0,
+            slotIndex = 3,
+            label = "Drumroll Tegangan",
+            subtitle = "Roll snare pengumuman + simbal",
+            durationMs = 3_000L,
+        ),
+        SoundPadMomentPreset(
+            id = "fanfare_opening",
+            bankIndex = 0,
+            slotIndex = 4,
+            label = "Fanfare Pembuka",
+            subtitle = "Brass megah pembuka & sambutan VIP",
+            durationMs = 2_800L,
+        ),
+        SoundPadMomentPreset(
+            id = "gong_peresmian",
+            bankIndex = 0,
+            slotIndex = 5,
+            label = "Gong Peresmian",
+            subtitle = "Dentuman gong seremonial",
+            durationMs = 3_400L,
+        ),
+        SoundPadMomentPreset(
+            id = "kirab_stinger",
+            bankIndex = 0,
+            slotIndex = 6,
+            label = "Stinger Kirab",
+            subtitle = "Chime anggun pengiring masuk",
+            durationMs = 3_200L,
+        ),
+        SoundPadMomentPreset(
+            id = "award_victory",
+            bankIndex = 0,
+            slotIndex = 7,
+            label = "Momen Juara",
+            subtitle = "Kemenangan & penyerahan hadiah",
+            durationMs = 2_800L,
+        ),
+        // Bank 1: Kuis / MC
+        SoundPadMomentPreset(
+            id = "bell_correct",
+            bankIndex = 1,
+            slotIndex = 0,
+            label = "Jawaban Benar",
+            subtitle = "Denting bel ganda (Ding-Ding!)",
+            durationMs = 1_400L,
+        ),
+        SoundPadMomentPreset(
+            id = "buzzer_wrong",
+            bankIndex = 1,
+            slotIndex = 1,
+            label = "Buzzer Salah",
+            subtitle = "Tetot / Zonk jawaban salah",
+            durationMs = 1_500L,
+        ),
+        SoundPadMomentPreset(
+            id = "punchline_joke",
+            bankIndex = 1,
+            slotIndex = 2,
+            label = "Ba-Dum-Tss (Lucu)",
+            subtitle = "Rimshot punchline candaan MC",
+            durationMs = 1_600L,
+        ),
+        SoundPadMomentPreset(
+            id = "comedy_womp",
+            bankIndex = 1,
+            slotIndex = 3,
+            label = "Gagal Lucu (Womp)",
+            subtitle = "Nada turun momen zonk santai",
+            durationMs = 2_200L,
+        ),
+        SoundPadMomentPreset(
+            id = "countdown_tick",
+            bankIndex = 1,
+            slotIndex = 4,
+            label = "Hitung Mundur",
+            subtitle = "Detak waktu cepat + bel akhir",
+            durationMs = 4_000L,
+        ),
+        SoundPadMomentPreset(
+            id = "siren_doorprize",
+            bankIndex = 1,
+            slotIndex = 5,
+            label = "Sirine Doorprize",
+            subtitle = "Sirine meriah undian hadiah",
+            durationMs = 2_800L,
+        ),
+        SoundPadMomentPreset(
+            id = "chime_mc",
+            bankIndex = 1,
+            slotIndex = 6,
+            label = "Chime Panggilan MC",
+            subtitle = "Nada perhatian transisi acara",
+            durationMs = 1_800L,
+        ),
+        SoundPadMomentPreset(
+            id = "airhorn_hype",
+            bankIndex = 1,
+            slotIndex = 7,
+            label = "Terompet Meriah",
+            subtitle = "Party horn pemecah suasana",
+            durationMs = 2_000L,
+        ),
+    )
+
+    private val presetsById: Map<String, SoundPadMomentPreset> = MOMENT_PRESETS.associateBy { it.id }
+    private val presetsByPosition: Map<Pair<Int, Int>, SoundPadMomentPreset> =
+        MOMENT_PRESETS.associateBy { it.bankIndex to it.slotIndex }
+
     private val mapper = ObjectMapper()
+
+    fun presetById(id: String?): SoundPadMomentPreset? =
+        id?.trim()?.takeIf { it.isNotEmpty() }?.let { presetsById[it] }
 
     fun bankLabel(bankIndex: Int): String = when (bankIndex) {
         0 -> "Event"
@@ -161,15 +313,74 @@ internal object SoundboardRules {
         }
     }
 
+    fun defaultPresetSlots(): List<SoundPadSlot> = buildList(BANK_COUNT * SLOTS_PER_BANK) {
+        for (bank in 0 until BANK_COUNT) {
+            for (slot in 0 until SLOTS_PER_BANK) {
+                val preset = presetsByPosition[bank to slot]
+                if (preset != null) {
+                    add(
+                        SoundPadSlot(
+                            bankIndex = bank,
+                            slotIndex = slot,
+                            trackId = null,
+                            label = preset.label,
+                            trimDb = preset.defaultTrimDb,
+                            presetId = preset.id,
+                        ),
+                    )
+                } else {
+                    add(SoundPadSlot(bankIndex = bank, slotIndex = slot))
+                }
+            }
+        }
+    }
+
+    fun mergeEmptyWithDefaultPresets(current: List<SoundPadSlot>): List<SoundPadSlot> {
+        val byPos = current.associateBy { it.bankIndex to it.slotIndex }
+        return buildList(BANK_COUNT * SLOTS_PER_BANK) {
+            for (bank in 0 until BANK_COUNT) {
+                for (slot in 0 until SLOTS_PER_BANK) {
+                    val existing = byPos[bank to slot]
+                    if (existing != null && existing.isAssigned) {
+                        add(existing)
+                    } else {
+                        val preset = presetsByPosition[bank to slot]
+                        if (preset != null) {
+                            add(
+                                SoundPadSlot(
+                                    bankIndex = bank,
+                                    slotIndex = slot,
+                                    trackId = null,
+                                    label = preset.label,
+                                    trimDb = preset.defaultTrimDb,
+                                    presetId = preset.id,
+                                ),
+                            )
+                        } else {
+                            add(SoundPadSlot(bankIndex = bank, slotIndex = slot))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun isSlotPlayable(slot: SoundPadSlot, availableTrackIds: Set<Long>): Boolean =
+        presetById(slot.presetId) != null || (slot.trackId != null && slot.trackId in availableTrackIds)
+
     fun encodeSlotsJson(slots: List<SoundPadSlot>): String {
-        val assigned = slots.filter { it.isAssigned }.map {
-            mapOf(
-                "bank" to it.bankIndex,
-                "slot" to it.slotIndex,
-                "trackId" to it.trackId,
-                "label" to it.label.take(40),
-                "trimDb" to clampTrimDb(it.trimDb),
-            )
+        val assigned = slots.filter { it.isAssigned }.map { slot ->
+            buildMap<String, Any?> {
+                put("bank", slot.bankIndex)
+                put("slot", slot.slotIndex)
+                put("trackId", slot.trackId)
+                put("label", slot.label.take(40))
+                put("trimDb", clampTrimDb(slot.trimDb))
+                val preset = slot.presetId?.trim()?.takeIf { it.isNotEmpty() }
+                if (preset != null) {
+                    put("presetId", preset)
+                }
+            }
         }
         return mapper.writeValueAsString(assigned)
     }
@@ -182,17 +393,23 @@ internal object SoundboardRules {
         for (node in tree) {
             val bank = node.path("bank").asInt(-1)
             val slot = node.path("slot").asInt(-1)
-            val trackId = node.path("trackId").asLong(-1L)
-            if (bank !in 0 until BANK_COUNT || slot !in 0 until SLOTS_PER_BANK || trackId <= 0L) continue
+            val rawTrackId = node.path("trackId").asLong(-1L)
+            val rawPresetId = node.path("presetId").asText("").trim()
+            val validPreset = presetById(rawPresetId)
+            val hasTrack = rawTrackId > 0L
+            if (bank !in 0 until BANK_COUNT || slot !in 0 until SLOTS_PER_BANK || (!hasTrack && validPreset == null)) {
+                continue
+            }
             val label = node.path("label").asText("").trim().take(40)
             val trimDb = clampTrimDb(node.path("trimDb").asDouble(0.0).toFloat())
             val idx = bank * SLOTS_PER_BANK + slot
             base[idx] = SoundPadSlot(
                 bankIndex = bank,
                 slotIndex = slot,
-                trackId = trackId,
-                label = label,
+                trackId = if (hasTrack) rawTrackId else null,
+                label = label.ifBlank { validPreset?.label.orEmpty() },
                 trimDb = trimDb,
+                presetId = if (hasTrack) null else validPreset?.id,
             )
         }
         return base

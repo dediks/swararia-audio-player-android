@@ -501,6 +501,7 @@ internal fun FocusedPlayer(
     var pendingGuardEntry by remember { mutableStateOf<SessionQueueItem?>(null) }
     var routeDialogOpen by remember { mutableStateOf(false) }
     var faderSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var eqSheetOpen by rememberSaveable { mutableStateOf(false) }
     var safeSheetOpen by rememberSaveable { mutableStateOf(false) }
     var assignPadTarget by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var editPadSlot by remember { mutableStateOf<SoundPadSlot?>(null) }
@@ -564,7 +565,7 @@ internal fun FocusedPlayer(
     val needsDndPermission = FohSafeModeRules.needsDndPermissionPrompt(safeSettings, dndGranted)
     val assignedInBank = remember(soundboardState.slots, soundboardState.selectedBank, tracksByLongId) {
         soundboardState.slots.count {
-            it.bankIndex == soundboardState.selectedBank && it.isAssigned && tracksByLongId.containsKey(it.trackId)
+            it.bankIndex == soundboardState.selectedBank && SoundboardRules.isSlotPlayable(it, tracksByLongId.keys)
         }
     }
 
@@ -632,6 +633,7 @@ internal fun FocusedPlayer(
                     }
                 },
                 onOpenStageRta = onOpenStageRta,
+                onOpenEqSheet = { eqSheetOpen = true },
                 positionMsProvider = positionMsProvider,
             )
 
@@ -639,6 +641,7 @@ internal fun FocusedPlayer(
                 queueCount = playback.queue.size,
                 currentIndex = playback.currentIndex,
                 assignedPads = assignedInBank,
+                eqStatusLabel = controlUi.eq31.shortStatusLabel,
                 viewMode = viewMode,
                 onSelectViewMode = onSelectViewMode,
             )
@@ -675,6 +678,17 @@ internal fun FocusedPlayer(
                             onOpenEditSlot = { editPadSlot = it },
                             onTogglePadDuck = { soundboardEngine?.setPadDuckEnabled(it) },
                             onStopAllPads = { soundboardEngine?.stopAll() },
+                            onFillDefaultPresets = { onlyEmpty ->
+                                soundboardEngine?.fillMomentPresets(onlyEmpty = onlyEmpty)
+                            },
+                        )
+                    }
+                    LocalPlayerViewMode.EQ -> {
+                        FohGraphicEqPanel(
+                            eqState = controlUi.eq31,
+                            enabled = controlUi.connected && controlUi.eq31Supported,
+                            onUpdateEq = controlUi.onSetEq31,
+                            onExpandSheet = { eqSheetOpen = true },
                         )
                     }
                     LocalPlayerViewMode.ART -> {
@@ -711,6 +725,7 @@ internal fun FocusedPlayer(
                 },
                 onCueStart = { cueCurrentTrackToStart(controller, playback) },
                 onFaderPillClick = { faderSheetOpen = true },
+                onEqPillClick = { eqSheetOpen = true },
                 positionMsProvider = positionMsProvider,
             )
         }
@@ -730,6 +745,15 @@ internal fun FocusedPlayer(
                 onSetMonoSum = controlUi.onSetMonoSum,
                 onOpenPhoneVolumePanel = { showSystemMediaVolumePanel(context) },
                 onDismiss = { faderSheetOpen = false },
+            )
+        }
+
+        if (eqSheetOpen) {
+            LocalFohEqSheet(
+                eqState = controlUi.eq31,
+                enabled = controlUi.connected && controlUi.eq31Supported,
+                onUpdateEq = controlUi.onSetEq31,
+                onDismiss = { eqSheetOpen = false },
             )
         }
     }
@@ -758,6 +782,14 @@ internal fun FocusedPlayer(
             tracks = tracks,
             onPickTrack = { track ->
                 soundboardEngine?.assignSlot(targetBank, targetSlot, track)
+                assignPadTarget = null
+            },
+            onPickPreset = { preset ->
+                soundboardEngine?.assignPreset(targetBank, targetSlot, preset)
+                assignPadTarget = null
+            },
+            onFillAllDefaultPresets = {
+                soundboardEngine?.fillMomentPresets(onlyEmpty = false)
                 assignPadTarget = null
             },
             onDismiss = { assignPadTarget = null },

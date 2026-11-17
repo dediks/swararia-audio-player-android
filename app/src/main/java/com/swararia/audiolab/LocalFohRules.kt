@@ -6,6 +6,7 @@ import java.util.Locale
 internal enum class LocalPlayerViewMode(val label: String) {
     CUE_LIST("Cue"),
     PADS("Pads"),
+    EQ("EQ"),
     ART("Art"),
 }
 

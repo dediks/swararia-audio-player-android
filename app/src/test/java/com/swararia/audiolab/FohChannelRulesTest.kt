@@ -106,4 +106,63 @@ class FohChannelRulesTest {
         assertTrue(FohSafeModeRules.shouldWarnBluetooth(btRoute))
         assertFalse(FohSafeModeRules.shouldWarnBluetooth(lineRoute))
     }
+
+    @Test
+    fun momentPresetsAndWavSynthesizerGenerateValidStereoRiffWaveFiles() {
+        val presetSlots = SoundboardRules.defaultPresetSlots()
+        assertEquals(SoundboardRules.BANK_COUNT * SoundboardRules.SLOTS_PER_BANK, presetSlots.size)
+        assertTrue(presetSlots.all { it.isAssigned })
+        assertTrue(presetSlots.any { it.presetId == "applause" && it.label == "Tepuk Tangan" })
+        assertTrue(presetSlots.any { it.presetId == "laughter" && it.label == "Tertawa Ramai" })
+        assertTrue(presetSlots.any { it.presetId == "tense_suspense" && it.label == "Momen Tegang" })
+
+        val modified = presetSlots.toMutableList()
+        modified[0] = modified[0].copy(trimDb = -6f)
+        val roundTripped = SoundboardRules.decodeSlotsJson(SoundboardRules.encodeSlotsJson(modified))
+        assertEquals("applause", roundTripped[0].presetId)
+        assertEquals("Tepuk Tangan", roundTripped[0].label)
+        assertEquals(-6f, roundTripped[0].trimDb, 0.01f)
+        assertEquals(null, roundTripped[0].trackId)
+
+        val partial = SoundboardRules.defaultSlots().toMutableList()
+        partial[0] = SoundPadSlot(bankIndex = 0, slotIndex = 0, trackId = 99L, label = "Custom Track", trimDb = -3f)
+        val merged = SoundboardRules.mergeEmptyWithDefaultPresets(partial)
+        assertEquals(99L, merged[0].trackId)
+        assertEquals(null, merged[0].presetId)
+        assertEquals("laughter", merged[1].presetId)
+        assertTrue(SoundboardRules.isSlotPlayable(merged[1], emptySet()))
+
+        for (preset in SoundboardRules.MOMENT_PRESETS) {
+            val wav = SoundboardWavPresets.buildPresetWavBytes(preset.id)
+            assertTrue("Preset ${preset.id} must use SoundPool path", SoundboardRules.shouldUseSoundPool(preset.durationMs))
+            assertTrue("Preset ${preset.id} wav header too short", wav.size > 44)
+            assertTrue("Preset ${preset.id} wav must fit <1MB SoundPool cap", wav.size < 1_000_000)
+
+            assertEquals("RIFF", String(wav, 0, 4, Charsets.US_ASCII))
+            assertEquals("WAVE", String(wav, 8, 4, Charsets.US_ASCII))
+            val header = ByteBuffer.wrap(wav, 0, 44).order(ByteOrder.LITTLE_ENDIAN)
+            assertEquals(1.toShort(), header.getShort(20)) // PCM
+            assertEquals(2.toShort(), header.getShort(22)) // Stereo
+            assertEquals(SoundboardWavPresets.SAMPLE_RATE, header.getInt(24))
+            assertEquals(16.toShort(), header.getShort(34)) // Bits per sample
+            val dataBytes = header.getInt(40)
+            assertEquals(wav.size - 44, dataBytes)
+
+            val pcm = ByteBuffer.wrap(wav, 44, dataBytes).order(ByteOrder.LITTLE_ENDIAN)
+            var maxAbs = 0
+            while (pcm.remaining() >= 2) {
+                val sample = kotlin.math.abs(pcm.getShort().toInt())
+                if (sample > maxAbs) maxAbs = sample
+            }
+            assertTrue("Preset ${preset.id} must have non-zero audio signal", maxAbs > 500)
+        }
+
+        val tmpDir = java.nio.file.Files.createTempDirectory("swararia_pad_wav_test").toFile()
+        try {
+            val exported = SoundboardWavPresets.ensurePresetWavFile(tmpDir, "tense_suspense")
+            assertTrue(exported != null && exported.exists() && exported.length() > 44L)
+        } finally {
+            tmpDir.deleteRecursively()
+        }
+    }
 }

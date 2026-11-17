@@ -253,6 +253,7 @@ internal fun LocalFohTrackSummaryCard(
     onSeekChange: (Float) -> Unit,
     onSeekCommit: () -> Unit,
     onOpenStageRta: () -> Unit = {},
+    onOpenEqSheet: () -> Unit = {},
     positionMsProvider: () -> Long = { playback.positionMs },
 ) {
     val foh = FohTheme.colors
@@ -307,6 +308,13 @@ internal fun LocalFohTrackSummaryCard(
                                 label = "DUCK -12dB",
                                 containerColor = FohTheme.colors.warnBg,
                                 contentColor = FohTheme.colors.warnAccent,
+                            )
+                        }
+                        if (controlUi.eq31.isProcessingAudio || !controlUi.eq31.enabled) {
+                            LocalFohEqPill(
+                                eqState = controlUi.eq31,
+                                onClick = onOpenEqSheet,
+                                compact = true,
                             )
                         }
                         LibraryRules.sanitizedTag(current?.artist)?.let { artist ->
@@ -535,6 +543,7 @@ internal fun LocalFohViewModeHeader(
     queueCount: Int,
     currentIndex: Int,
     assignedPads: Int = 0,
+    eqStatusLabel: String = "FLAT",
     viewMode: LocalPlayerViewMode,
     onSelectViewMode: (LocalPlayerViewMode) -> Unit,
 ) {
@@ -542,6 +551,7 @@ internal fun LocalFohViewModeHeader(
     val headerCaption = when (viewMode) {
         LocalPlayerViewMode.CUE_LIST -> "LIVE CUE LIST · $queueCount TRACKS"
         LocalPlayerViewMode.PADS -> "JINGLE PADS · $assignedPads/${SoundboardRules.SLOTS_PER_BANK}"
+        LocalPlayerViewMode.EQ -> "31-BAND EQ · $eqStatusLabel"
         LocalPlayerViewMode.ART -> "COVER ART & INFO"
     }
     Row(
@@ -556,11 +566,15 @@ internal fun LocalFohViewModeHeader(
                 text = headerCaption,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (viewMode == LocalPlayerViewMode.EQ && eqStatusLabel != "FLAT" && eqStatusLabel != "BYPASS") {
+                    foh.safeAccent
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (viewMode != LocalPlayerViewMode.PADS && currentIndex >= 0 && queueCount > 0) {
+            if (viewMode != LocalPlayerViewMode.PADS && viewMode != LocalPlayerViewMode.EQ && currentIndex >= 0 && queueCount > 0) {
                 Text(
                     text = "Active Slot #${currentIndex + 1}",
                     style = MaterialTheme.typography.labelSmall,
@@ -592,7 +606,7 @@ internal fun LocalFohViewModeHeader(
                             color = if (isSelected) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             softWrap = false,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                         )
                     }
                 }
@@ -809,6 +823,7 @@ internal fun LocalFohBottomDeck(
     onNext: () -> Unit,
     onCueStart: () -> Unit,
     onFaderPillClick: () -> Unit = {},
+    onEqPillClick: () -> Unit = {},
     positionMsProvider: () -> Long = { playback.positionMs },
 ) {
     val foh = FohTheme.colors
@@ -846,6 +861,13 @@ internal fun LocalFohBottomDeck(
                         playing = playback.playing,
                         barCount = 4,
                     )
+                    if (controlUi.eq31.isProcessingAudio || !controlUi.eq31.enabled) {
+                        LocalFohEqPill(
+                            eqState = controlUi.eq31,
+                            onClick = onEqPillClick,
+                            compact = true,
+                        )
+                    }
                     if (controlUi.monoSum) {
                         MonoOutputBadge(
                             monoSum = true,
@@ -920,6 +942,11 @@ internal fun LocalFohBottomDeck(
                     CompactSignalVisualizer(
                         playing = playback.playing,
                         barCount = 4,
+                    )
+                    LocalFohEqPill(
+                        eqState = controlUi.eq31,
+                        onClick = onEqPillClick,
+                        compact = true,
                     )
                     MonoOutputBadge(
                         monoSum = controlUi.monoSum,

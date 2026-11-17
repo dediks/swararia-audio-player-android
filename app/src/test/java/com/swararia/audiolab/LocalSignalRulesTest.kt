@@ -210,4 +210,92 @@ class LocalSignalRulesTest {
         assertTrue(stepped.bandsR[11] > 0.7f)
         assertTrue(stepped.bandPeaksR[11] >= stepped.bandsR[11])
     }
+
+    @Test
+    fun analyze31BandRtaIsolatesSubBassMidAndHighFrequencies() {
+        fun peakBandForSine(freqHz: Double, sampleRateHz: Int, windowSamples: Int): Pair<Int, List<Float>> {
+            val mono = FloatArray(windowSamples) { i ->
+                (0.5 * sin(2.0 * PI * freqHz * i / sampleRateHz.toDouble())).toFloat()
+            }
+            val bands = LocalSignalRules.analyze31BandRta(mono, windowSamples, sampleRateHz)
+            assertEquals(LocalSignalRules.RTA31_BAND_COUNT, bands.size)
+            val peakIdx = bands.indices.maxByOrNull { bands[it] } ?: -1
+            return peakIdx to bands
+        }
+
+        val testCases48k = listOf(
+            31.5 to 2,
+            63.0 to 5,
+            125.0 to 8,
+            1000.0 to 17,
+            8000.0 to 26,
+            16000.0 to 29,
+        )
+        for ((freqHz, expectedBand) in testCases48k) {
+            val (peakIdx, bands) = peakBandForSine(freqHz, 48_000, 4096)
+            assertEquals("48kHz $freqHz Hz should peak at band $expectedBand, got $peakIdx ($bands)", expectedBand, peakIdx)
+            assertTrue("Expected strong magnitude at band $expectedBand for $freqHz Hz, got ${bands[expectedBand]}", bands[expectedBand] > 0.65f)
+        }
+
+        val (peak63At96k, bands63At96k) = peakBandForSine(63.0, 96_000, 8192)
+        assertEquals(5, peak63At96k)
+        assertTrue(bands63At96k[5] > 0.65f)
+
+        val (peak16kAt96k, bands16kAt96k) = peakBandForSine(16_000.0, 96_000, 8192)
+        assertEquals(29, peak16kAt96k)
+        assertTrue(bands16kAt96k[29] > 0.65f)
+    }
+
+    @Test
+    fun stepBallisticsTracksAndDecays31BandRtaWithGainAndMute() {
+        val raw = RawPcmSignalFrame(
+            peakL = 0.6f,
+            peakR = 0.6f,
+            rmsL = 0.4f,
+            rmsR = 0.4f,
+            bands = List(LocalSignalRules.BAND_COUNT) { 0f },
+            bands31 = List(LocalSignalRules.RTA31_BAND_COUNT) { idx -> if (idx == 5) 0.85f else 0.05f },
+        )
+
+        val active = LocalSignalRules.stepBallistics(
+            previous = LocalAudioSignalSnapshot(),
+            rawFrame = raw,
+            playing = true,
+            postFaderGain = 1f,
+            muted = false,
+            nowMs = 100L,
+        )
+        assertEquals(LocalSignalRules.RTA31_BAND_COUNT, active.bands31.size)
+        assertEquals(LocalSignalRules.RTA31_BAND_COUNT, active.bandPeaks31.size)
+        assertEquals(0.85f, active.bands31[5], 0.01f)
+        assertEquals(active.bands31[5], active.bandPeaks31[5], 0.0001f)
+        assertTrue(active.bands31[5] > active.bands31[17])
+
+        val mutedStep = LocalSignalRules.stepBallistics(
+            previous = active,
+            rawFrame = raw,
+            playing = true,
+            postFaderGain = 1f,
+            muted = true,
+            nowMs = 133L,
+        )
+        assertTrue(mutedStep.bands31[5] < active.bands31[5])
+
+        var decayed = active
+        var now = 200L
+        repeat(90) {
+            decayed = LocalSignalRules.stepBallistics(
+                previous = decayed,
+                rawFrame = null,
+                playing = false,
+                postFaderGain = 1f,
+                muted = false,
+                nowMs = now,
+            )
+            now += 33L
+        }
+        assertFalse(decayed.active)
+        assertTrue(decayed.bands31.all { it == 0f })
+        assertTrue(decayed.bandPeaks31.all { it == 0f })
+    }
 }

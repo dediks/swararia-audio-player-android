@@ -30,9 +30,9 @@ internal data class SoundboardUiState(
 /**
  * Dual-path low-latency soundboard engine supporting overlapping one-shot stingers.
  *
- * Short stingers (`<= 5.5s`) load into `SoundPool` for sub-20ms hardware-mixed response, while
- * longer bumpers pre-prepare on dedicated `MediaPlayer` instances so SoundPool's 1 MB decoded PCM
- * cap never truncates them.
+ * Short stingers (`<= 5.5s`, including all built-in `.wav` moment presets) load into `SoundPool`
+ * for sub-20ms hardware-mixed response, while longer bumpers pre-prepare on dedicated
+ * `MediaPlayer` instances so SoundPool's 1 MB decoded PCM cap never truncates them.
  */
 class FohSoundboardEngine(context: Context) {
     private val appContext = context.applicationContext
@@ -55,8 +55,9 @@ class FohSoundboardEngine(context: Context) {
     }
 
     private data class BoundPad(
-        val trackId: Long,
+        val sourceKey: String,
         val uriString: String,
+        val durationMs: Long,
         val trimDb: Float,
         val backend: LoadedPadBackend,
     )
@@ -73,7 +74,7 @@ class FohSoundboardEngine(context: Context) {
     private val mutableState = MutableStateFlow(
         SoundboardUiState(
             selectedBank = prefs.getInt(KEY_SELECTED_BANK, 0).coerceIn(0, SoundboardRules.BANK_COUNT - 1),
-            slots = SoundboardRules.decodeSlotsJson(prefs.getString(KEY_SLOTS_JSON, null)),
+            slots = loadInitialSlots(),
             padDuckEnabled = prefs.getBoolean(KEY_PAD_DUCK_ENABLED, true),
         ),
     )
@@ -94,11 +95,33 @@ class FohSoundboardEngine(context: Context) {
                         soundPool.unload(sampleId)
                         poolSampleToKey.remove(sampleId)
                         val gen = slotGenerations[key] ?: 0L
-                        prepareLongPlayerFallback(key, gen, existing.trackId, existing.uriString, existing.trimDb)
+                        prepareLongPlayerFallback(
+                            key = key,
+                            gen = gen,
+                            sourceKey = existing.sourceKey,
+                            uriString = existing.uriString,
+                            durationMs = existing.durationMs,
+                            trimDb = existing.trimDb,
+                        )
                     }
                 }
             }
         }
+        prewarmAssignedSlots(mutableState.value.slots)
+    }
+
+    private fun loadInitialSlots(): List<SoundPadSlot> {
+        val decoded = SoundboardRules.decodeSlotsJson(prefs.getString(KEY_SLOTS_JSON, null))
+        val seeded = prefs.getBoolean(KEY_PRESETS_SEEDED, false)
+        if (!seeded && decoded.none { it.isAssigned }) {
+            val presetSlots = SoundboardRules.defaultPresetSlots()
+            prefs.edit()
+                .putString(KEY_SLOTS_JSON, SoundboardRules.encodeSlotsJson(presetSlots))
+                .putBoolean(KEY_PRESETS_SEEDED, true)
+                .apply()
+            return presetSlots
+        }
+        return decoded
     }
 
     fun setAutoDuckListener(listener: ((Boolean) -> Unit)?) {
@@ -111,10 +134,12 @@ class FohSoundboardEngine(context: Context) {
         val currentSlots = mutableState.value.slots
         var changed = false
         val cleaned = currentSlots.map { slot ->
-            if (slot.isAssigned && !tracksById.containsKey(slot.trackId)) {
+            if (slot.presetId.isNullOrBlank() && slot.trackId != null && !tracksById.containsKey(slot.trackId)) {
                 changed = true
                 SoundPadSlot(bankIndex = slot.bankIndex, slotIndex = slot.slotIndex)
-            } else slot
+            } else {
+                slot
+            }
         }
         if (changed) {
             persistSlots(cleaned)
@@ -145,9 +170,44 @@ class FohSoundboardEngine(context: Context) {
             trackId = track.id,
             label = SoundboardRules.defaultPadLabel(track.displayName),
             trimDb = 0f,
+            presetId = null,
         )
         replaceSlot(updated)
         prewarmSlot(updated)
+    }
+
+    fun assignPreset(bankIndex: Int, slotIndex: Int, preset: SoundPadMomentPreset) {
+        if (bankIndex !in 0 until SoundboardRules.BANK_COUNT || slotIndex !in 0 until SoundboardRules.SLOTS_PER_BANK) return
+        val key = PadKey(bankIndex, slotIndex)
+        stopSinglePad(key)
+        releaseBoundPad(key)
+        val updated = SoundPadSlot(
+            bankIndex = bankIndex,
+            slotIndex = slotIndex,
+            trackId = null,
+            label = preset.label,
+            trimDb = preset.defaultTrimDb,
+            presetId = preset.id,
+        )
+        replaceSlot(updated)
+        prewarmSlot(updated)
+    }
+
+    fun fillMomentPresets(onlyEmpty: Boolean = false) {
+        if (!onlyEmpty) {
+            stopAll()
+        }
+        val current = mutableState.value.slots
+        val next = if (onlyEmpty) {
+            SoundboardRules.mergeEmptyWithDefaultPresets(current)
+        } else {
+            SoundboardRules.defaultPresetSlots()
+        }
+        if (!onlyEmpty) {
+            boundPads.keys.toList().forEach { releaseBoundPad(it) }
+        }
+        persistSlots(next)
+        prewarmAssignedSlots(next)
     }
 
     fun updateSlot(bankIndex: Int, slotIndex: Int, label: String, trimDb: Float) {
@@ -189,8 +249,10 @@ class FohSoundboardEngine(context: Context) {
         }
         val idx = bankIndex * SoundboardRules.SLOTS_PER_BANK + slotIndex
         val slot = mutableState.value.slots.getOrNull(idx) ?: return
-        val trackId = slot.trackId ?: return
-        val track = tracksById[trackId] ?: return
+        val preset = SoundboardRules.presetById(slot.presetId)
+        val track = slot.trackId?.let { tracksById[it] }
+        if (preset == null && track == null) return
+
         val bound = boundPads[key]
         val linear = SoundboardRules.trimDbToLinear(slot.trimDb)
 
@@ -254,8 +316,18 @@ class FohSoundboardEngine(context: Context) {
     }
 
     private fun persistSlots(list: List<SoundPadSlot>) {
-        prefs.edit().putString(KEY_SLOTS_JSON, SoundboardRules.encodeSlotsJson(list)).apply()
+        prefs.edit()
+            .putString(KEY_SLOTS_JSON, SoundboardRules.encodeSlotsJson(list))
+            .putBoolean(KEY_PRESETS_SEEDED, true)
+            .apply()
         mutableState.update { it.copy(slots = list) }
+    }
+
+    private fun resolveSourceKey(slot: SoundPadSlot): String? {
+        val preset = SoundboardRules.presetById(slot.presetId)
+        if (preset != null) return "preset:${preset.id}"
+        val track = slot.trackId?.let { tracksById[it] } ?: return null
+        return "track:${track.id}:${track.uri}"
     }
 
     private fun prewarmAssignedSlots(slots: List<SoundPadSlot>) {
@@ -263,10 +335,10 @@ class FohSoundboardEngine(context: Context) {
         for (slot in slots) {
             if (!slot.isAssigned) continue
             val key = PadKey(slot.bankIndex, slot.slotIndex)
+            val sourceKey = resolveSourceKey(slot) ?: continue
             assignedKeys.add(key)
-            val track = tracksById[slot.trackId] ?: continue
             val existing = boundPads[key]
-            if (existing == null || existing.trackId != track.id || existing.uriString != track.uri) {
+            if (existing == null || existing.sourceKey != sourceKey) {
                 releaseBoundPad(key)
                 prewarmSlot(slot)
             }
@@ -275,17 +347,81 @@ class FohSoundboardEngine(context: Context) {
     }
 
     private fun prewarmSlot(slot: SoundPadSlot, playWhenReady: Boolean = false) {
-        val track = slot.trackId?.let { tracksById[it] } ?: return
+        val preset = SoundboardRules.presetById(slot.presetId)
+        val track = slot.trackId?.let { tracksById[it] }
+        if (preset == null && track == null) return
+
         val key = PadKey(slot.bankIndex, slot.slotIndex)
         val gen = (slotGenerations[key] ?: 0L) + 1L
         slotGenerations[key] = gen
         mutableState.update { it.copy(loadingSlots = it.loadingSlots + key) }
 
-        if (SoundboardRules.shouldUseSoundPool(track.durationMs) && !playWhenReady) {
+        if (preset != null) {
+            val sourceKey = "preset:${preset.id}"
+            scope.launch {
+                val wavFile = withContext(Dispatchers.IO) {
+                    runCatching { SoundboardWavPresets.ensurePresetWavFile(appContext.filesDir, preset.id) }.getOrNull()
+                }
+                if (slotGenerations[key] != gen) return@launch
+                if (wavFile == null) {
+                    mutableState.update { it.copy(loadingSlots = it.loadingSlots - key) }
+                    return@launch
+                }
+                val fileUri = Uri.fromFile(wavFile).toString()
+                if (SoundboardRules.shouldUseSoundPool(preset.durationMs) && !playWhenReady) {
+                    val sampleId = withContext(Dispatchers.IO) {
+                        runCatching { soundPool.load(wavFile.absolutePath, 1) }.getOrDefault(0)
+                    }
+                    if (slotGenerations[key] != gen) {
+                        if (sampleId != 0) runCatching { soundPool.unload(sampleId) }
+                        return@launch
+                    }
+                    if (sampleId != 0) {
+                        poolSampleToKey[sampleId] = key
+                        boundPads[key] = BoundPad(
+                            sourceKey = sourceKey,
+                            uriString = fileUri,
+                            durationMs = preset.durationMs,
+                            trimDb = slot.trimDb,
+                            backend = LoadedPadBackend.Pool(
+                                sampleId = sampleId,
+                                ready = false,
+                                durationMs = preset.durationMs,
+                            ),
+                        )
+                    } else {
+                        prepareLongPlayerFallback(
+                            key = key,
+                            gen = gen,
+                            sourceKey = sourceKey,
+                            uriString = fileUri,
+                            durationMs = preset.durationMs,
+                            trimDb = slot.trimDb,
+                        )
+                    }
+                } else {
+                    prepareLongPlayerFallback(
+                        key = key,
+                        gen = gen,
+                        sourceKey = sourceKey,
+                        uriString = fileUri,
+                        durationMs = preset.durationMs,
+                        trimDb = slot.trimDb,
+                        autoStart = playWhenReady,
+                    )
+                }
+            }
+            return
+        }
+
+        val resolvedTrack = track!!
+        val sourceKey = "track:${resolvedTrack.id}:${resolvedTrack.uri}"
+        val durationMs = resolvedTrack.durationMs ?: 2_000L
+        if (SoundboardRules.shouldUseSoundPool(resolvedTrack.durationMs) && !playWhenReady) {
             scope.launch {
                 val sampleId = withContext(Dispatchers.IO) {
                     runCatching {
-                        appContext.contentResolver.openAssetFileDescriptor(Uri.parse(track.uri), "r")?.use { afd ->
+                        appContext.contentResolver.openAssetFileDescriptor(Uri.parse(resolvedTrack.uri), "r")?.use { afd ->
                             soundPool.load(afd, 1)
                         } ?: 0
                     }.getOrDefault(0)
@@ -297,29 +433,46 @@ class FohSoundboardEngine(context: Context) {
                 if (sampleId != 0) {
                     poolSampleToKey[sampleId] = key
                     boundPads[key] = BoundPad(
-                        trackId = track.id,
-                        uriString = track.uri,
+                        sourceKey = sourceKey,
+                        uriString = resolvedTrack.uri,
+                        durationMs = durationMs,
                         trimDb = slot.trimDb,
                         backend = LoadedPadBackend.Pool(
                             sampleId = sampleId,
                             ready = false,
-                            durationMs = track.durationMs ?: 2_000L,
+                            durationMs = durationMs,
                         ),
                     )
                 } else {
-                    prepareLongPlayerFallback(key, gen, track.id, track.uri, slot.trimDb)
+                    prepareLongPlayerFallback(
+                        key = key,
+                        gen = gen,
+                        sourceKey = sourceKey,
+                        uriString = resolvedTrack.uri,
+                        durationMs = durationMs,
+                        trimDb = slot.trimDb,
+                    )
                 }
             }
         } else {
-            prepareLongPlayerFallback(key, gen, track.id, track.uri, slot.trimDb, autoStart = playWhenReady)
+            prepareLongPlayerFallback(
+                key = key,
+                gen = gen,
+                sourceKey = sourceKey,
+                uriString = resolvedTrack.uri,
+                durationMs = durationMs,
+                trimDb = slot.trimDb,
+                autoStart = playWhenReady,
+            )
         }
     }
 
     private fun prepareLongPlayerFallback(
         key: PadKey,
         gen: Long,
-        trackId: Long,
+        sourceKey: String,
         uriString: String,
+        durationMs: Long,
         trimDb: Float,
         autoStart: Boolean = false,
     ) {
@@ -328,7 +481,7 @@ class FohSoundboardEngine(context: Context) {
         runCatching {
             mp.setAudioAttributes(audioAttrs)
             mp.setDataSource(appContext, Uri.parse(uriString))
-            val bound = BoundPad(trackId, uriString, trimDb, LoadedPadBackend.LongPlayer(mp, ready = false))
+            val bound = BoundPad(sourceKey, uriString, durationMs, trimDb, LoadedPadBackend.LongPlayer(mp, ready = false))
             boundPads[key] = bound
             mp.setOnPreparedListener { readyPlayer ->
                 val cur = boundPads[key]
@@ -417,6 +570,7 @@ class FohSoundboardEngine(context: Context) {
         private const val KEY_SELECTED_BANK = "selected_bank"
         private const val KEY_SLOTS_JSON = "pad_slots_json"
         private const val KEY_PAD_DUCK_ENABLED = "pad_duck_enabled"
+        private const val KEY_PRESETS_SEEDED = "pad_presets_seeded_v1"
         private const val MAX_CONCURRENT_STREAMS = 6
     }
 }

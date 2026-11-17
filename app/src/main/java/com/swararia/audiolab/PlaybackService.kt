@@ -86,6 +86,7 @@ class PlaybackService : MediaSessionService() {
     private var fadePhase = FadePhase.NONE
     private var faderState = FaderState()
     private var monoSumEnabled = false
+    private var eqState = GraphicEqState()
     private var padDuckActive = false
     private var focusGuardEnabled = false
     private var focusDucked = false
@@ -130,6 +131,7 @@ class PlaybackService : MediaSessionService() {
     private var remoteServerForegroundActive = false
     private var remoteEndpointLabel = "LAN"
     private val monoSumProcessor = MonoSumAudioProcessor()
+    private val eqProcessor = GraphicEq31AudioProcessor()
     private val signalTapProcessor = LocalAudioSignalTapProcessor()
     private var signalTickRunning = false
     private val signalTick = object : Runnable {
@@ -308,7 +310,7 @@ class PlaybackService : MediaSessionService() {
                 .add(PlaybackCommands.setFader).add(PlaybackCommands.toggleMute)
                 .add(PlaybackCommands.toggleDuck).add(PlaybackCommands.resetFader)
                 .add(PlaybackCommands.setMonoSum).add(PlaybackCommands.setPadDuck)
-                .add(PlaybackCommands.setFocusGuard)
+                .add(PlaybackCommands.setFocusGuard).add(PlaybackCommands.setEq31)
                 .add(PreviewProtocol.start).add(PreviewProtocol.stop).add(PreviewProtocol.forget)
             val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
                 .remove(Player.COMMAND_SET_REPEAT_MODE).remove(Player.COMMAND_SET_SHUFFLE_MODE).build()
@@ -424,6 +426,15 @@ class PlaybackService : MediaSessionService() {
                     publishState()
                     SessionResult.RESULT_SUCCESS
                 }
+                PlaybackCommands.ACTION_SET_EQ_31 -> {
+                    val rawJson = args.getString(PlaybackCommands.EXTRA_EQ_31_JSON)
+                    val parsed = GraphicEqRules.decodeJson(rawJson)
+                    eqState = parsed
+                    eqProcessor.updateState(parsed)
+                    PlaybackPreferences.writeGraphicEq(playbackPrefs, parsed)
+                    publishState()
+                    SessionResult.RESULT_SUCCESS
+                }
                 else -> SessionError.ERROR_NOT_SUPPORTED
             }
             return Futures.immediateFuture(SessionResult(result, stateExtras()))
@@ -445,7 +456,7 @@ class PlaybackService : MediaSessionService() {
             ): AudioSink = DefaultAudioSink.Builder(context)
                 .setEnableFloatOutput(enableFloatOutput)
                 .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                .setAudioProcessors(arrayOf(monoSumProcessor, signalTapProcessor))
+                .setAudioProcessors(arrayOf(monoSumProcessor, eqProcessor, signalTapProcessor))
                 .build()
         }
         val player = ExoPlayer.Builder(this, renderersFactory)
@@ -456,6 +467,8 @@ class PlaybackService : MediaSessionService() {
         appPlayer = player
         monoSumEnabled = playbackPrefs.getBoolean(KEY_MONO_SUM, false)
         monoSumProcessor.monoEnabled = monoSumEnabled
+        eqState = PlaybackPreferences.readGraphicEq(playbackPrefs)
+        eqProcessor.updateState(eqState, snapImmediately = true)
         playbackPrefs.registerOnSharedPreferenceChangeListener(prefListener)
         reloadFadeSettings(playbackPrefs)
         reloadSafeFocusSetting(playbackPrefs)
@@ -486,6 +499,7 @@ class PlaybackService : MediaSessionService() {
         android.util.Log.d("SwarariaTiming", "preview_dispatch_to_service_ms=${((SystemClock.elapsedRealtimeNanos() - requestDispatched) / 1_000_000L).coerceAtLeast(0)}")
         savedLocal = PreviewLocalQueue((0 until player.mediaItemCount).map(player::getMediaItemAt), player.currentMediaItem?.mediaId,
             player.currentMediaItemIndex.coerceAtLeast(0), player.currentPosition.coerceAtLeast(0)) { it.mediaId }
+        eqProcessor.setPreviewBypass(true)
         savedExplicitlyStopped = explicitlyStopped
         changing = true
         cancelFade(); player.pause(); player.stop(); player.clearMediaItems()
@@ -554,6 +568,7 @@ class PlaybackService : MediaSessionService() {
         val restoredExplicitStop = savedExplicitlyStopped
         savedLocal = null // Clear before synchronous Player callbacks / owner callbacks.
         savedExplicitlyStopped = false
+        eqProcessor.setPreviewBypass(false)
         if (!keepError && ::previewOwner.isInitialized) previewOwner.cancelPreview()
         previewPrepared = false; previewPhase = if (keepError) "error" else ""
         nominalVolume = effectiveTargetVolume()
@@ -604,6 +619,7 @@ class PlaybackService : MediaSessionService() {
         putBoolean(PlaybackCommands.EXTRA_MONO_SUM, monoSumEnabled)
         putBoolean(PlaybackCommands.EXTRA_PAD_DUCK, padDuckActive)
         putBoolean(PlaybackCommands.EXTRA_FOCUS_GUARD, focusGuardEnabled)
+        putString(PlaybackCommands.EXTRA_EQ_31_JSON, GraphicEqRules.encodeJson(eqState))
         if (::previewOwner.isInitialized) {
             val state = previewOwner.preview.value
             state.hit?.let { putString(PreviewProtocol.ID, it.videoId); putString(PreviewProtocol.TITLE, it.title) }

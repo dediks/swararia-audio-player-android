@@ -285,6 +285,14 @@ internal object UiIcons {
         moveTo(15f, 20f); lineTo(15f, 15f); lineTo(20f, 15f)
         moveTo(4f, 15f); lineTo(9f, 15f); lineTo(9f, 20f)
     }
+    val Equalizer = outline("Equalizer") {
+        moveTo(6f, 4f); lineTo(6f, 20f)
+        moveTo(12f, 4f); lineTo(12f, 20f)
+        moveTo(18f, 4f); lineTo(18f, 20f)
+        moveTo(4f, 9f); lineTo(8f, 9f)
+        moveTo(10f, 15f); lineTo(14f, 15f)
+        moveTo(16f, 11f); lineTo(20f, 11f)
+    }
 
     private fun outline(name: String, draw: PathBuilder.() -> Unit) =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {

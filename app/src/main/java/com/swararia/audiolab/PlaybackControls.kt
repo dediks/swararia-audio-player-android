@@ -60,6 +60,7 @@ object PlaybackCommands {
     const val ACTION_SET_MONO_SUM = "com.swararia.audiolab.SET_MONO_SUM"
     const val ACTION_SET_PAD_DUCK = "com.swararia.audiolab.SET_PAD_DUCK"
     const val ACTION_SET_FOCUS_GUARD = "com.swararia.audiolab.SET_FOCUS_GUARD"
+    const val ACTION_SET_EQ_31 = "com.swararia.audiolab.SET_EQ_31"
     const val EXTRA_MODE = "com.swararia.audiolab.playback.MODE"
     const val EXTRA_FADE_BUSY = "com.swararia.audiolab.playback.FADE_BUSY"
     const val EXTRA_FADE_IN_MS = "com.swararia.audiolab.playback.FADE_IN_MS"
@@ -71,6 +72,7 @@ object PlaybackCommands {
     const val EXTRA_MONO_SUM = "com.swararia.audiolab.playback.MONO_SUM"
     const val EXTRA_PAD_DUCK = "com.swararia.audiolab.playback.PAD_DUCK"
     const val EXTRA_FOCUS_GUARD = "com.swararia.audiolab.playback.FOCUS_GUARD"
+    const val EXTRA_EQ_31_JSON = "com.swararia.audiolab.playback.EQ_31_JSON"
     const val EXTRA_PROTOCOL = "com.swararia.audiolab.playback.PROTOCOL"
     val setMode = SessionCommand(ACTION_SET_MODE, Bundle.EMPTY)
     val fade = SessionCommand(ACTION_FADE, Bundle.EMPTY)
@@ -83,6 +85,7 @@ object PlaybackCommands {
     val setMonoSum = SessionCommand(ACTION_SET_MONO_SUM, Bundle.EMPTY)
     val setPadDuck = SessionCommand(ACTION_SET_PAD_DUCK, Bundle.EMPTY)
     val setFocusGuard = SessionCommand(ACTION_SET_FOCUS_GUARD, Bundle.EMPTY)
+    val setEq31 = SessionCommand(ACTION_SET_EQ_31, Bundle.EMPTY)
 }
 
 private data class PlaybackControlState(
@@ -94,9 +97,11 @@ private data class PlaybackControlState(
     val monoSum: Boolean = false,
     val padDucked: Boolean = false,
     val focusGuard: Boolean = false,
+    val eq31: GraphicEqState = GraphicEqState(),
     val modeSupported: Boolean = false,
     val fadeSupported: Boolean = false,
     val faderSupported: Boolean = false,
+    val eq31Supported: Boolean = false,
     val playing: Boolean = false,
     val connected: Boolean = false,
 )
@@ -118,6 +123,9 @@ private fun MediaController?.readPlaybackControlState(): PlaybackControlState {
             preDuckPosition = FaderRules.clampPosition(extras.getFloat(PlaybackCommands.EXTRA_FADER_PRE_DUCK, FaderRules.DEFAULT_POSITION)),
         )
     } else FaderState()
+    val eq31State = if (knownProtocol) {
+        GraphicEqRules.decodeJson(extras.getString(PlaybackCommands.EXTRA_EQ_31_JSON))
+    } else GraphicEqState()
     return PlaybackControlState(
         mode = mode,
         busy = knownProtocol && extras.getBoolean(PlaybackCommands.EXTRA_FADE_BUSY, false),
@@ -127,9 +135,11 @@ private fun MediaController?.readPlaybackControlState(): PlaybackControlState {
         monoSum = knownProtocol && extras.getBoolean(PlaybackCommands.EXTRA_MONO_SUM, false),
         padDucked = knownProtocol && extras.getBoolean(PlaybackCommands.EXTRA_PAD_DUCK, false),
         focusGuard = knownProtocol && extras.getBoolean(PlaybackCommands.EXTRA_FOCUS_GUARD, false),
+        eq31 = eq31State,
         modeSupported = knownProtocol && mode != null && isSessionCommandAvailable(PlaybackCommands.setMode),
         fadeSupported = knownProtocol && isSessionCommandAvailable(PlaybackCommands.fade),
         faderSupported = knownProtocol && isSessionCommandAvailable(PlaybackCommands.setFader),
+        eq31Supported = knownProtocol && isSessionCommandAvailable(PlaybackCommands.setEq31),
         playing = isPlaying,
         connected = true,
     )
@@ -168,9 +178,11 @@ data class LocalPlaybackControlUi(
     val monoSum: Boolean = false,
     val padDucked: Boolean = false,
     val focusGuard: Boolean = false,
+    val eq31: GraphicEqState = GraphicEqState(),
     val modeSupported: Boolean,
     val fadeSupported: Boolean,
     val faderSupported: Boolean = false,
+    val eq31Supported: Boolean = false,
     val playing: Boolean,
     val connected: Boolean,
     val pending: Boolean,
@@ -185,6 +197,7 @@ data class LocalPlaybackControlUi(
     val onSetMonoSum: (Boolean) -> Unit = {},
     val onSetPadDuck: (Boolean) -> Unit = {},
     val onSetFocusGuard: (Boolean) -> Unit = {},
+    val onSetEq31: (GraphicEqState) -> Unit = {},
 ) {
     val manualFadeOutMs: Long get() = FadeRules.manualDurationMs(fadeOutMs)
 }
@@ -206,14 +219,19 @@ fun PlaybackModeBar(
     var lastFaderEditUptimeMs by remember(controller) { mutableLongStateOf(0L) }
     var optimisticMonoSum by remember(controller) { mutableStateOf<Boolean?>(null) }
     var lastMonoEditUptimeMs by remember(controller) { mutableLongStateOf(0L) }
+    var optimisticEq31 by remember(controller) { mutableStateOf<GraphicEqState?>(null) }
+    var lastEq31EditUptimeMs by remember(controller) { mutableLongStateOf(0L) }
     val scope = rememberCoroutineScope()
     var commandJob by remember(controller) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var faderJob by remember(controller) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var queuedFaderCommand by remember(controller) { mutableStateOf<Pair<SessionCommand, Bundle>?>(null) }
+    var eq31Job by remember(controller) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var queuedEq31State by remember(controller) { mutableStateOf<GraphicEqState?>(null) }
     DisposableEffect(controller) {
         onDispose {
             commandJob?.cancel()
             faderJob?.cancel()
+            eq31Job?.cancel()
         }
     }
 
@@ -238,6 +256,14 @@ fun PlaybackModeBar(
                         SystemClock.uptimeMillis() - lastMonoEditUptimeMs > 500L)
                 ) {
                     optimisticMonoSum = null
+                }
+                if (optimisticEq31 != null &&
+                    eq31Job?.isActive != true &&
+                    queuedEq31State == null &&
+                    (state.eq31 == optimisticEq31 ||
+                        SystemClock.uptimeMillis() - lastEq31EditUptimeMs > 700L)
+                ) {
+                    optimisticEq31 = null
                 }
                 delay(200)
             }
@@ -293,6 +319,40 @@ fun PlaybackModeBar(
         }
     }
 
+    fun dispatchEq31(nextState: GraphicEqState) {
+        val target = controller ?: return
+        if (!target.isConnected || !target.isSessionCommandAvailable(PlaybackCommands.setEq31)) return
+        optimisticEq31 = nextState
+        lastEq31EditUptimeMs = SystemClock.uptimeMillis()
+        queuedEq31State = nextState
+        if (eq31Job?.isActive == true) return
+        eq31Job = scope.launch {
+            try {
+                while (isActive) {
+                    val next = queuedEq31State ?: break
+                    queuedEq31State = null
+                    var future: com.google.common.util.concurrent.ListenableFuture<SessionResult>? = null
+                    try {
+                        val args = Bundle().apply {
+                            putString(PlaybackCommands.EXTRA_EQ_31_JSON, GraphicEqRules.encodeJson(next))
+                        }
+                        future = target.sendCustomCommand(PlaybackCommands.setEq31, args)
+                        withTimeout(2000L) {
+                            while (!future.isDone) delay(12)
+                            future.get()
+                        }
+                    } catch (_: Exception) {
+                        if (future?.isDone == false) future.cancel(false)
+                    }
+                    if (queuedEq31State != null) delay(16)
+                }
+                state = target.readPlaybackControlState()
+            } finally {
+                eq31Job = null
+            }
+        }
+    }
+
     fun send(command: SessionCommand, args: Bundle) {
         val target = controller
         if (pending || target == null || !target.isConnected || !target.isSessionCommandAvailable(command)) {
@@ -329,6 +389,7 @@ fun PlaybackModeBar(
 
     val activeFader = optimisticFader ?: state.faderState
     val activeMonoSum = optimisticMonoSum ?: state.monoSum
+    val activeEq31 = optimisticEq31 ?: state.eq31
     val status = error ?: when {
         !state.connected -> "Playback disconnected"
         !state.modeSupported -> "Playback modes unavailable"
@@ -347,9 +408,11 @@ fun PlaybackModeBar(
                     monoSum = activeMonoSum,
                     padDucked = state.padDucked,
                     focusGuard = state.focusGuard,
+                    eq31 = activeEq31,
                     modeSupported = state.modeSupported,
                     fadeSupported = state.fadeSupported,
                     faderSupported = state.faderSupported,
+                    eq31Supported = state.eq31Supported,
                     playing = state.playing,
                     connected = state.connected,
                     pending = pending,
@@ -410,6 +473,9 @@ fun PlaybackModeBar(
                             PlaybackCommands.setFocusGuard,
                             Bundle().apply { putBoolean(PlaybackCommands.EXTRA_FOCUS_GUARD, guarded) },
                         )
+                    },
+                    onSetEq31 = { nextEq ->
+                        dispatchEq31(nextEq)
                     },
                 )
             )

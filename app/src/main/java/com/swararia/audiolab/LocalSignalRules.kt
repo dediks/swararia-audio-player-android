@@ -18,6 +18,7 @@ data class RawPcmSignalFrame(
     val bands: List<Float> = LocalSignalRules.EmptyBands,
     val bandsL: List<Float> = bands,
     val bandsR: List<Float> = bands,
+    val bands31: List<Float> = LocalSignalRules.EmptyBands31,
 )
 
 /** Ballistic-smoothed, post-fader UI signal snapshot for local playback meters and RTA bars. */
@@ -39,22 +40,27 @@ data class LocalAudioSignalSnapshot(
     val bandsR: List<Float> = bands,
     val bandPeaksL: List<Float> = bandPeaks,
     val bandPeaksR: List<Float> = bandPeaks,
+    val bands31: List<Float> = LocalSignalRules.EmptyBands31,
+    val bandPeaks31: List<Float> = LocalSignalRules.EmptyBands31,
     val holdUntilMsL: Long = 0L,
     val holdUntilMsR: Long = 0L,
 )
 
 /**
- * Pure PCM signal analysis (stereo Peak/RMS + 16-band logarithmic FFT spectrum) and mixer-style
- * meter ballistics for local track playback.
+ * Pure PCM signal analysis (stereo Peak/RMS + 16-band & 31-band logarithmic FFT spectrum) and
+ * mixer-style meter ballistics for local track playback.
  */
 object LocalSignalRules {
     const val BAND_COUNT: Int = 16
+    const val RTA31_BAND_COUNT: Int = 31
     const val FFT_SIZE: Int = 256
+    const val RTA31_FFT_SIZE: Int = 1024
     const val MIN_DB: Float = -54f
     const val MAX_DB: Float = 0f
     const val PEAK_HOLD_MS: Long = 550L
 
     val EmptyBands: List<Float> = List(BAND_COUNT) { 0f }
+    val EmptyBands31: List<Float> = List(RTA31_BAND_COUNT) { 0f }
 
     // Disjoint monotonically increasing bin ranges over positive bins [1 .. FFT_SIZE/2 - 1]
     // covering ~170 Hz sub/bass through ~22 kHz air in 16 quasi-logarithmic bands.
@@ -267,19 +273,22 @@ object LocalSignalRules {
             -1f
         }
 
-        val nextBands = stepBandSeries(rawFrame?.bands, previous.bands, effectiveGain, gainDbMeterOffset)
-        val nextBandPeaks = stepBandPeakSeries(nextBands, previous.bandPeaks)
-        val nextBandsL = stepBandSeries(rawFrame?.bandsL, previous.bandsL, effectiveGain, gainDbMeterOffset)
-        val nextBandPeaksL = stepBandPeakSeries(nextBandsL, previous.bandPeaksL)
-        val nextBandsR = stepBandSeries(rawFrame?.bandsR, previous.bandsR, effectiveGain, gainDbMeterOffset)
-        val nextBandPeaksR = stepBandPeakSeries(nextBandsR, previous.bandPeaksR)
+        val nextBands = stepBandSeries(rawFrame?.bands, previous.bands, BAND_COUNT, effectiveGain, gainDbMeterOffset)
+        val nextBandPeaks = stepBandPeakSeries(nextBands, previous.bandPeaks, BAND_COUNT)
+        val nextBandsL = stepBandSeries(rawFrame?.bandsL, previous.bandsL, BAND_COUNT, effectiveGain, gainDbMeterOffset)
+        val nextBandPeaksL = stepBandPeakSeries(nextBandsL, previous.bandPeaksL, BAND_COUNT)
+        val nextBandsR = stepBandSeries(rawFrame?.bandsR, previous.bandsR, BAND_COUNT, effectiveGain, gainDbMeterOffset)
+        val nextBandPeaksR = stepBandPeakSeries(nextBandsR, previous.bandPeaksR, BAND_COUNT)
+        val nextBands31 = stepBandSeries(rawFrame?.bands31, previous.bands31, RTA31_BAND_COUNT, effectiveGain, gainDbMeterOffset)
+        val nextBandPeaks31 = stepBandPeakSeries(nextBands31, previous.bandPeaks31, RTA31_BAND_COUNT)
 
         val active = playing ||
             nextLevelL > 0.01f ||
             nextLevelR > 0.01f ||
             nextPeakHoldL > 0.01f ||
             nextPeakHoldR > 0.01f ||
-            nextBands.any { it > 0.015f }
+            nextBands.any { it > 0.015f } ||
+            nextBands31.any { it > 0.015f }
 
         val maxLinear = maxOf(nextPeakLinearL, nextPeakLinearR)
         return LocalAudioSignalSnapshot(
@@ -300,17 +309,121 @@ object LocalSignalRules {
             bandsR = nextBandsR,
             bandPeaksL = nextBandPeaksL,
             bandPeaksR = nextBandPeaksR,
+            bands31 = nextBands31,
+            bandPeaks31 = nextBandPeaks31,
             holdUntilMsL = nextHoldUntilMsL,
             holdUntilMsR = nextHoldUntilMsR,
         )
     }
 
+    /**
+     * Analyzes a mono float window (typically 4096 or 8192 newest samples) into 31 ISO 1/3-octave
+     * meter fractions `[0..1]` (`-54..0 dBFS`) covering `20 Hz .. 20 kHz`.
+     */
+    fun analyze31BandRta(
+        monoWindow: FloatArray,
+        sampleCount: Int,
+        sampleRateHz: Int,
+    ): List<Float> {
+        val count = minOf(sampleCount, monoWindow.size)
+        if (count < 256 || sampleRateHz <= 0) return EmptyBands31
+
+        val fs = sampleRateHz.toDouble()
+        val freqs = GraphicEqRules.CENTER_FREQUENCIES_HZ
+        val result = FloatArray(RTA31_BAND_COUNT)
+
+        // Low bands 0..8 (20..125 Hz): decimate to ~5.5-6 kHz for sharp sub-bass frequency resolution.
+        val decim = (sampleRateHz / 6_000).coerceIn(4, 16)
+        val decimN = (count / decim).coerceIn(1, 512)
+        if (decimN >= 32) {
+            val startOffset = count - decimN * decim
+            val fsLow = fs / decim.toDouble()
+            val lowWin = FloatArray(decimN)
+            val lowDenom = (decimN - 1).coerceAtLeast(1)
+            for (i in 0 until decimN) {
+                var sum = 0f
+                val base = startOffset + i * decim
+                for (k in 0 until decim) {
+                    val v = monoWindow[base + k]
+                    if (v.isFinite()) sum += v
+                }
+                val hann = (0.5 - 0.5 * cos(2.0 * PI * i / lowDenom)).toFloat()
+                lowWin[i] = (sum / decim.toFloat()) * hann
+            }
+            val normLow = decimN * 0.25
+            for (b in 0..8) {
+                val freq = freqs[b]
+                if (freq >= fsLow * 0.48) continue
+                val w = 2.0 * PI * freq / fsLow
+                val dCos = cos(w)
+                val dSin = sin(w)
+                var c = 1.0
+                var s = 0.0
+                var re = 0.0
+                var im = 0.0
+                for (n in 0 until decimN) {
+                    val x = lowWin[n].toDouble()
+                    re += x * c
+                    im += x * s
+                    val nextC = c * dCos - s * dSin
+                    s = c * dSin + s * dCos
+                    c = nextC
+                }
+                var mag = hypot(re, im) / normLow
+                val sincArg = PI * freq * decim.toDouble() / fs
+                if (sincArg > 1e-4) {
+                    val sinc = abs(sin(sincArg) / sincArg)
+                    if (sinc > 0.05) mag /= sinc
+                }
+                result[b] = linearToMeterFraction(mag.toFloat().coerceIn(0f, 1f))
+            }
+        }
+
+        // High bands 9..30 (160 Hz..20 kHz): 1024-point Hann FFT over newest samples.
+        val fftN = RTA31_FFT_SIZE
+        val activeN = minOf(count, fftN)
+        val startHi = count - activeN
+        val denomHi = (activeN - 1).coerceAtLeast(1)
+        val real = FloatArray(fftN)
+        val imag = FloatArray(fftN)
+        for (i in 0 until activeN) {
+            val raw = monoWindow[startHi + i]
+            val safe = if (raw.isFinite()) raw.coerceIn(-1f, 1f) else 0f
+            val hann = if (activeN == 1) 1f else (0.5 - 0.5 * cos(2.0 * PI * i / denomHi)).toFloat()
+            real[i] = safe * hann
+        }
+        fftInPlace(real, imag)
+
+        val normHi = activeN * 0.25f
+        val halfBins = fftN / 2
+        for (b in 9 until RTA31_BAND_COUNT) {
+            val fCenter = freqs[b]
+            if (fCenter >= fs * 0.495) continue
+            val fLo = sqrt(freqs[b - 1] * fCenter)
+            val fHi = if (b < RTA31_BAND_COUNT - 1) sqrt(fCenter * freqs[b + 1]) else minOf(fs * 0.49, fCenter * 1.122)
+            var kLo = kotlin.math.floor(fLo * fftN / fs).toInt().coerceIn(1, halfBins - 1)
+            var kHi = kotlin.math.ceil(fHi * fftN / fs).toInt().coerceIn(1, halfBins - 1)
+            val kCenter = kotlin.math.round(fCenter * fftN / fs).toInt().coerceIn(1, halfBins - 1)
+            if (kLo > kCenter) kLo = kCenter
+            if (kHi < kCenter) kHi = kCenter
+            var maxMag = 0f
+            for (k in kLo..kHi) {
+                val mag = hypot(real[k], imag[k]) / normHi
+                if (mag > maxMag) maxMag = mag
+            }
+            result[b] = linearToMeterFraction(maxMag.coerceIn(0f, 1f))
+        }
+
+        return result.toList()
+    }
+
     private fun stepBandSeries(
         rawBands: List<Float>?,
         previousBands: List<Float>,
+        bandCount: Int,
         effectiveGain: Float,
         gainDbMeterOffset: Float,
-    ): List<Float> = List(BAND_COUNT) { idx ->
+    ): List<Float> = List(bandCount) { idx ->
         val rawBand = rawBands?.getOrNull(idx) ?: 0f
         val targetBand = if (rawBand <= 0f || effectiveGain <= 0.0001f) {
             0f
@@ -324,7 +437,8 @@ object LocalSignalRules {
     private fun stepBandPeakSeries(
         currentBands: List<Float>,
         previousPeaks: List<Float>,
-    ): List<Float> = List(BAND_COUNT) { idx ->
+        bandCount: Int,
+    ): List<Float> = List(bandCount) { idx ->
         val currentBand = currentBands[idx]
         val prevPeak = previousPeaks.getOrNull(idx) ?: 0f
         if (currentBand >= prevPeak) {
