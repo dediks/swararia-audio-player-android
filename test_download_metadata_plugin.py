@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+sys.dont_write_bytecode = True
 import unittest
 from pathlib import Path
 from unittest import mock

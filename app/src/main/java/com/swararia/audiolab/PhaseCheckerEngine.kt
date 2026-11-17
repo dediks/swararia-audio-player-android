@@ -42,6 +42,8 @@ internal data class PhaseCheckerUiState(
     val snrRatio: Float = 0f,
     val waveformPreview: List<Float> = List(PhaseCheckerRules.PREVIEW_POINT_COUNT) { 0f },
     val pulseCount: Int = 0,
+    val stackedPulses: Int = 0,
+    val clipped: Boolean = false,
     val checkEntries: List<SpeakerPhaseCheckEntry> = emptyList(),
     val outputRoute: AudioOutputRoute = AudioOutputRoute(
         kind = AudioOutputKind.SPEAKER,
@@ -87,11 +89,21 @@ internal class PhaseCheckerEngine(context: Context) {
     @Volatile
     private var activeSensitivity: PhaseMicSensitivity = PhaseMicSensitivity.NORMAL
 
+    @Volatile
+    private var activeMode: PhaseTestSignalMode = PhaseTransmitterService.state.value.mode
+
+    @Volatile
+    private var stackResetRequested: Boolean = false
+
     fun refreshOutputRoute() {
         rxState.update { it.copy(outputRoute = resolveCurrentOutputRoute()) }
     }
 
     fun setMode(mode: PhaseTestSignalMode) {
+        if (activeMode != mode) {
+            activeMode = mode
+            stackResetRequested = true
+        }
         PhaseTransmitterService.updateParams(appContext, mode, state.value.generatorGain)
         rxState.update { it.copy(errorMessage = null) }
     }
@@ -217,6 +229,7 @@ internal class PhaseCheckerEngine(context: Context) {
             return
         }
         lastValidPulseElapsedMs = 0L
+        stackResetRequested = true
         rxState.update {
             it.copy(
                 micListening = true,
@@ -224,6 +237,8 @@ internal class PhaseCheckerEngine(context: Context) {
                 heldEffectiveVerdict = PolarityVerdict.LOW_SIGNAL,
                 confidence = 0f,
                 pulseCount = 0,
+                stackedPulses = 0,
+                clipped = false,
                 errorMessage = null,
             )
         }
@@ -290,9 +305,13 @@ internal class PhaseCheckerEngine(context: Context) {
         val readChunk = ShortArray(chunkSamples)
         val ring = ShortArray(ringSamples)
         val snapshot = ShortArray(ringSamples)
+        val normSnapshot = FloatArray(ringSamples)
+        val pulseStacker = PhasePulseStacker()
         var ringWritePos = 0
         var totalCaptured = 0L
         var lastCountedGlobalSample = -sampleRate.toLong()
+        var lastStackedGlobalSample = -sampleRate.toLong()
+        var prevMode = activeMode
 
         try {
             record.startRecording()
@@ -322,16 +341,32 @@ internal class PhaseCheckerEngine(context: Context) {
                 totalCaptured += read
                 if (totalCaptured < ringSamples) continue
 
+                val currentMode = state.value.mode
+                if (stackResetRequested || currentMode != prevMode) {
+                    stackResetRequested = false
+                    prevMode = currentMode
+                    pulseStacker.reset()
+                    lastStackedGlobalSample = -sampleRate.toLong()
+                }
+
                 val tailCount = ringSamples - ringWritePos
                 System.arraycopy(ring, ringWritePos, snapshot, 0, tailCount)
                 System.arraycopy(ring, 0, snapshot, tailCount, ringWritePos)
 
-                val analysis = PhaseCheckerRules.analyzeMicWindow(
-                    samples = snapshot,
+                var sum = 0.0
+                for (i in 0 until ringSamples) sum += snapshot[i]
+                val mean = ((sum / ringSamples) / 32768.0).toFloat()
+                for (i in 0 until ringSamples) {
+                    normSnapshot[i] = snapshot[i] / 32768.0f - mean
+                }
+
+                val analysis = PhaseCheckerRules.analyzeFloatWindow(
+                    samples = normSnapshot,
                     sampleRate = sampleRate,
                     micInverted = invertMicPolarity,
                     sensitivity = activeSensitivity,
-                    mode = state.value.mode,
+                    mode = currentMode,
+                    skipMeanSubtraction = true,
                 )
                 val nowMs = SystemClock.elapsedRealtime()
                 val validPulse = analysis.effectiveVerdict == PolarityVerdict.POSITIVE ||
@@ -344,21 +379,77 @@ internal class PhaseCheckerEngine(context: Context) {
                         lastCountedGlobalSample = globalPeakSample
                     }
                     lastValidPulseElapsedMs = nowMs
-                    rxState.update { current ->
-                        current.copy(
-                            heldRawVerdict = analysis.rawVerdict,
-                            heldEffectiveVerdict = analysis.effectiveVerdict,
-                            confidence = analysis.confidence,
-                            asymmetry = analysis.asymmetry,
-                            peakDbfs = analysis.peakDbfs,
-                            snrRatio = analysis.snrRatio,
-                            waveformPreview = analysis.waveformPreview,
-                            pulseCount = if (isNewPulse) current.pulseCount + 1 else current.pulseCount,
+
+                    val (preMargin, postMargin) = pulseStacker.windowMargins(sampleRate, currentMode)
+                    val anchorIdx = analysis.anchorSampleIndex
+                    val canStackHere = anchorIdx in preMargin..(ringSamples - postMargin)
+                    val globalAnchorSample = totalCaptured - (ringSamples - anchorIdx)
+                    val isNewStackCandidate = canStackHere &&
+                        (globalAnchorSample - lastStackedGlobalSample) >= (sampleRate / 4)
+
+                    if (isNewStackCandidate) {
+                        lastStackedGlobalSample = globalAnchorSample
+                        val stacked = pulseStacker.ingestAndAnalyze(
+                            normSamples = normSnapshot,
+                            singleAnalysis = analysis,
+                            sampleRate = sampleRate,
+                            micInverted = invertMicPolarity,
+                            sensitivity = activeSensitivity,
+                            mode = currentMode,
                         )
+                        val display = stacked.analysis
+                        rxState.update { current ->
+                            current.copy(
+                                heldRawVerdict = display.rawVerdict,
+                                heldEffectiveVerdict = display.effectiveVerdict,
+                                confidence = display.confidence,
+                                asymmetry = display.asymmetry,
+                                peakDbfs = analysis.peakDbfs,
+                                snrRatio = display.snrRatio,
+                                waveformPreview = display.waveformPreview,
+                                pulseCount = if (isNewPulse) current.pulseCount + 1 else current.pulseCount,
+                                stackedPulses = stacked.stackedCount,
+                                clipped = display.clipped,
+                            )
+                        }
+                    } else {
+                        val currentState = rxState.value
+                        val flippedFromHeld = currentState.stackedPulses > 0 &&
+                            analysis.rawVerdict != currentState.heldRawVerdict
+                        if (flippedFromHeld) {
+                            pulseStacker.reset()
+                            lastStackedGlobalSample = -sampleRate.toLong()
+                        }
+                        rxState.update { current ->
+                            if (current.stackedPulses > 0 && !flippedFromHeld) {
+                                current.copy(
+                                    peakDbfs = analysis.peakDbfs,
+                                    snrRatio = maxOf(current.snrRatio, analysis.snrRatio),
+                                    pulseCount = if (isNewPulse) current.pulseCount + 1 else current.pulseCount,
+                                    clipped = current.clipped || analysis.clipped,
+                                )
+                            } else {
+                                current.copy(
+                                    heldRawVerdict = analysis.rawVerdict,
+                                    heldEffectiveVerdict = analysis.effectiveVerdict,
+                                    confidence = analysis.confidence,
+                                    asymmetry = analysis.asymmetry,
+                                    peakDbfs = analysis.peakDbfs,
+                                    snrRatio = analysis.snrRatio,
+                                    waveformPreview = analysis.waveformPreview,
+                                    pulseCount = if (isNewPulse) current.pulseCount + 1 else current.pulseCount,
+                                    stackedPulses = 0,
+                                    clipped = analysis.clipped,
+                                )
+                            }
+                        }
                     }
                 } else {
                     val expired = lastValidPulseElapsedMs == 0L ||
                         (nowMs - lastValidPulseElapsedMs) > PhaseCheckerRules.HOLD_DURATION_MS
+                    if (expired && pulseStacker.stackedCount > 0) {
+                        pulseStacker.reset()
+                    }
                     rxState.update { current ->
                         if (expired) {
                             current.copy(
@@ -369,11 +460,14 @@ internal class PhaseCheckerEngine(context: Context) {
                                 peakDbfs = analysis.peakDbfs,
                                 snrRatio = analysis.snrRatio,
                                 waveformPreview = analysis.waveformPreview,
+                                stackedPulses = 0,
+                                clipped = analysis.clipped,
                             )
                         } else {
                             current.copy(
                                 peakDbfs = analysis.peakDbfs,
                                 snrRatio = analysis.snrRatio,
+                                clipped = analysis.clipped,
                             )
                         }
                     }
@@ -404,8 +498,16 @@ internal class PhaseCheckerEngine(context: Context) {
 
     @SuppressLint("MissingPermission")
     private fun openMicRecord(sampleRate: Int, bufferBytes: Int): Pair<AudioRecord, String>? {
+        val supportsRawUnprocessed = audioManager.getProperty(
+            AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED,
+        ) == "true"
+        val unprocessedLabel = if (supportsRawUnprocessed) {
+            "Mic Raw (Unprocessed)"
+        } else {
+            "Mic Unprocessed (Non-raw HAL)"
+        }
         val candidates = listOf(
-            MediaRecorder.AudioSource.UNPROCESSED to "Mic Raw (Unprocessed)",
+            MediaRecorder.AudioSource.UNPROCESSED to unprocessedLabel,
             MediaRecorder.AudioSource.VOICE_RECOGNITION to "Mic Voice Recognition (Non-raw DSP)",
             MediaRecorder.AudioSource.MIC to "Mic Standard (Non-raw DSP)",
         )

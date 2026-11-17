@@ -1,11 +1,15 @@
 package com.swararia.audiolab
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.random.Random
 
 class PhaseCheckerRulesTest {
     @Test
@@ -219,5 +223,214 @@ class PhaseCheckerRulesTest {
             ReferenceComparison.INVERTED,
             PhaseCheckerRules.compareToReference(next.heldEffectiveVerdict, next.referencePolarity),
         )
+    }
+
+    @Test
+    fun `full range pulse preserves polarity and high confidence through realistic PA and mic HPF`() {
+        val sampleRate = 48_000
+        val pulseStereo = PhaseCheckerRules.buildStereoTestFrame(PhaseTestSignalMode.PULSE_FULL_RANGE, gain = 0.75f, sampleRate)
+        val rawWindow = DoubleArray(20_160) { i ->
+            val src = i - 4_800
+            if (src in 0 until pulseStereo.size / 2) pulseStereo[src * 2] / 32768.0 else 0.0
+        }
+        // PA Top 100 Hz 2nd-order HPF + 2 kHz LPF + 80 Hz 1st-order phone mic HPF.
+        val filtered = firstOrderHpf(biquadLpf(biquadHpf(rawWindow, sampleRate, 100.0, 0.707), sampleRate, 2000.0, 0.707), sampleRate, 80.0)
+        val posPcm = toPcm16(filtered)
+        val negPcm = ShortArray(posPcm.size) { i -> (-posPcm[i].toInt()).toShort() }
+
+        val posResult = PhaseCheckerRules.analyzeMicWindow(posPcm, sampleRate, mode = PhaseTestSignalMode.PULSE_FULL_RANGE)
+        assertEquals(PolarityVerdict.POSITIVE, posResult.effectiveVerdict)
+        assertTrue("Expected realistic confidence >= 0.75, got ${posResult.confidence}", posResult.confidence >= 0.75f)
+        assertFalse(posResult.clipped)
+
+        val negResult = PhaseCheckerRules.analyzeMicWindow(negPcm, sampleRate, mode = PhaseTestSignalMode.PULSE_FULL_RANGE)
+        assertEquals(PolarityVerdict.NEGATIVE, negResult.effectiveVerdict)
+        assertTrue("Expected realistic confidence >= 0.75, got ${negResult.confidence}", negResult.confidence >= 0.75f)
+    }
+
+    @Test
+    fun `full range pulse preserves woofer polarity on 2-way crossover with inverted tweeter`() {
+        val sampleRate = 48_000
+        val pulseStereo = PhaseCheckerRules.buildStereoTestFrame(PhaseTestSignalMode.PULSE_FULL_RANGE, gain = 0.75f, sampleRate)
+        val raw = DoubleArray(20_160) { i ->
+            val src = i - 4_800
+            if (src in 0 until pulseStereo.size / 2) pulseStereo[src * 2] / 32768.0 else 0.0
+        }
+        val woofer = biquadLpf(biquadHpf(raw, sampleRate, 70.0, 0.707), sampleRate, 2000.0, 0.707)
+        val tweeter = biquadHpf(raw, sampleRate, 2000.0, 0.707)
+        val tweeterDelaySamples = (sampleRate * 0.00020).roundToInt()
+        val combined = DoubleArray(raw.size) { i ->
+            woofer[i] - (if (i >= tweeterDelaySamples) tweeter[i - tweeterDelaySamples] else 0.0)
+        }
+        val micFiltered = firstOrderHpf(combined, sampleRate, 60.0)
+
+        val result = PhaseCheckerRules.analyzeMicWindow(toPcm16(micFiltered), sampleRate, mode = PhaseTestSignalMode.PULSE_FULL_RANGE)
+        assertEquals(PolarityVerdict.POSITIVE, result.effectiveVerdict)
+        assertTrue(result.confidence >= 0.75f)
+    }
+
+    @Test
+    fun `PULSE_SUB detects positive and inverted subwoofer polarity accurately despite bandpass overshoot`() {
+        val sampleRate = 48_000
+        val pulseStereo = PhaseCheckerRules.buildStereoTestFrame(PhaseTestSignalMode.PULSE_SUB, gain = 0.85f, sampleRate)
+        val raw = DoubleArray(20_160) { i ->
+            val src = i - 4_000
+            if (src in 0 until pulseStereo.size / 2) pulseStereo[src * 2] / 32768.0 else 0.0
+        }
+        // Subwoofer bandpass: 35 Hz 2nd-order HPF + 95 Hz 4th-order LPF + 60 Hz 1st-order mic HPF.
+        val subHp = biquadHpf(raw, sampleRate, 35.0, 0.9)
+        val subLp = biquadLpf(biquadLpf(subHp, sampleRate, 95.0, 0.707), sampleRate, 95.0, 0.707)
+        val micFiltered = firstOrderHpf(subLp, sampleRate, 60.0)
+
+        val posPcm = toPcm16(micFiltered)
+        val negPcm = ShortArray(posPcm.size) { i -> (-posPcm[i].toInt()).toShort() }
+
+        val posResult = PhaseCheckerRules.analyzeMicWindow(posPcm, sampleRate, mode = PhaseTestSignalMode.PULSE_SUB)
+        assertEquals(PolarityVerdict.POSITIVE, posResult.effectiveVerdict)
+        assertTrue("Expected subwoofer confidence >= 0.72, got ${posResult.confidence}", posResult.confidence >= 0.72f)
+
+        val negResult = PhaseCheckerRules.analyzeMicWindow(negPcm, sampleRate, mode = PhaseTestSignalMode.PULSE_SUB)
+        assertEquals(PolarityVerdict.NEGATIVE, negResult.effectiveVerdict)
+        assertTrue("Expected subwoofer confidence >= 0.72, got ${negResult.confidence}", negResult.confidence >= 0.72f)
+    }
+
+    @Test
+    fun `random white noise and low-frequency rumble are rejected as ambiguous`() {
+        val sampleRate = 48_000
+        val rng = Random(42)
+        val whiteNoise = ShortArray(19_200) {
+            ((rng.nextDouble() * 2.0 - 1.0) * 4_500.0).roundToInt().toShort()
+        }
+        assertEquals(
+            PolarityVerdict.AMBIGUOUS,
+            PhaseCheckerRules.analyzeMicWindow(whiteNoise, sampleRate, mode = PhaseTestSignalMode.PULSE_FULL_RANGE).effectiveVerdict,
+        )
+
+        var rumbleState = 0.0
+        val rumble = ShortArray(19_200) {
+            rumbleState = 0.99 * rumbleState + 0.01 * (rng.nextDouble() * 2.0 - 1.0) * 18_000.0
+            rumbleState.roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+        }
+        assertEquals(
+            PolarityVerdict.AMBIGUOUS,
+            PhaseCheckerRules.analyzeMicWindow(rumble, sampleRate, mode = PhaseTestSignalMode.PULSE_SUB).effectiveVerdict,
+        )
+    }
+
+    @Test
+    fun `PhasePulseStacker boosts SNR across noisy pulses and resets immediately when polarity flips`() {
+        val sampleRate = 48_000
+        val pulseStereo = PhaseCheckerRules.buildStereoTestFrame(PhaseTestSignalMode.PULSE_FULL_RANGE, gain = 0.70f, sampleRate)
+        val clean = DoubleArray(20_160) { i ->
+            val src = i - 6_500
+            if (src in 0 until pulseStereo.size / 2) pulseStereo[src * 2] / 32768.0 else 0.0
+        }
+        val filtered = firstOrderHpf(biquadHpf(clean, sampleRate, 90.0, 0.707), sampleRate, 70.0)
+        val peak = filtered.maxOf { abs(it) }
+        val rng = Random(7)
+
+        val stacker = PhasePulseStacker()
+        var firstSnr = 0f
+        var lastSnr = 0f
+        var lastConf = 0f
+        repeat(4) { idx ->
+            val noisy = FloatArray(filtered.size) { i ->
+                val noise = (rng.nextDouble() * 2.0 - 1.0) * (peak / 3.5)
+                (filtered[i] + noise).toFloat()
+            }
+            val single = PhaseCheckerRules.analyzeFloatWindow(noisy, sampleRate, mode = PhaseTestSignalMode.PULSE_FULL_RANGE)
+            val stacked = stacker.ingestAndAnalyze(noisy, single, sampleRate, false, PhaseMicSensitivity.NORMAL, PhaseTestSignalMode.PULSE_FULL_RANGE)
+            if (idx == 0) firstSnr = stacked.analysis.snrRatio
+            lastSnr = stacked.analysis.snrRatio
+            lastConf = stacked.analysis.confidence
+            assertEquals(PolarityVerdict.POSITIVE, stacked.analysis.effectiveVerdict)
+        }
+        assertEquals(4, stacker.stackedCount)
+        assertTrue("Expected SNR improvement from stacking ($firstSnr -> $lastSnr)", lastSnr > firstSnr * 1.4f)
+        assertTrue("Expected boosted confidence <= 0.99f, got $lastConf", lastConf in 0.85f..0.99f)
+
+        // Flip to negative speaker -> stacker must reset immediately to 1 pulse and report NEGATIVE.
+        val inverted = FloatArray(filtered.size) { i -> (-filtered[i]).toFloat() }
+        val invSingle = PhaseCheckerRules.analyzeFloatWindow(inverted, sampleRate, mode = PhaseTestSignalMode.PULSE_FULL_RANGE)
+        val resetResult = stacker.ingestAndAnalyze(inverted, invSingle, sampleRate, false, PhaseMicSensitivity.NORMAL, PhaseTestSignalMode.PULSE_FULL_RANGE)
+        assertEquals(PolarityVerdict.NEGATIVE, resetResult.analysis.effectiveVerdict)
+        assertEquals(1, resetResult.stackedCount)
+    }
+
+    @Test
+    fun `clipped microphone input marks clipped flag and caps confidence`() {
+        val sampleRate = 48_000
+        val pulseStereo = PhaseCheckerRules.buildStereoTestFrame(PhaseTestSignalMode.PULSE_FULL_RANGE, gain = 0.95f, sampleRate)
+        val clippedWindow = ShortArray(19_200) { i ->
+            val src = i - 4_000
+            if (src in 0 until pulseStereo.size / 2) {
+                (pulseStereo[src * 2].toInt() * 3).coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+            } else {
+                0
+            }
+        }
+        val result = PhaseCheckerRules.analyzeMicWindow(clippedWindow, sampleRate, mode = PhaseTestSignalMode.PULSE_FULL_RANGE)
+        assertEquals(PolarityVerdict.POSITIVE, result.effectiveVerdict)
+        assertTrue(result.clipped)
+        assertTrue(result.confidence <= 0.85f)
+    }
+
+    private fun biquadHpf(input: DoubleArray, sampleRate: Int, fc: Double, q: Double): DoubleArray {
+        val w0 = 2.0 * PI * fc / sampleRate
+        val alpha = sin(w0) / (2.0 * q)
+        val c = cos(w0)
+        val a0 = 1.0 + alpha
+        val b0 = ((1.0 + c) / 2.0) / a0
+        val b1 = (-(1.0 + c)) / a0
+        val b2 = ((1.0 + c) / 2.0) / a0
+        val a1 = (-2.0 * c) / a0
+        val a2 = (1.0 - alpha) / a0
+        return runBiquad(input, b0, b1, b2, a1, a2)
+    }
+
+    private fun biquadLpf(input: DoubleArray, sampleRate: Int, fc: Double, q: Double): DoubleArray {
+        val w0 = 2.0 * PI * fc / sampleRate
+        val alpha = sin(w0) / (2.0 * q)
+        val c = cos(w0)
+        val a0 = 1.0 + alpha
+        val b0 = ((1.0 - c) / 2.0) / a0
+        val b1 = (1.0 - c) / a0
+        val b2 = ((1.0 - c) / 2.0) / a0
+        val a1 = (-2.0 * c) / a0
+        val a2 = (1.0 - alpha) / a0
+        return runBiquad(input, b0, b1, b2, a1, a2)
+    }
+
+    private fun runBiquad(input: DoubleArray, b0: Double, b1: Double, b2: Double, a1: Double, a2: Double): DoubleArray {
+        val out = DoubleArray(input.size)
+        var x1 = 0.0
+        var x2 = 0.0
+        var y1 = 0.0
+        var y2 = 0.0
+        for (i in input.indices) {
+            val x = input[i]
+            val y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            x2 = x1
+            x1 = x
+            y2 = y1
+            y1 = y
+            out[i] = y
+        }
+        return out
+    }
+
+    private fun firstOrderHpf(input: DoubleArray, sampleRate: Int, fc: Double): DoubleArray {
+        val rc = 1.0 / (2.0 * PI * fc)
+        val dt = 1.0 / sampleRate
+        val a = rc / (rc + dt)
+        val out = DoubleArray(input.size)
+        for (i in 1 until input.size) {
+            out[i] = a * (out[i - 1] + input[i] - input[i - 1])
+        }
+        return out
+    }
+
+    private fun toPcm16(input: DoubleArray): ShortArray = ShortArray(input.size) { i ->
+        (input[i] * 32760.0).roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
     }
 }

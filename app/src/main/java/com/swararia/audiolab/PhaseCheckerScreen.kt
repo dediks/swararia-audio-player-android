@@ -220,11 +220,14 @@ internal fun PhaseCheckerScreen(
     val toggleRxMicOnly: () -> Unit = {
         if (state.micListening) {
             engine.stopMicAnalysis()
-        } else if (engine.hasMicPermission()) {
-            engine.startMicAnalysis()
         } else {
-            pendingStartSingleAllInOne = false
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            if (!state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
+            if (engine.hasMicPermission()) {
+                engine.startMicAnalysis()
+            } else {
+                pendingStartSingleAllInOne = false
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
         }
     }
 
@@ -258,8 +261,12 @@ internal fun PhaseCheckerScreen(
                     if (next == PhasePhoneTopology.SINGLE_PHONE && singleSubMode == PhaseSingleSubMode.STEREO_EAR) {
                         engine.stopMicAnalysis()
                     } else if (next == PhasePhoneTopology.TWO_PHONES) {
-                        if (twoPhoneRole == PhaseTwoPhoneRole.RECEIVER) engine.stopGenerator()
-                        else engine.stopMicAnalysis()
+                        if (twoPhoneRole == PhaseTwoPhoneRole.RECEIVER) {
+                            engine.stopGenerator()
+                            if (!state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
+                        } else {
+                            engine.stopMicAnalysis()
+                        }
                     }
                 },
             )
@@ -295,8 +302,12 @@ internal fun PhaseCheckerScreen(
                     },
                     onSelect = { role ->
                         twoPhoneRole = role
-                        if (role == PhaseTwoPhoneRole.TRANSMITTER) engine.stopMicAnalysis()
-                        else engine.stopGenerator()
+                        if (role == PhaseTwoPhoneRole.TRANSMITTER) {
+                            engine.stopMicAnalysis()
+                        } else {
+                            engine.stopGenerator()
+                            if (!state.mode.usesMicPulse) engine.setMode(PhaseTestSignalMode.PULSE_FULL_RANGE)
+                        }
                     },
                 )
             }
@@ -453,6 +464,7 @@ internal fun PhaseCheckerScreen(
                         state = state,
                         selectedSpeakerSlot = selectedSpeakerSlot,
                         onSelectSpeakerSlot = { selectedSpeakerSlot = it },
+                        onSelectPulseMode = { engine.setMode(it) },
                         onSelectSensitivity = { engine.setSensitivity(it) },
                         onLockOrClearRef = {
                             if (state.referencePolarity != null) engine.clearReference()
@@ -684,14 +696,19 @@ private fun PolarityReadoutCard(state: PhaseCheckerUiState) {
                     )
                     if (state.micListening && state.micSourceLabel.isNotBlank()) {
                         val isFallbackDsp = state.micSourceLabel.contains("Non-raw", ignoreCase = true)
+                        val stackSuffix = if (state.stackedPulses >= 2) " · Avg ${state.stackedPulses}×" else ""
                         Text(
-                            text = if (isFallbackDsp) {
-                                "${state.micSourceLabel} · AGC/filter HP aktif"
-                            } else {
-                                state.micSourceLabel
+                            text = when {
+                                state.clipped -> "Mic klip (terlalu keras) — mundurkan mic 10–20 cm"
+                                isFallbackDsp -> "${state.micSourceLabel} · AGC/filter HP aktif$stackSuffix"
+                                else -> "${state.micSourceLabel}$stackSuffix"
                             },
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (isFallbackDsp) foh.warnAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = when {
+                                state.clipped -> foh.alertAccent
+                                isFallbackDsp -> foh.warnAccent
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -793,6 +810,7 @@ private fun TwoPhoneReceiverSecondaryCard(
     state: PhaseCheckerUiState,
     selectedSpeakerSlot: String,
     onSelectSpeakerSlot: (String) -> Unit,
+    onSelectPulseMode: (PhaseTestSignalMode) -> Unit,
     onSelectSensitivity: (PhaseMicSensitivity) -> Unit,
     onLockOrClearRef: () -> Unit,
     onToggleInvertMic: () -> Unit,
@@ -807,6 +825,7 @@ private fun TwoPhoneReceiverSecondaryCard(
             Modifier.fillMaxWidth().padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            PulseTargetRow(selected = state.mode, onSelect = onSelectPulseMode)
             SensitivityRow(selected = state.sensitivity, onSelect = onSelectSensitivity)
             CalibrationAndSlotRow(
                 state = state,
@@ -815,6 +834,31 @@ private fun TwoPhoneReceiverSecondaryCard(
                 onLockOrClearRef = onLockOrClearRef,
                 onToggleInvertMic = onToggleInvertMic,
                 onSaveResult = onSaveResult,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PulseTargetRow(
+    selected: PhaseTestSignalMode,
+    onSelect: (PhaseTestSignalMode) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "Target Speaker:",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        listOf(PhaseTestSignalMode.PULSE_FULL_RANGE, PhaseTestSignalMode.PULSE_SUB).forEach { mode ->
+            FohFilterChip(
+                label = if (mode == PhaseTestSignalMode.PULSE_FULL_RANGE) "Full" else "Sub LF",
+                selected = selected == mode,
+                onClick = { onSelect(mode) },
             )
         }
     }
@@ -1337,9 +1381,9 @@ private fun PhaseFieldGuideDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when {
                     topology == PhasePhoneTopology.SINGLE_PHONE && singleSubMode == PhaseSingleSubMode.PULSE_AND_MIC -> {
-                        Text("1. Hubungkan output HP ke speaker/mixer (kabel panjang atau Bluetooth dekat speaker).", style = MaterialTheme.typography.bodySmall)
-                        Text("2. Dekatkan mic HP ~20–50 cm di depan driver, tekan Mulai Uji, lalu tekan Kunci Ref A di speaker pertama.", style = MaterialTheme.typography.bodySmall)
-                        Text("3. Pindah ke speaker lain lalu tekan Simpan Hasil untuk mencatat daftar speaker.", style = MaterialTheme.typography.bodySmall)
+                        Text("1. Hubungkan output HP ke speaker/mixer memakai kabel (hindari Bluetooth karena mengubah fasa).", style = MaterialTheme.typography.bodySmall)
+                        Text("2. Dekatkan mic HP ~20–30 cm tepat di depan woofer, tekan Mulai Uji, lalu tekan Kunci Ref A di speaker pertama.", style = MaterialTheme.typography.bodySmall)
+                        Text("3. Pindah ke speaker lain dengan jarak serupa lalu tekan Simpan Hasil untuk mencatat daftar speaker.", style = MaterialTheme.typography.bodySmall)
                     }
 
                     topology == PhasePhoneTopology.SINGLE_PHONE -> {
@@ -1355,9 +1399,9 @@ private fun PhaseFieldGuideDialog(
                     }
 
                     else -> {
-                        Text("1. Pastikan HP 1 (atau pemutar FOH) sedang memancarkan pulsa uji ke sistem PA.", style = MaterialTheme.typography.bodySmall)
-                        Text("2. Di depan Speaker Acuan (misal PA Main L), nyalakan Mic lalu ketuk Kunci Ref A.", style = MaterialTheme.typography.bodySmall)
-                        Text("3. Keliling ke speaker lain, pilih slot speaker, lalu ketuk Simpan Hasil untuk rekap.", style = MaterialTheme.typography.bodySmall)
+                        Text("1. Pastikan HP 1 (atau pemutar FOH) memancarkan pulsa uji via kabel, lalu samakan Target Speaker (Full / Sub LF) di HP 2.", style = MaterialTheme.typography.bodySmall)
+                        Text("2. Di depan Speaker Acuan (~20–30 cm dari woofer), nyalakan Mic lalu ketuk Kunci Ref A.", style = MaterialTheme.typography.bodySmall)
+                        Text("3. Keliling ke speaker lain dengan HP 2 yang sama, lalu ketuk Simpan Hasil untuk rekap.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

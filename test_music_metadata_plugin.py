@@ -3,6 +3,8 @@ from pathlib import Path
 import importlib.util
 import sys
 import unittest
+
+sys.dont_write_bytecode = True
 ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT/'app/src/main/res/raw/ytdlp'))
 PLUGIN=ROOT/'app/src/main/assets/search_plugins/yt_dlp_plugins/extractor/swararia_music.py'
