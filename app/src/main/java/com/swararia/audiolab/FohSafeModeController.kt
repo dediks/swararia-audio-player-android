@@ -11,25 +11,38 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
+ * Platform-agnostic contract for reading/updating FOH Safe Mode settings and launching OS policy screens.
+ */
+internal interface FohSafeModeStore {
+    val settings: StateFlow<FohSafeModeSettings>
+    fun isNotificationPolicyGranted(): Boolean
+    fun updateSettings(transform: (FohSafeModeSettings) -> FohSafeModeSettings): FohSafeModeSettings
+    fun setEnabled(enabled: Boolean): FohSafeModeSettings
+    fun refreshPolicySync()
+    fun openNotificationPolicySettings()
+    fun openSamsungSeparateAppSound()
+}
+
+/**
  * Owns persistent FOH Safe Mode configuration and best-effort OS Do-Not-Disturb transitions.
  *
  * On Android 15+ (API 35+), `setInterruptionFilter` toggles an app-owned implicit Zen Rule per
  * platform rules rather than mutating unrelated user DND schedules.
  */
-class FohSafeModeController(context: Context) {
+class FohSafeModeController(context: Context) : FohSafeModeStore {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(PlaybackPreferences.PREFS_NAME, Context.MODE_PRIVATE)
     private val notificationManager = appContext.getSystemService(NotificationManager::class.java)
 
     private val mutableSettings = MutableStateFlow(readSettings())
-    val settings: StateFlow<FohSafeModeSettings> = mutableSettings.asStateFlow()
+    override val settings: StateFlow<FohSafeModeSettings> = mutableSettings.asStateFlow()
 
     fun current(): FohSafeModeSettings = mutableSettings.value
 
-    fun isNotificationPolicyGranted(): Boolean =
+    override fun isNotificationPolicyGranted(): Boolean =
         notificationManager?.isNotificationPolicyAccessGranted == true
 
-    fun updateSettings(transform: (FohSafeModeSettings) -> FohSafeModeSettings): FohSafeModeSettings {
+    override fun updateSettings(transform: (FohSafeModeSettings) -> FohSafeModeSettings): FohSafeModeSettings {
         val next = transform(mutableSettings.value)
         prefs.edit()
             .putBoolean(KEY_SAFE_ENABLED, next.enabled)
@@ -41,15 +54,23 @@ class FohSafeModeController(context: Context) {
         return next
     }
 
-    fun setEnabled(enabled: Boolean): FohSafeModeSettings =
+    override fun setEnabled(enabled: Boolean): FohSafeModeSettings =
         updateSettings { it.copy(enabled = enabled) }
 
     fun toggleEnabled(): FohSafeModeSettings =
         updateSettings { it.copy(enabled = !it.enabled) }
 
     /** Re-syncs DND state after returning from system Notification Policy settings. */
-    fun refreshPolicySync() {
+    override fun refreshPolicySync() {
         syncSystemDnd(mutableSettings.value)
+    }
+
+    override fun openNotificationPolicySettings() {
+        Companion.openNotificationPolicySettings(appContext)
+    }
+
+    override fun openSamsungSeparateAppSound() {
+        Companion.openSamsungSeparateAppSound(appContext)
     }
 
     private fun syncSystemDnd(current: FohSafeModeSettings) {

@@ -17,9 +17,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-internal data class PadKey(val bankIndex: Int, val slotIndex: Int)
+data class PadKey(val bankIndex: Int, val slotIndex: Int)
 
-internal data class SoundboardUiState(
+data class SoundboardUiState(
     val selectedBank: Int = 0,
     val slots: List<SoundPadSlot> = SoundboardRules.defaultSlots(),
     val activeSlots: Set<PadKey> = emptySet(),
@@ -28,13 +28,31 @@ internal data class SoundboardUiState(
 )
 
 /**
+ * Platform-agnostic contract for driving soundboard pad banks, presets, and auto-duck events.
+ */
+internal interface FohSoundboardStore {
+    val state: StateFlow<SoundboardUiState>
+    fun setAutoDuckListener(listener: ((Boolean) -> Unit)?)
+    fun syncTracks(tracks: List<AudioTrack>)
+    fun selectBank(bankIndex: Int)
+    fun setPadDuckEnabled(enabled: Boolean)
+    fun assignSlot(bankIndex: Int, slotIndex: Int, track: AudioTrack)
+    fun assignPreset(bankIndex: Int, slotIndex: Int, preset: SoundPadMomentPreset)
+    fun fillMomentPresets(onlyEmpty: Boolean = false)
+    fun updateSlot(bankIndex: Int, slotIndex: Int, label: String, trimDb: Float)
+    fun clearSlot(bankIndex: Int, slotIndex: Int)
+    fun triggerPad(bankIndex: Int, slotIndex: Int)
+    fun stopAll()
+}
+
+/**
  * Dual-path low-latency soundboard engine supporting overlapping one-shot stingers.
  *
  * Short stingers (`<= 5.5s`, including all built-in `.wav` moment presets) load into `SoundPool`
  * for sub-20ms hardware-mixed response, while longer bumpers pre-prepare on dedicated
  * `MediaPlayer` instances so SoundPool's 1 MB decoded PCM cap never truncates them.
  */
-class FohSoundboardEngine(context: Context) {
+class FohSoundboardEngine(context: Context) : FohSoundboardStore {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -78,7 +96,7 @@ class FohSoundboardEngine(context: Context) {
             padDuckEnabled = prefs.getBoolean(KEY_PAD_DUCK_ENABLED, true),
         ),
     )
-    internal val state: StateFlow<SoundboardUiState> = mutableState.asStateFlow()
+    override val state: StateFlow<SoundboardUiState> = mutableState.asStateFlow()
 
     init {
         soundPool.setOnLoadCompleteListener { _, sampleId, status ->
@@ -124,12 +142,12 @@ class FohSoundboardEngine(context: Context) {
         return decoded
     }
 
-    fun setAutoDuckListener(listener: ((Boolean) -> Unit)?) {
+    override fun setAutoDuckListener(listener: ((Boolean) -> Unit)?) {
         duckListener = listener
         reportDuckIfNeeded()
     }
 
-    fun syncTracks(tracks: List<AudioTrack>) {
+    override fun syncTracks(tracks: List<AudioTrack>) {
         tracksById = tracks.associateBy { it.id }
         val currentSlots = mutableState.value.slots
         var changed = false
@@ -147,19 +165,19 @@ class FohSoundboardEngine(context: Context) {
         prewarmAssignedSlots(if (changed) cleaned else currentSlots)
     }
 
-    fun selectBank(bankIndex: Int) {
+    override fun selectBank(bankIndex: Int) {
         val clamped = bankIndex.coerceIn(0, SoundboardRules.BANK_COUNT - 1)
         prefs.edit().putInt(KEY_SELECTED_BANK, clamped).apply()
         mutableState.update { it.copy(selectedBank = clamped) }
     }
 
-    fun setPadDuckEnabled(enabled: Boolean) {
+    override fun setPadDuckEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_PAD_DUCK_ENABLED, enabled).apply()
         mutableState.update { it.copy(padDuckEnabled = enabled) }
         reportDuckIfNeeded()
     }
 
-    fun assignSlot(bankIndex: Int, slotIndex: Int, track: AudioTrack) {
+    override fun assignSlot(bankIndex: Int, slotIndex: Int, track: AudioTrack) {
         if (bankIndex !in 0 until SoundboardRules.BANK_COUNT || slotIndex !in 0 until SoundboardRules.SLOTS_PER_BANK) return
         val key = PadKey(bankIndex, slotIndex)
         stopSinglePad(key)
@@ -176,7 +194,7 @@ class FohSoundboardEngine(context: Context) {
         prewarmSlot(updated)
     }
 
-    fun assignPreset(bankIndex: Int, slotIndex: Int, preset: SoundPadMomentPreset) {
+    override fun assignPreset(bankIndex: Int, slotIndex: Int, preset: SoundPadMomentPreset) {
         if (bankIndex !in 0 until SoundboardRules.BANK_COUNT || slotIndex !in 0 until SoundboardRules.SLOTS_PER_BANK) return
         val key = PadKey(bankIndex, slotIndex)
         stopSinglePad(key)
@@ -193,7 +211,7 @@ class FohSoundboardEngine(context: Context) {
         prewarmSlot(updated)
     }
 
-    fun fillMomentPresets(onlyEmpty: Boolean = false) {
+    override fun fillMomentPresets(onlyEmpty: Boolean) {
         if (!onlyEmpty) {
             stopAll()
         }
@@ -210,7 +228,7 @@ class FohSoundboardEngine(context: Context) {
         prewarmAssignedSlots(next)
     }
 
-    fun updateSlot(bankIndex: Int, slotIndex: Int, label: String, trimDb: Float) {
+    override fun updateSlot(bankIndex: Int, slotIndex: Int, label: String, trimDb: Float) {
         val idx = bankIndex * SoundboardRules.SLOTS_PER_BANK + slotIndex
         val existing = mutableState.value.slots.getOrNull(idx) ?: return
         if (!existing.isAssigned) return
@@ -232,7 +250,7 @@ class FohSoundboardEngine(context: Context) {
         }
     }
 
-    fun clearSlot(bankIndex: Int, slotIndex: Int) {
+    override fun clearSlot(bankIndex: Int, slotIndex: Int) {
         val key = PadKey(bankIndex, slotIndex)
         stopSinglePad(key)
         releaseBoundPad(key)
@@ -240,7 +258,7 @@ class FohSoundboardEngine(context: Context) {
         reportDuckIfNeeded()
     }
 
-    fun triggerPad(bankIndex: Int, slotIndex: Int) {
+    override fun triggerPad(bankIndex: Int, slotIndex: Int) {
         val key = PadKey(bankIndex, slotIndex)
         if (key in mutableState.value.activeSlots) {
             stopSinglePad(key)
@@ -295,7 +313,7 @@ class FohSoundboardEngine(context: Context) {
         }
     }
 
-    fun stopAll() {
+    override fun stopAll() {
         val active = mutableState.value.activeSlots.toList()
         active.forEach { stopSinglePad(it) }
         reportDuckIfNeeded()

@@ -21,57 +21,76 @@ import java.security.MessageDigest
 import kotlin.math.roundToInt
 
 /**
+ * Platform-agnostic contract for reading and mutating persisted rental brand & stage skin settings.
+ */
+internal interface BrandSkinStore {
+    val state: StateFlow<BrandSkinConfig>
+    fun selectPreset(presetId: String)
+    fun selectCustomLogoAccent()
+    fun setOledTrueBlack(enabled: Boolean)
+    fun setRentalName(raw: String)
+    fun setEventTag(raw: String)
+    fun setStageRtaStyle(style: StageRtaStyle)
+    fun setHaloChannelMode(mode: HaloChannelMode)
+    fun setCleanStageMode(clean: Boolean)
+    fun setPrestigeAnimations(enabled: Boolean)
+    fun dismissWelcomeBanner()
+    fun resetAllBranding()
+    suspend fun importLogoFromUriString(uriString: String): Result<BrandSkinConfig>
+}
+
+/**
  * Manages persisted rental branding, custom transparent PNG/photo logo storage in app-private files,
  * and dynamic console skin configuration.
  */
-class BrandSkinManager(context: Context) {
+class BrandSkinManager(context: Context) : BrandSkinStore {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val mutableState = MutableStateFlow(readConfig(prefs))
-    val state: StateFlow<BrandSkinConfig> = mutableState.asStateFlow()
+    override val state: StateFlow<BrandSkinConfig> = mutableState.asStateFlow()
 
-    fun selectPreset(presetId: String) {
+    override fun selectPreset(presetId: String) {
         val preset = BrandSkinRules.resolvePreset(presetId)
         updateConfig { it.copy(presetId = preset.id, useCustomLogoAccent = false) }
     }
 
-    fun selectCustomLogoAccent() {
+    override fun selectCustomLogoAccent() {
         updateConfig { current ->
             if (current.customAccentArgb != null) current.copy(useCustomLogoAccent = true) else current
         }
     }
 
-    fun setOledTrueBlack(enabled: Boolean) {
+    override fun setOledTrueBlack(enabled: Boolean) {
         updateConfig { it.copy(oledTrueBlack = enabled) }
     }
 
-    fun setRentalName(raw: String) {
+    override fun setRentalName(raw: String) {
         val sanitized = BrandSkinRules.sanitizeRentalName(raw)
         updateConfig { it.copy(rentalName = sanitized) }
     }
 
-    fun setEventTag(raw: String) {
+    override fun setEventTag(raw: String) {
         val sanitized = BrandSkinRules.sanitizeEventTag(raw)
         updateConfig { it.copy(eventTag = sanitized) }
     }
 
-    fun setStageRtaStyle(style: StageRtaStyle) {
+    override fun setStageRtaStyle(style: StageRtaStyle) {
         updateConfig { it.copy(stageRtaStyle = style) }
     }
 
-    fun setHaloChannelMode(mode: HaloChannelMode) {
+    override fun setHaloChannelMode(mode: HaloChannelMode) {
         updateConfig { it.copy(haloChannelMode = mode) }
     }
 
-    fun setCleanStageMode(clean: Boolean) {
+    override fun setCleanStageMode(clean: Boolean) {
         updateConfig { it.copy(cleanStageMode = clean) }
     }
 
-    fun setPrestigeAnimations(enabled: Boolean) {
+    override fun setPrestigeAnimations(enabled: Boolean) {
         updateConfig { it.copy(prestigeAnimations = enabled) }
     }
 
-    fun dismissWelcomeBanner() {
+    override fun dismissWelcomeBanner() {
         updateConfig { it.copy(welcomeBannerDismissed = true) }
     }
 
@@ -89,7 +108,7 @@ class BrandSkinManager(context: Context) {
         }
     }
 
-    fun resetAllBranding() {
+    override fun resetAllBranding() {
         val previousKey = mutableState.value.customLogoKey
         updateConfig {
             it.copy(
@@ -105,6 +124,9 @@ class BrandSkinManager(context: Context) {
             deleteLogoFile(previousKey)
         }
     }
+
+    override suspend fun importLogoFromUriString(uriString: String): Result<BrandSkinConfig> =
+        importLogoFromUri(Uri.parse(uriString))
 
     suspend fun importLogoFromUri(uri: Uri): Result<BrandSkinConfig> = withContext(Dispatchers.IO) {
         runCatching {

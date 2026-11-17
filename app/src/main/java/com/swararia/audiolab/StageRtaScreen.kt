@@ -52,7 +52,6 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -84,11 +83,8 @@ internal fun StageRtaScreen(
     onOpenBrandStudio: () -> Unit,
     modifier: Modifier = Modifier,
     showCloseButton: Boolean = false,
+    brandSkinActions: BrandSkinUiActions = BrandSkinUiActions(),
 ) {
-    val context = LocalContext.current
-    val brandManager = remember(context) {
-        (context.applicationContext as? SwarariaApp)?.container?.brandSkinManager
-    }
     val foh = FohTheme.colors
     val brand = FohTheme.brand
     val signal by rememberLocalAudioSignal()
@@ -144,7 +140,7 @@ internal fun StageRtaScreen(
                 showCloseButton = showCloseButton,
                 onClose = onClose,
                 onOpenThemeQuickSheet = { quickThemeOpen = true },
-                onToggleCleanMode = { brandManager?.setCleanStageMode(!brand.cleanStageMode) },
+                onToggleCleanMode = { brandSkinActions.onSetCleanStageMode(!brand.cleanStageMode) },
             )
 
             StageHeroBrandHeader(
@@ -161,14 +157,14 @@ internal fun StageRtaScreen(
                 liveActive = liveActive,
                 brand = brand,
                 bassEnergy = bassEnergy,
-                onSelectRtaStyle = { brandManager?.setStageRtaStyle(it) },
+                onSelectRtaStyle = brandSkinActions.onSetStageRtaStyle,
                 onToggleHaloChannelMode = {
                     val next = if (brand.haloChannelMode == HaloChannelMode.MIRRORED) {
                         HaloChannelMode.STEREO_SPLIT
                     } else {
                         HaloChannelMode.MIRRORED
                     }
-                    brandManager?.setHaloChannelMode(next)
+                    brandSkinActions.onSetHaloChannelMode(next)
                 },
                 modifier = Modifier
                     .weight(1f)
@@ -200,11 +196,11 @@ internal fun StageRtaScreen(
     if (quickThemeOpen) {
         StageQuickThemeSheet(
             brand = brand,
-            onSelectPreset = { brandManager?.selectPreset(it) },
-            onSelectLogoAccent = { brandManager?.selectCustomLogoAccent() },
-            onToggleOled = { brandManager?.setOledTrueBlack(it) },
-            onToggleAnimations = { brandManager?.setPrestigeAnimations(it) },
-            onToggleClean = { brandManager?.setCleanStageMode(it) },
+            onSelectPreset = brandSkinActions.onSelectPreset,
+            onSelectLogoAccent = brandSkinActions.onSelectLogoAccent,
+            onToggleOled = brandSkinActions.onSetOledTrueBlack,
+            onToggleAnimations = brandSkinActions.onSetPrestigeAnimations,
+            onToggleClean = brandSkinActions.onSetCleanStageMode,
             onOpenFullStudio = {
                 quickThemeOpen = false
                 onOpenBrandStudio()

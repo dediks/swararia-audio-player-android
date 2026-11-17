@@ -70,6 +70,8 @@ internal fun MoreScreen(
     modifier: Modifier = Modifier,
     onOpenStageRta: () -> Unit = {},
     localAudioBanner: @Composable () -> Unit = {},
+    brandSkinActions: BrandSkinUiActions = BrandSkinUiActions(),
+    brandSkinStudioState: BrandSkinStudioUiState = BrandSkinStudioUiState(),
 ) {
     when (activeTool) {
         MoreToolRoute.PHASE_CHECKER -> PhaseCheckerScreen(
@@ -81,6 +83,8 @@ internal fun MoreScreen(
         MoreToolRoute.BRAND_STUDIO -> BrandSkinStudioScreen(
             onBack = { onSelectTool(MoreToolRoute.HUB) },
             onOpenStageRta = onOpenStageRta,
+            studioState = brandSkinStudioState,
+            brandSkinActions = brandSkinActions,
             modifier = modifier,
         )
 

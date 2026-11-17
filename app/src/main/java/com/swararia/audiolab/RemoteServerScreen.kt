@@ -39,6 +39,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.common.BitMatrix
@@ -60,6 +61,13 @@ internal fun readPlainTextFromClipboard(context: Context): String? = runCatching
 }.getOrNull()
 
 @Composable
+private fun rememberRemoteNetworkViewModel(): RemoteNetworkViewModel {
+    val app = LocalContext.current.applicationContext
+    val factory = remember(app) { RemoteNetworkViewModelFactory.fromContext(app) }
+    return viewModel(factory = factory)
+}
+
+@Composable
 internal fun RemoteTabScreen(
     desktopRemote: DesktopRemoteSession,
     serverState: RemoteServerUiState,
@@ -67,19 +75,16 @@ internal fun RemoteTabScreen(
     modifier: Modifier = Modifier,
     localAudioBanner: @Composable () -> Unit = {},
     onBack: (() -> Unit)? = null,
+    networkViewModel: RemoteNetworkViewModel = rememberRemoteNetworkViewModel(),
 ) {
     var selectedRole by rememberSaveable { mutableStateOf("") }
     var showGuideDialog by rememberSaveable { mutableStateOf(false) }
     var qrScanRequestTick by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
-    val appContainer = remember(context) { (context.applicationContext as? SwarariaApp)?.container }
     val remoteState by desktopRemote.state.collectAsStateWithLifecycle()
-    val peerState by (appContainer?.remoteWifiPeerController?.state
-        ?: remember { kotlinx.coroutines.flow.MutableStateFlow(RemoteWifiPeerState()) }).collectAsStateWithLifecycle()
-    val wifiStatus by (appContainer?.remoteWifiTransport?.status
-        ?: remember { kotlinx.coroutines.flow.MutableStateFlow(RemoteWifiTransportStatus()) }).collectAsStateWithLifecycle()
-    val mdnsServers by (appContainer?.remoteNsdCoordinator?.servers
-        ?: remember { kotlinx.coroutines.flow.MutableStateFlow(emptyList<RemoteMdnsServer>()) }).collectAsStateWithLifecycle()
+    val peerState by networkViewModel.peerState.collectAsStateWithLifecycle()
+    val wifiStatus by networkViewModel.wifiStatus.collectAsStateWithLifecycle()
+    val mdnsServers by networkViewModel.mdnsServers.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val effectiveRole = when {
         selectedRole.isNotEmpty() -> selectedRole
@@ -96,7 +101,7 @@ internal fun RemoteTabScreen(
     ) { results ->
         val action = pendingWifiAction
         pendingWifiAction = null
-        val granted = results.values.all { it } || (appContainer?.remoteWifiPeerController?.hasWifiPeerPermissions() == true)
+        val granted = results.values.all { it } || networkViewModel.hasWifiPeerPermissions()
         if (granted) {
             permissionNotice = null
             action?.invoke()
@@ -124,13 +129,12 @@ internal fun RemoteTabScreen(
     }
 
     fun runWithWifiPermission(action: () -> Unit) {
-        val controller = appContainer?.remoteWifiPeerController
-        if (controller == null || controller.hasWifiPeerPermissions()) {
+        if (networkViewModel.hasWifiPeerPermissions()) {
             permissionNotice = null
             action()
         } else {
             pendingWifiAction = action
-            wifiPermissionLauncher.launch(controller.requiredWifiPeerPermissions())
+            wifiPermissionLauncher.launch(networkViewModel.requiredWifiPeerPermissions())
         }
     }
 
@@ -152,25 +156,20 @@ internal fun RemoteTabScreen(
         }
     }
 
-    DisposableEffect(lifecycle, effectiveRole, appContainer) {
+    DisposableEffect(lifecycle, effectiveRole, networkViewModel) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                appContainer?.remoteWifiTransport?.refreshStatus()
-                if (effectiveRole == "server") {
-                    serverActions.onRefreshInterfaces()
-                } else if (effectiveRole == "controller") {
-                    appContainer?.remoteNsdCoordinator?.startDiscovery()
-                }
+                networkViewModel.onHostResume(effectiveRole, serverActions.onRefreshInterfaces)
             } else if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                appContainer?.remoteNsdCoordinator?.stopDiscovery()
+                networkViewModel.onHostPauseOrStop()
             }
         }
         lifecycle.addObserver(observer)
-        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && effectiveRole == "controller") {
-            appContainer?.remoteNsdCoordinator?.startDiscovery()
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            networkViewModel.syncControllerDiscovery(effectiveRole == "controller")
         }
         onDispose {
-            appContainer?.remoteNsdCoordinator?.stopDiscovery()
+            networkViewModel.onHostPauseOrStop()
             lifecycle.removeObserver(observer)
         }
     }
@@ -280,13 +279,13 @@ internal fun RemoteTabScreen(
                 actions = serverActions,
                 peerState = peerState,
                 onStartLocalHotspot = {
-                    runWithWifiPermission { appContainer?.remoteWifiPeerController?.startLocalOnlyHotspot() }
+                    runWithWifiPermission { networkViewModel.startLocalOnlyHotspot() }
                 },
-                onStopLocalHotspot = { appContainer?.remoteWifiPeerController?.stopLocalOnlyHotspot() },
+                onStopLocalHotspot = networkViewModel::stopLocalOnlyHotspot,
                 onStartWifiDirect = {
-                    runWithWifiPermission { appContainer?.remoteWifiPeerController?.startWifiDirectGroup() }
+                    runWithWifiPermission { networkViewModel.startWifiDirectGroup() }
                 },
-                onStopWifiDirect = { appContainer?.remoteWifiPeerController?.stopWifiDirectGroup() },
+                onStopWifiDirect = networkViewModel::stopWifiDirectGroup,
                 onRequireLegacyStoragePermission = ::runWithLegacyStorage,
                 modifier = Modifier
                     .weight(1f)
@@ -302,32 +301,17 @@ internal fun RemoteTabScreen(
                 peerState = peerState,
                 wifiStatus = wifiStatus,
                 mdnsServers = mdnsServers,
-                onHandleQrInput = { rawText, directConnect ->
-                    val peer = appContainer?.remoteWifiPeerController
-                    if (peer != null) {
-                        peer.handleClientQrInput(rawText, directConnect)
-                    } else {
-                        directConnect(rawText)
-                    }
-                },
-                onConfirmLegacyWifiJoin = { directConnect ->
-                    appContainer?.remoteWifiPeerController?.confirmLegacyWifiJoin(directConnect)
-                },
-                onCancelLegacyWifiJoin = {
-                    appContainer?.remoteWifiPeerController?.clearPendingLegacyWifiJoin()
-                },
-                onReleasePeerNetwork = {
-                    appContainer?.remoteWifiPeerController?.releaseClientPeerWifiNetwork()
-                },
+                onHandleQrInput = networkViewModel::handleClientQrInput,
+                onConfirmLegacyWifiJoin = networkViewModel::confirmLegacyWifiJoin,
+                onCancelLegacyWifiJoin = networkViewModel::clearPendingLegacyWifiJoin,
+                onReleasePeerNetwork = networkViewModel::releaseClientPeerWifiNetwork,
                 onDiscoverP2p = {
-                    runWithWifiPermission { appContainer?.remoteWifiPeerController?.discoverWifiDirectPeers() }
+                    runWithWifiPermission { networkViewModel.discoverWifiDirectPeers() }
                 },
                 onConnectP2p = { addr ->
-                    runWithWifiPermission { appContainer?.remoteWifiPeerController?.connectWifiDirectPeer(addr) }
+                    runWithWifiPermission { networkViewModel.connectWifiDirectPeer(addr) }
                 },
-                onDisconnectP2p = {
-                    appContainer?.remoteWifiPeerController?.disconnectWifiDirectClient()
-                },
+                onDisconnectP2p = networkViewModel::disconnectWifiDirectClient,
                 onRequireLegacyStoragePermission = ::runWithLegacyStorage,
             )
         }

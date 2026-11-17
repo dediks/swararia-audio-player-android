@@ -27,7 +27,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -478,6 +480,13 @@ private fun MiniPlayerTimeSubtitle(
 }
 
 @Composable
+private fun rememberLiveDeckViewModel(): LiveDeckViewModel {
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val factory = remember(context) { LiveDeckViewModelFactory.fromContext(context) }
+    return viewModel(factory = factory)
+}
+
+@Composable
 internal fun FocusedPlayer(
     tracks: List<AudioTrack>,
     current: AudioTrack?,
@@ -497,6 +506,7 @@ internal fun FocusedPlayer(
     guardEnabled: Boolean,
     onToggleGuardEnabled: () -> Unit,
     positionMsProvider: () -> Long = { playback.positionMs },
+    viewModel: LiveDeckViewModel = rememberLiveDeckViewModel(),
 ) {
     var pendingGuardEntry by remember { mutableStateOf<SessionQueueItem?>(null) }
     var routeDialogOpen by remember { mutableStateOf(false) }
@@ -523,30 +533,22 @@ internal fun FocusedPlayer(
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val appContainer = remember(context) { (context.applicationContext as? SwarariaApp)?.container }
-    val safeModeController = appContainer?.safeModeController
-    val soundboardEngine = appContainer?.soundboardEngine
-    val safeSettings by safeModeController?.settings?.collectAsState()
-        ?: remember { mutableStateOf(FohSafeModeSettings()) }
-    val soundboardState by soundboardEngine?.state?.collectAsState()
-        ?: remember { mutableStateOf(SoundboardUiState()) }
-    var dndGranted by remember(safeModeController) {
-        mutableStateOf(safeModeController?.isNotificationPolicyGranted() == true)
-    }
+    val safeSettings by viewModel.safeSettings.collectAsStateWithLifecycle()
+    val soundboardState by viewModel.soundboardState.collectAsStateWithLifecycle()
+    val dndGranted by viewModel.dndGranted.collectAsStateWithLifecycle()
 
-    DisposableEffect(lifecycleOwner, safeModeController) {
+    DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                dndGranted = safeModeController?.isNotificationPolicyGranted() == true
-                safeModeController?.refreshPolicySync()
+                viewModel.onHostResume()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(soundboardEngine, tracks) {
-        soundboardEngine?.syncTracks(tracks)
+    LaunchedEffect(viewModel, tracks) {
+        viewModel.syncTracks(tracks)
     }
 
     val outputRoute = rememberAudioOutputRoute()
@@ -571,12 +573,12 @@ internal fun FocusedPlayer(
 
     PlaybackModeBar(controller, modifier.fillMaxSize()) { controlUi ->
         val latestControlUi by rememberUpdatedState(controlUi)
-        DisposableEffect(soundboardEngine) {
-            soundboardEngine?.setAutoDuckListener { ducked ->
+        DisposableEffect(viewModel) {
+            viewModel.setAutoDuckListener { ducked ->
                 latestControlUi.onSetPadDuck(ducked)
             }
             onDispose {
-                soundboardEngine?.setAutoDuckListener(null)
+                viewModel.setAutoDuckListener(null)
                 latestControlUi.onSetPadDuck(false)
             }
         }
@@ -672,14 +674,14 @@ internal fun FocusedPlayer(
                         FohSoundboardPanel(
                             soundboardState = soundboardState,
                             tracksById = tracksByLongId,
-                            onSelectBank = { soundboardEngine?.selectBank(it) },
-                            onTriggerPad = { bank, slot -> soundboardEngine?.triggerPad(bank, slot) },
+                            onSelectBank = viewModel::selectBank,
+                            onTriggerPad = viewModel::triggerPad,
                             onOpenAssignSlot = { bank, slot -> assignPadTarget = bank to slot },
                             onOpenEditSlot = { editPadSlot = it },
-                            onTogglePadDuck = { soundboardEngine?.setPadDuckEnabled(it) },
-                            onStopAllPads = { soundboardEngine?.stopAll() },
+                            onTogglePadDuck = viewModel::setPadDuckEnabled,
+                            onStopAllPads = viewModel::stopAllPads,
                             onFillDefaultPresets = { onlyEmpty ->
-                                soundboardEngine?.fillMomentPresets(onlyEmpty = onlyEmpty)
+                                viewModel.fillMomentPresets(onlyEmpty = onlyEmpty)
                             },
                         )
                     }
@@ -767,11 +769,11 @@ internal fun FocusedPlayer(
             onToggleKeepScreenOn = { onToggleKeepScreenOn() },
             guardEnabled = guardEnabled,
             onToggleGuard = { onToggleGuardEnabled() },
-            onToggleEnabled = { enabled -> safeModeController?.setEnabled(enabled) },
-            onToggleAutoDnd = { enabled -> safeModeController?.updateSettings { it.copy(autoDnd = enabled) } },
-            onToggleFocusLock = { enabled -> safeModeController?.updateSettings { it.copy(focusLock = enabled) } },
-            onRequestDndPermission = { FohSafeModeController.openNotificationPolicySettings(context) },
-            onOpenSamsungSeparateAppSound = { FohSafeModeController.openSamsungSeparateAppSound(context) },
+            onToggleEnabled = viewModel::setSafeModeEnabled,
+            onToggleAutoDnd = viewModel::setAutoDnd,
+            onToggleFocusLock = viewModel::setFocusLock,
+            onRequestDndPermission = viewModel::openNotificationPolicySettings,
+            onOpenSamsungSeparateAppSound = viewModel::openSamsungSeparateAppSound,
             onDismiss = { safeSheetOpen = false },
         )
     }
@@ -781,15 +783,15 @@ internal fun FocusedPlayer(
             slotNumber = targetSlot + 1,
             tracks = tracks,
             onPickTrack = { track ->
-                soundboardEngine?.assignSlot(targetBank, targetSlot, track)
+                viewModel.assignSlot(targetBank, targetSlot, track)
                 assignPadTarget = null
             },
             onPickPreset = { preset ->
-                soundboardEngine?.assignPreset(targetBank, targetSlot, preset)
+                viewModel.assignPreset(targetBank, targetSlot, preset)
                 assignPadTarget = null
             },
             onFillAllDefaultPresets = {
-                soundboardEngine?.fillMomentPresets(onlyEmpty = false)
+                viewModel.fillMomentPresets(onlyEmpty = false)
                 assignPadTarget = null
             },
             onDismiss = { assignPadTarget = null },
@@ -800,7 +802,7 @@ internal fun FocusedPlayer(
         SoundPadEditSheet(
             slot = slot,
             onSave = { label, trimDb ->
-                soundboardEngine?.updateSlot(slot.bankIndex, slot.slotIndex, label, trimDb)
+                viewModel.updateSlot(slot.bankIndex, slot.slotIndex, label, trimDb)
                 editPadSlot = null
             },
             onReplaceAudio = {
@@ -808,7 +810,7 @@ internal fun FocusedPlayer(
                 assignPadTarget = slot.bankIndex to slot.slotIndex
             },
             onClearSlot = {
-                soundboardEngine?.clearSlot(slot.bankIndex, slot.slotIndex)
+                viewModel.clearSlot(slot.bankIndex, slot.slotIndex)
                 editPadSlot = null
             },
             onDismiss = { editPadSlot = null },

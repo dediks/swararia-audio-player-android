@@ -31,11 +31,22 @@ data class RemoteMdnsServer(
     val fingerprintPrefix: String?,
 )
 
+internal interface RemoteWifiTransportStore {
+    val status: StateFlow<RemoteWifiTransportStatus>
+    fun refreshStatus(): RemoteWifiTransportStatus
+}
+
+internal interface RemoteNsdDiscoveryStore {
+    val servers: StateFlow<List<RemoteMdnsServer>>
+    fun startDiscovery()
+    fun stopDiscovery()
+}
+
 /**
  * Binds client remote HTTPS connections explicitly to the Wi-Fi (or local-only peer) Network
  * so both server and client phones can keep cellular internet active without hijacking LAN routes.
  */
-class RemoteWifiTransport(context: Context) : RemoteHttpsConnectionOpener {
+class RemoteWifiTransport(context: Context) : RemoteHttpsConnectionOpener, RemoteWifiTransportStore {
     private val appContext = context.applicationContext
     private val cm = appContext.getSystemService(ConnectivityManager::class.java)
 
@@ -43,7 +54,7 @@ class RemoteWifiTransport(context: Context) : RemoteHttpsConnectionOpener {
     private var peerNetwork: Network? = null
 
     private val mutableStatus = MutableStateFlow(RemoteWifiTransportStatus())
-    val status: StateFlow<RemoteWifiTransportStatus> = mutableStatus.asStateFlow()
+    override val status: StateFlow<RemoteWifiTransportStatus> = mutableStatus.asStateFlow()
 
     private val monitorRegistered = AtomicBoolean(false)
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -77,7 +88,7 @@ class RemoteWifiTransport(context: Context) : RemoteHttpsConnectionOpener {
         refreshStatus()
     }
 
-    fun refreshStatus(): RemoteWifiTransportStatus {
+    override fun refreshStatus(): RemoteWifiTransportStatus {
         val manager = cm ?: return RemoteWifiTransportStatus().also { mutableStatus.value = it }
         @Suppress("DEPRECATION")
         val networks = runCatching { manager.allNetworks }.getOrNull().orEmpty()
@@ -177,7 +188,7 @@ class RemoteWifiTransport(context: Context) : RemoteHttpsConnectionOpener {
  * Registers and discovers `_swararia._tcp.` mDNS services on local Wi-Fi/Hotspot/P2P networks.
  * Advertises only a short TLS fingerprint prefix and port — never invite secrets or tokens.
  */
-class RemoteNsdCoordinator(context: Context) {
+class RemoteNsdCoordinator(context: Context) : RemoteNsdDiscoveryStore {
     private val appContext = context.applicationContext
     private val nsdManager by lazy { appContext.getSystemService(NsdManager::class.java) }
     private val lock = Any()
@@ -191,7 +202,7 @@ class RemoteNsdCoordinator(context: Context) {
     private val discoveredMap = LinkedHashMap<String, RemoteMdnsServer>()
 
     private val mutableServers = MutableStateFlow<List<RemoteMdnsServer>>(emptyList())
-    val servers: StateFlow<List<RemoteMdnsServer>> = mutableServers.asStateFlow()
+    override val servers: StateFlow<List<RemoteMdnsServer>> = mutableServers.asStateFlow()
 
     fun registerServer(port: Int, fingerprintBase64Url: String) {
         val manager = nsdManager ?: return
@@ -240,7 +251,7 @@ class RemoteNsdCoordinator(context: Context) {
         runCatching { manager.unregisterService(listener) }
     }
 
-    fun startDiscovery() {
+    override fun startDiscovery() {
         val manager = nsdManager ?: return
         synchronized(lock) {
             if (discoveryListener != null) return
@@ -278,7 +289,7 @@ class RemoteNsdCoordinator(context: Context) {
         }
     }
 
-    fun stopDiscovery() {
+    override fun stopDiscovery() {
         val manager = nsdManager ?: return
         val listener = synchronized(lock) {
             val current = discoveryListener

@@ -26,6 +26,7 @@ import com.google.common.util.concurrent.ListenableFuture
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 class MainActivity : ComponentActivity() {
     private lateinit var model: AppViewModel
+    private lateinit var brandSkinModel: BrandSkinViewModel
     private var pendingPermissionAction: (() -> Unit)? = null
     private var pendingLegacyStorageAction: (() -> Unit)? = null
     private var controller by mutableStateOf<MediaController?>(null)
@@ -120,11 +121,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         volumeControlStream = AudioManager.STREAM_MUSIC
         enableEdgeToEdge()
-        model = ViewModelProvider(this, AppViewModelFactory((application as SwarariaApp).container))[AppViewModel::class.java]
+        val container = (application as SwarariaApp).container
+        model = ViewModelProvider(this, AppViewModelFactory(container))[AppViewModel::class.java]
+        brandSkinModel = ViewModelProvider(this, BrandSkinViewModelFactory(container))[BrandSkinViewModel::class.java]
         connectPlayer()
         setContent {
-            val container = (application as SwarariaApp).container
-            val brandSkinConfig by container.brandSkinManager.state.collectAsStateWithLifecycle()
+            val brandSkinConfig by brandSkinModel.state.collectAsStateWithLifecycle()
+            val brandSkinStudioState by brandSkinModel.studioState.collectAsStateWithLifecycle()
             AudioTheme(skinConfig = brandSkinConfig) {
                 val tracks by model.tracks.collectAsStateWithLifecycle()
                 val playlists by model.playlists.collectAsStateWithLifecycle()
@@ -220,6 +223,8 @@ class MainActivity : ComponentActivity() {
                         model.setPlaybackFadeOutMs(fadeOutMs)
                         syncFadeSettingsToService(playbackSettings.copy(fadeOutMs = fadeOutMs))
                     },
+                    brandSkinActions = brandSkinModel.actions,
+                    brandSkinStudioState = brandSkinStudioState,
                     ytMusicActions = YoutubeMusicAccountActions(
                         onCompleteWebViewSignIn = { www, music -> model.connectYtMusicWebView(www, music) },
                         onImportCookiesText = { raw -> model.importYtMusicCookies(raw) },

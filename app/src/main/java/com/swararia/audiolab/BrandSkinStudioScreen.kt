@@ -33,51 +33,35 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
 
 @Composable
 internal fun BrandSkinStudioScreen(
     onBack: () -> Unit,
     onOpenStageRta: () -> Unit,
     modifier: Modifier = Modifier,
+    studioState: BrandSkinStudioUiState = BrandSkinStudioUiState(),
+    brandSkinActions: BrandSkinUiActions = BrandSkinUiActions(),
 ) {
-    val context = LocalContext.current
-    val brandManager = remember(context) {
-        (context.applicationContext as? SwarariaApp)?.container?.brandSkinManager
-    }
     val foh = FohTheme.colors
     val brand = FohTheme.brand
     val signal by rememberLocalAudioSignal()
-    val scope = rememberCoroutineScope()
-
-    var importingLogo by remember { mutableStateOf(false) }
-    var importError by remember { mutableStateOf<String?>(null) }
+    val importingLogo = studioState.importingLogo
+    val importError = studioState.importError
 
     val logoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
-        if (uri == null || brandManager == null) return@rememberLauncherForActivityResult
-        importingLogo = true
-        importError = null
-        scope.launch {
-            brandManager.importLogoFromUri(uri)
-                .onFailure { importError = it.message ?: "Logo gagal diproses." }
-            importingLogo = false
-        }
+        if (uri == null) return@rememberLauncherForActivityResult
+        brandSkinActions.onImportLogoUri(uri.toString())
     }
 
     val liveBass = if (!signal.muted && signal.active) {
@@ -203,10 +187,7 @@ internal fun BrandSkinStudioScreen(
                     }
 
                     OutlinedButton(
-                        onClick = {
-                            importError = null
-                            brandManager?.resetAllBranding()
-                        },
+                        onClick = brandSkinActions.onResetAllBranding,
                         enabled = BrandSkinRules.hasCustomBrand(brand),
                         shape = RoundedCornerShape(14.dp),
                         border = BorderStroke(1.dp, foh.borderSubtle),
@@ -236,7 +217,7 @@ internal fun BrandSkinStudioScreen(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = brand.rentalName,
-                    onValueChange = { brandManager?.setRentalName(it) },
+                    onValueChange = brandSkinActions.onSetRentalName,
                     label = { Text("Nama Rental") },
                     placeholder = { Text("RAJA SOUND PRO") },
                     singleLine = true,
@@ -246,7 +227,7 @@ internal fun BrandSkinStudioScreen(
                 )
                 OutlinedTextField(
                     value = brand.eventTag,
-                    onValueChange = { brandManager?.setEventTag(it) },
+                    onValueChange = brandSkinActions.onSetEventTag,
                     label = { Text("Tag Event / Panggung") },
                     placeholder = { Text("MAIN STAGE · FOH") },
                     singleLine = true,
@@ -271,7 +252,7 @@ internal fun BrandSkinStudioScreen(
                     FohSkinPreset.entries.forEach { preset ->
                         val active = !brand.useCustomLogoAccent && brand.presetId == preset.id
                         Surface(
-                            onClick = { brandManager?.selectPreset(preset.id) },
+                            onClick = { brandSkinActions.onSelectPreset(preset.id) },
                             shape = RoundedCornerShape(14.dp),
                             color = if (active) foh.safeBg else foh.surfaceCard,
                             border = BorderStroke(
@@ -305,7 +286,7 @@ internal fun BrandSkinStudioScreen(
 
                 if (brand.customAccentArgb != null) {
                     Surface(
-                        onClick = { brandManager?.selectCustomLogoAccent() },
+                        onClick = brandSkinActions.onSelectLogoAccent,
                         shape = RoundedCornerShape(14.dp),
                         color = if (brand.useCustomLogoAccent) foh.safeBg else foh.surfaceCard,
                         border = BorderStroke(
@@ -352,12 +333,12 @@ internal fun BrandSkinStudioScreen(
                     StudioSwitchRow(
                         label = "True Black OLED",
                         checked = brand.oledTrueBlack,
-                        onCheckedChange = { brandManager?.setOledTrueBlack(it) },
+                        onCheckedChange = brandSkinActions.onSetOledTrueBlack,
                     )
                     StudioSwitchRow(
                         label = "Kilau Metallic & Aura Bass",
                         checked = brand.prestigeAnimations,
-                        onCheckedChange = { brandManager?.setPrestigeAnimations(it) },
+                        onCheckedChange = brandSkinActions.onSetPrestigeAnimations,
                     )
                 }
             }

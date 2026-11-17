@@ -78,6 +78,23 @@ data class RemoteWifiPeerState(
     override fun toString(): String = "RemoteWifiPeerState(mode=$serverPeerMode, ssid=$serverSsid, p2p=$p2pConnected)"
 }
 
+internal interface RemoteWifiPeerStore {
+    val state: StateFlow<RemoteWifiPeerState>
+    fun requiredWifiPeerPermissions(): Array<String>
+    fun hasWifiPeerPermissions(): Boolean
+    fun startLocalOnlyHotspot()
+    fun stopLocalOnlyHotspot()
+    fun startWifiDirectGroup()
+    fun stopWifiDirectGroup()
+    fun handleClientQrInput(rawText: String, onDirectPairing: (String) -> Unit)
+    fun confirmLegacyWifiJoin(onDirectPairing: (String) -> Unit)
+    fun clearPendingLegacyWifiJoin()
+    fun releaseClientPeerWifiNetwork()
+    fun discoverWifiDirectPeers()
+    fun connectWifiDirectPeer(deviceAddress: String)
+    fun disconnectWifiDirectClient()
+}
+
 /**
  * Coordinates Local-Only Hotspot (`startLocalOnlyHotspot`, API 26+), `WifiNetworkSpecifier`
  * peer binding (API 29+), and Wi-Fi Direct (`WifiP2pManager`, API 26+) for FOH LAN connections
@@ -87,7 +104,7 @@ class RemoteWifiPeerController(
     context: Context,
     private val wifiTransport: RemoteWifiTransport,
     private val onInterfacesMayHaveChanged: () -> Unit,
-) {
+) : RemoteWifiPeerStore {
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -105,7 +122,7 @@ class RemoteWifiPeerController(
     private var p2pOwnerRole = false
 
     private val mutableState = MutableStateFlow(RemoteWifiPeerState())
-    val state: StateFlow<RemoteWifiPeerState> = mutableState.asStateFlow()
+    override val state: StateFlow<RemoteWifiPeerState> = mutableState.asStateFlow()
 
     private val p2pReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -128,14 +145,14 @@ class RemoteWifiPeerController(
         }
     }
 
-    fun requiredWifiPeerPermissions(): Array<String> =
+    override fun requiredWifiPeerPermissions(): Array<String> =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES)
         } else {
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         }
 
-    fun hasWifiPeerPermissions(): Boolean =
+    override fun hasWifiPeerPermissions(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(appContext, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
         } else {
@@ -157,7 +174,7 @@ class RemoteWifiPeerController(
     // --- Server Mode: Local-Only Hotspot (API 26+) ---
 
     @SuppressLint("MissingPermission")
-    fun startLocalOnlyHotspot() {
+    override fun startLocalOnlyHotspot() {
         val wm = wifiManager ?: run {
             mutableState.update { it.copy(serverPeerError = "Perangkat tidak memiliki adaptor Wi-Fi.") }
             return
@@ -263,7 +280,7 @@ class RemoteWifiPeerController(
         }
     }
 
-    fun stopLocalOnlyHotspot() {
+    override fun stopLocalOnlyHotspot() {
         stopLocalOnlyHotspotInternal(notifyUi = true)
         onInterfacesMayHaveChanged()
     }
@@ -313,7 +330,7 @@ class RemoteWifiPeerController(
     // --- Server Mode: Wi-Fi Direct Group Owner (API 26+) ---
 
     @SuppressLint("MissingPermission")
-    fun startWifiDirectGroup() {
+    override fun startWifiDirectGroup() {
         val manager = p2pManager ?: run {
             mutableState.update { it.copy(serverPeerError = "Perangkat tidak mendukung Wi-Fi Direct.") }
             return
@@ -382,7 +399,7 @@ class RemoteWifiPeerController(
         )
     }
 
-    fun stopWifiDirectGroup() {
+    override fun stopWifiDirectGroup() {
         stopWifiDirectServerGroupInternal()
         onInterfacesMayHaveChanged()
     }
@@ -417,7 +434,7 @@ class RemoteWifiPeerController(
 
     // --- Client Mode: Smart QR Auto-Join (`WifiNetworkSpecifier` API 29+ / Guide API 26-28) ---
 
-    fun handleClientQrInput(
+    override fun handleClientQrInput(
         rawText: String,
         onDirectPairing: (String) -> Unit,
     ) {
@@ -570,18 +587,18 @@ class RemoteWifiPeerController(
         }
     }
 
-    fun confirmLegacyWifiJoin(onDirectPairing: (String) -> Unit) {
+    override fun confirmLegacyWifiJoin(onDirectPairing: (String) -> Unit) {
         val pending = mutableState.value.pendingLegacyWifiJoin ?: return
         wifiTransport.refreshStatus()
         clearPendingLegacyWifiJoin()
         onDirectPairing(pending.rawPairing)
     }
 
-    fun clearPendingLegacyWifiJoin() {
+    override fun clearPendingLegacyWifiJoin() {
         mutableState.update { it.copy(pendingLegacyWifiJoin = null) }
     }
 
-    fun releaseClientPeerWifiNetwork() {
+    override fun releaseClientPeerWifiNetwork() {
         val callback = peerNetworkCallback
         peerNetworkCallback = null
         if (callback != null) {
@@ -601,7 +618,7 @@ class RemoteWifiPeerController(
     // --- Client Mode: Wi-Fi Direct Peer Discovery & Connect (API 26+) ---
 
     @SuppressLint("MissingPermission")
-    fun discoverWifiDirectPeers() {
+    override fun discoverWifiDirectPeers() {
         val manager = p2pManager ?: run {
             mutableState.update { it.copy(p2pError = "Perangkat tidak mendukung Wi-Fi Direct.") }
             return
@@ -647,7 +664,7 @@ class RemoteWifiPeerController(
     }
 
     @SuppressLint("MissingPermission")
-    fun connectWifiDirectPeer(deviceAddress: String) {
+    override fun connectWifiDirectPeer(deviceAddress: String) {
         val manager = p2pManager ?: return
         val channel = ensureP2pChannel(manager) ?: return
         if (!hasWifiPeerPermissions()) {
@@ -684,7 +701,7 @@ class RemoteWifiPeerController(
         )
     }
 
-    fun disconnectWifiDirectClient() {
+    override fun disconnectWifiDirectClient() {
         val manager = p2pManager
         val channel = p2pChannel
         if (manager != null && channel != null && !p2pOwnerRole) {

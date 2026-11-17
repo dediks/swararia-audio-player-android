@@ -45,6 +45,8 @@ fun SwarariaUi(
     onSetPlaybackFadeInMs: (Long) -> Unit = {},
     onSetPlaybackFadeOutMs: (Long) -> Unit = {},
     ytMusicActions: YoutubeMusicAccountActions = YoutubeMusicAccountActions(),
+    brandSkinActions: BrandSkinUiActions = BrandSkinUiActions(),
+    brandSkinStudioState: BrandSkinStudioUiState = BrandSkinStudioUiState(),
 ) {
     var activeTab by rememberSaveable { mutableStateOf(MainRootTab.PUSTAKA) }
     var pustakaSubRoute by rememberSaveable { mutableStateOf(PustakaSubRoute.LIBRARY) }
@@ -71,10 +73,6 @@ fun SwarariaUi(
     val queueBusy = upgrade.operationBusy || search.busy || searchActions.preview.loading
     val searchBusyBlocked = ingest.engineBusy || queueBusy
     val onlineBusy = ingest.busy || queueBusy
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val brandManager = remember(context) {
-        (context.applicationContext as? SwarariaApp)?.container?.brandSkinManager
-    }
     val brand = FohTheme.brand
     val view = LocalView.current
     val keepWakeLock = playerKeepScreenOn && (((activeTab == MainRootTab.LIVE_DECK || activeTab == MainRootTab.STAGE_RTA) && !previewActive) || playback.wantsPlay)
@@ -103,7 +101,7 @@ fun SwarariaUi(
             moreToolRoute = MoreToolRoute.HUB
         }
         if (target != MainRootTab.STAGE_RTA && brand.cleanStageMode) {
-            brandManager?.setCleanStageMode(false)
+            brandSkinActions.onSetCleanStageMode(false)
         }
         downloadsSheetOpen = false
         activeTab = target
@@ -196,7 +194,7 @@ fun SwarariaUi(
     ) {
         when {
             downloadsSheetOpen -> downloadsSheetOpen = false
-            stageFullscreen -> brandManager?.setCleanStageMode(false)
+            stageFullscreen -> brandSkinActions.onSetCleanStageMode(false)
             activeTab == MainRootTab.PUSTAKA && pustakaSubRoute != PustakaSubRoute.LIBRARY -> {
                 searchActions.stopPreview()
                 pustakaSubRoute = PustakaSubRoute.LIBRARY
@@ -351,6 +349,7 @@ fun SwarariaUi(
                             onDelete = { activeModal = SwarariaModal.DeleteTrack(it) },
                             onDeleteBatch = { selected -> activeModal = SwarariaModal.DeleteBatch(selected) },
                             onImport = { if (!onlineBusy) onImport() },
+                            onDismissBrandWelcome = brandSkinActions.onDismissWelcomeBanner,
                         )
                     }
                 }
@@ -380,6 +379,7 @@ fun SwarariaUi(
                     controller = controller,
                     onClose = { navigateTab(MainRootTab.LIVE_DECK) },
                     onOpenBrandStudio = openBrandStudio,
+                    brandSkinActions = brandSkinActions,
                     modifier = contentModifier,
                     showCloseButton = false,
                 )
@@ -399,6 +399,8 @@ fun SwarariaUi(
                     onOpenSettings = { activeModal = SwarariaModal.EngineSettings },
                     onOpenRenameHistory = { activeModal = SwarariaModal.RenameHistory },
                     onOpenStageRta = { navigateTab(MainRootTab.STAGE_RTA) },
+                    brandSkinActions = brandSkinActions,
+                    brandSkinStudioState = brandSkinStudioState,
                     localAudioBanner = {
                         if (!previewActive && playback.mediaId != null) {
                             RemoteLocalAudioPill(

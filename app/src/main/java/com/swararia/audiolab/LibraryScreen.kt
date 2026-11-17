@@ -95,6 +95,7 @@ internal fun LibraryPage(
     onDelete: (AudioTrack) -> Unit,
     onDeleteBatch: (List<AudioTrack>) -> Unit = {},
     onImport: () -> Unit,
+    onDismissBrandWelcome: () -> Unit = {},
 ) {
     val state = rememberLibraryBrowserState(tracks = tracks, playlists = playlists)
     val section = state.section
@@ -116,12 +117,8 @@ internal fun LibraryPage(
     val visiblePlaylists = state.visiblePlaylists
     val groupedTracks = state.groupedTracks
     val activeTrackId = remember(currentId) { currentId?.toLongOrNull() }
-    val context = androidx.compose.ui.platform.LocalContext.current
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     val gridColumns = remember(screenWidthDp) { UiPresentation.songGridColumnCount(screenWidthDp) }
-    val brandManager = remember(context) {
-        (context.applicationContext as? SwarariaApp)?.container?.brandSkinManager
-    }
     val brand = FohTheme.brand
     val rowVerticalSpacing = if (viewType == LibrarySongViewType.COMPACT && !state.reorderMode) 5.dp else 8.dp
 
@@ -167,7 +164,7 @@ internal fun LibraryPage(
                                 WelcomeBrandBanner(
                                     brand = brand,
                                     onSetup = onOpenBrandStudio,
-                                    onDismiss = { brandManager?.dismissWelcomeBanner() },
+                                    onDismiss = onDismissBrandWelcome,
                                 )
                             }
                         } else {
