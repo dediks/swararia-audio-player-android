@@ -799,6 +799,33 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawWrappedSegment(
     )
 }
 
+/** Shared operation progress bar: determinate shimmer once above 1%, indeterminate glide otherwise. */
+@Composable
+internal fun FohOperationProgressBar(
+    progress: Float?,
+    modifier: Modifier = Modifier,
+    color: Color = FohTheme.colors.safeAccent,
+    trackColor: Color = FohTheme.colors.surfaceDeep,
+    height: Dp = 4.dp,
+) {
+    if (progress != null && progress > 0.01f) {
+        FohDeterminateShimmerBar(
+            progress = progress,
+            modifier = modifier,
+            color = color,
+            trackColor = trackColor,
+            height = height,
+        )
+    } else {
+        FohIndeterminateBar(
+            modifier = modifier,
+            color = color,
+            trackColor = trackColor,
+            height = height,
+        )
+    }
+}
+
 /** Compact 18 dp spinner shared by status banners in Library, Search, and Downloads. */
 @Composable
 internal fun CircularProgressIndicatorCompact() {

@@ -137,51 +137,49 @@ class AppViewModel(
         remoteServer?.denyOrRevokeDevice(deviceId, deny)
     }
     fun clearServerError() { remoteServer?.clearError() }
-    fun connectYtMusicWebView(wwwCookies: String?, musicCookies: String?) {
+    private inline fun launchYtMusicAction(
+        reportError: Boolean = true,
+        fallbackError: String? = null,
+        crossinline block: suspend YoutubeMusicAccountManager.() -> String?,
+    ) {
         val manager = ytMusicAccount ?: return
         viewModelScope.launch {
-            runCatching { manager.connectFromWebView(wwwCookies, musicCookies) }
-                .onSuccess { state ->
-                    message(state.statusNote ?: "Akun YouTube Music terhubung.")
-                }
+            runCatching { manager.block() }
+                .onSuccess { note -> note?.let(::message) }
                 .onFailure { failure ->
-                    message(failure.message ?: "Gagal menyimpan sesi YouTube Music.")
+                    if (reportError) message(failure.message ?: fallbackError ?: return@onFailure)
                 }
         }
     }
-    fun importYtMusicCookies(rawText: String) {
-        val manager = ytMusicAccount ?: return
-        viewModelScope.launch {
-            runCatching { manager.connectFromNetscapeText(rawText) }
-                .onSuccess { state ->
-                    message(state.statusNote ?: "Cookies YouTube Music tersimpan terenkripsi.")
-                }
-                .onFailure { failure ->
-                    message(failure.message ?: "Gagal mengimpor cookies YouTube Music.")
-                }
-        }
+
+    fun connectYtMusicWebView(wwwCookies: String?, musicCookies: String?) = launchYtMusicAction(
+        fallbackError = "Gagal menyimpan sesi YouTube Music.",
+    ) {
+        connectFromWebView(wwwCookies, musicCookies).statusNote ?: "Akun YouTube Music terhubung."
     }
-    fun setYtMusicEnabled(enabled: Boolean) {
-        val manager = ytMusicAccount ?: return
-        viewModelScope.launch {
-            runCatching { manager.setEnabledForDownloads(enabled) }
-                .onFailure { failure -> message(failure.message ?: "Gagal mengubah setelan akun.") }
-        }
+
+    fun importYtMusicCookies(rawText: String) = launchYtMusicAction(
+        fallbackError = "Gagal mengimpor cookies YouTube Music.",
+    ) {
+        connectFromNetscapeText(rawText).statusNote ?: "Cookies YouTube Music tersimpan terenkripsi."
     }
-    fun verifyYtMusicAccount() {
-        val manager = ytMusicAccount ?: return
-        viewModelScope.launch {
-            val state = runCatching { manager.verifyAccount() }.getOrNull()
-            if (state?.statusNote != null) message(state.statusNote)
-        }
+
+    fun setYtMusicEnabled(enabled: Boolean) = launchYtMusicAction(
+        fallbackError = "Gagal mengubah setelan akun.",
+    ) {
+        setEnabledForDownloads(enabled)
+        null
     }
-    fun disconnectYtMusic() {
-        val manager = ytMusicAccount ?: return
-        viewModelScope.launch {
-            runCatching { manager.disconnect() }
-                .onSuccess { message("Akun YouTube Music diputuskan & cookie dihapus.") }
-                .onFailure { failure -> message(failure.message ?: "Gagal memutus akun.") }
-        }
+
+    fun verifyYtMusicAccount() = launchYtMusicAction(reportError = false) {
+        verifyAccount().statusNote
+    }
+
+    fun disconnectYtMusic() = launchYtMusicAction(
+        fallbackError = "Gagal memutus akun.",
+    ) {
+        disconnect()
+        "Akun YouTube Music diputuskan & cookie dihapus."
     }
     fun canDispatchOrAppendDownload(): Boolean =
         !search.value.busy && !preview.value.loading && !preview.value.canceling && !organizerBusy.value && !operations.busy.value
@@ -200,44 +198,58 @@ class AppViewModel(
     fun setPlaybackFadeOutMs(durationMs: Long) {
         playbackPreferences?.setFadeOutMs(durationMs)
     }
-    fun enqueueDownloads(requests: List<DownloadRequest>, authorized: Boolean, start: (String) -> Unit) {
-        if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
-        operations.enqueueOrAppend(requests, authorized) { batch ->
-            if (canDownloadOnNetworkNow()) start(batch)
-            else message("Mode Hanya Wi-Fi aktif. Disimpan di antrean hingga Wi-Fi terhubung.")
+
+    private inline fun ifCanDispatchDownloads(action: () -> Unit) {
+        if (!canDispatchOrAppendDownload()) {
+            message("Tunggu proses yang sedang berjalan.")
+            return
         }
+        action()
     }
-    fun retryDownloads(batchId: String, start: (String) -> Unit) {
-        if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
+
+    private fun dispatchWhenNetworkReady(wifiNotice: String, start: (String) -> Unit): (String) -> Unit = { batch ->
+        if (canDownloadOnNetworkNow()) start(batch) else message(wifiNotice)
+    }
+
+    fun enqueueDownloads(requests: List<DownloadRequest>, authorized: Boolean, start: (String) -> Unit) =
+        ifCanDispatchDownloads {
+            operations.enqueueOrAppend(
+                requests,
+                authorized,
+                dispatchWhenNetworkReady("Mode Hanya Wi-Fi aktif. Disimpan di antrean hingga Wi-Fi terhubung.", start),
+            )
+        }
+
+    fun retryDownloads(batchId: String, start: (String) -> Unit) = ifCanDispatchDownloads {
         if (ingest.value.busy && ingest.value.batchId != null) {
             operations.retry(batchId) { start(it) }
         } else {
-            operations.retry(batchId) { batch ->
-                if (canDownloadOnNetworkNow()) start(batch)
-                else message("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.")
-            }
+            operations.retry(
+                batchId,
+                start = dispatchWhenNetworkReady("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.", start),
+            )
         }
     }
-    fun retryDownloadJob(jobId: Long, start: (String) -> Unit) {
-        if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
-        operations.requeueJob(jobId, allowAppend = true) { batch ->
-            if (canDownloadOnNetworkNow()) start(batch)
-            else message("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.")
-        }
+
+    fun retryDownloadJob(jobId: Long, start: (String) -> Unit) = ifCanDispatchDownloads {
+        operations.requeueJob(
+            jobId,
+            allowAppend = true,
+            start = dispatchWhenNetworkReady("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.", start),
+        )
     }
-    fun requeueDownloadJobs(jobIds: List<Long>, start: (String) -> Unit) {
-        if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
-        operations.requeueJobs(jobIds) { batch ->
-            if (canDownloadOnNetworkNow()) start(batch)
-            else message("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.")
-        }
+
+    fun requeueDownloadJobs(jobIds: List<Long>, start: (String) -> Unit) = ifCanDispatchDownloads {
+        operations.requeueJobs(
+            jobIds,
+            start = dispatchWhenNetworkReady("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.", start),
+        )
     }
-    fun retryAllFailedDownloads(start: (String) -> Unit) {
-        if (!canDispatchOrAppendDownload()) { message("Tunggu proses yang sedang berjalan."); return }
-        operations.retryAllFailed { batch ->
-            if (canDownloadOnNetworkNow()) start(batch)
-            else message("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.")
-        }
+
+    fun retryAllFailedDownloads(start: (String) -> Unit) = ifCanDispatchDownloads {
+        operations.retryAllFailed(
+            start = dispatchWhenNetworkReady("Mode Hanya Wi-Fi aktif. Siap diunduh saat Wi-Fi terhubung.", start),
+        )
     }
     fun continueDownloadQueue(start: (String) -> Unit) {
         if (!canStartExclusiveIngestOperation()) { message("Tunggu proses yang sedang berjalan."); return }

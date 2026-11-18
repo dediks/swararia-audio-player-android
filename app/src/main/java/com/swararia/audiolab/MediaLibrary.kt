@@ -3,10 +3,6 @@ package com.swararia.audiolab
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
-import android.media.AudioFormat
-import android.media.MediaExtractor
-import android.media.MediaFormat
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -51,36 +47,8 @@ class MediaLibrary(private val context: Context, private val database: AudioData
     private fun isLegacyUri(value: String): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && ManagedCopyRules.validLegacyFileUri(value)
 
-    private data class ExtractedAudioMetadata(
-        val durationMs: Long?,
-        val artist: String?,
-        val album: String?,
-        val genre: String?,
-    )
-
-    private fun inspectAudioMetadata(uri: Uri): ExtractedAudioMetadata = runCatching {
-        val reader = MediaMetadataRetriever()
-        try {
-            if ("file".equals(uri.scheme, ignoreCase = true) && uri.path != null) {
-                reader.setDataSource(uri.path)
-            } else {
-                reader.setDataSource(context, uri)
-            }
-            val durationMs = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-            val artist = LibraryRules.sanitizedTag(reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST), 120)
-                ?: LibraryRules.sanitizedTag(reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST), 120)
-            val album = LibraryRules.sanitizedTag(reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM), 120)
-            val genre = LibraryRules.sanitizedTag(reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE), 60)
-            ExtractedAudioMetadata(
-                durationMs = durationMs,
-                artist = artist,
-                album = album,
-                genre = genre,
-            )
-        } finally {
-            reader.release()
-        }
-    }.getOrDefault(ExtractedAudioMetadata(null, null, null, null))
+    private fun inspectAudioMetadata(uri: Uri): ExtractedAudioMetadata =
+        AudioFileInspector.inspectAudioMetadata(context, uri)
 
     private val artwork = ArtworkStore(context)
     private val pendingDownloadMetadata = java.util.concurrent.ConcurrentHashMap<Long, DownloadedAudioMetadata>()
@@ -184,17 +152,8 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         }
     }
 
-    private fun embeddedArtwork(uri: Uri): String? = runCatching {
-        val reader = MediaMetadataRetriever()
-        try {
-            if ("file".equals(uri.scheme, ignoreCase = true) && uri.path != null) {
-                reader.setDataSource(uri.path)
-            } else {
-                reader.setDataSource(context, uri)
-            }
-            reader.embeddedPicture?.let(artwork::cacheEmbedded)
-        } finally { reader.release() }
-    }.getOrNull()
+    private fun embeddedArtwork(uri: Uri): String? =
+        AudioFileInspector.extractEmbeddedArtwork(context, uri, artwork)
 
     override suspend fun rename(trackId: Long, requestedTitle: String): String = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
@@ -208,11 +167,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                     database.tracks().insertRename(RenameRecord(trackId = track.id, fromName = oldName, toName = changed))
                 }
             } catch (failure: Throwable) {
-                val restored = withContext(NonCancellable + Dispatchers.IO) {
-                    legacyStorage.restoreRename(newUri, oldName) != null
-                }
-                if (!restored) throw IllegalStateException("Nama file berubah, tetapi penyimpanan library gagal. Periksa file di Music/SwarariaAudioLab sebelum mengulang.", failure)
-                throw failure
+                restoreAfterDatabaseFailure(failure) { legacyStorage.restoreRename(newUri, oldName) != null }
             }
             return@withLock changed
         }
@@ -228,7 +183,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                 database.tracks().insertRename(RenameRecord(trackId = track.id, fromName = oldName, toName = changed))
             }
         } catch (failure: Throwable) {
-            restoreAfterDatabaseFailure(uri, oldName, failure)
+            restoreAfterDatabaseFailure(failure) { changeName(uri, oldName) == oldName }
         }
         changed
         }
@@ -247,11 +202,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                     database.tracks().removeRename(record.id)
                 }
             } catch (failure: Throwable) {
-                val reverted = withContext(NonCancellable + Dispatchers.IO) {
-                    legacyStorage.restoreRename(restoredUri, record.toName) != null
-                }
-                if (!reverted) throw IllegalStateException("Nama file berubah, tetapi penyimpanan library gagal. Periksa file di Music/SwarariaAudioLab sebelum mengulang.", failure)
-                throw failure
+                restoreAfterDatabaseFailure(failure) { legacyStorage.restoreRename(restoredUri, record.toName) != null }
             }
             return@withLock restored
         }
@@ -265,7 +216,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                 database.tracks().removeRename(record.id)
             }
         } catch (failure: Throwable) {
-            restoreAfterDatabaseFailure(uri, record.toName, failure)
+            restoreAfterDatabaseFailure(failure) { changeName(uri, record.toName) == record.toName }
         }
         restored
         }
@@ -290,8 +241,8 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         return actualName(uri)
     }
 
-    private suspend fun restoreAfterDatabaseFailure(uri: Uri, oldName: String, failure: Throwable): Nothing {
-        val restored = withContext(NonCancellable + Dispatchers.IO) { runCatching { changeName(uri, oldName) == oldName }.getOrDefault(false) }
+    private suspend fun restoreAfterDatabaseFailure(failure: Throwable, rollback: () -> Boolean): Nothing {
+        val restored = withContext(NonCancellable + Dispatchers.IO) { runCatching { rollback() }.getOrDefault(false) }
         if (!restored) throw IllegalStateException("Nama file berubah, tetapi penyimpanan library gagal. Periksa file di Music/SwarariaAudioLab sebelum mengulang.", failure)
         throw failure
     }
@@ -382,7 +333,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             val artist = probed.artist ?: LibraryRules.sanitizedTag(fallback?.artist, 120)
             val album = probed.album ?: LibraryRules.sanitizedTag(fallback?.album, 120)
             val genre = probed.genre ?: LibraryRules.sanitizedTag(fallback?.genre, 60)
-            val digest = if (isManagedUri(finalUri)) computeUriSha256(parsedUri) else null
+            val digest = if (isManagedUri(finalUri)) AudioFileInspector.computeUriSha256(resolver, parsedUri) else null
             val checkedAt = System.currentTimeMillis()
             val trackId = database.withTransaction {
                 val job = checkNotNull(database.downloads().find(id))
@@ -487,7 +438,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             title.append(part); byteCount += size
         }
         val name = LibraryRules.renamedDisplayName("audio.$extension", title.toString().ifBlank { "Audio" })
-        val (sha256, sizeBytes) = computeUriSha256AndSize(source)
+        val (sha256, sizeBytes) = AudioFileInspector.computeUriSha256AndSize(resolver, source)
             ?: error("File pilihan tidak dapat dibaca.")
         require(sizeBytes > 0L) { "Sumber audio kosong; tidak ada file yang ditambahkan." }
         findTrackBySha256AndSize(sha256, sizeBytes)?.let { existing ->
@@ -555,7 +506,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                 }
             }
             require(copied > 0) { "Sumber audio kosong; tidak ada file yang ditambahkan." }
-            val actualSha256 = shaHex(digest.digest())
+            val actualSha256 = AudioFileInspector.shaHex(digest.digest())
             if (expectedSha256 != null) {
                 require(actualSha256.equals(expectedSha256, ignoreCase = true)) { "Checksum audio tidak cocok." }
             }
@@ -698,7 +649,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
                 currentCoroutineContext().ensureActive()
                 val uri = runCatching { Uri.parse(track.uri) }.getOrNull() ?: continue
                 if (!isManagedUri(track.uri)) continue
-                val digest = computeUriSha256(uri) ?: continue
+                val digest = AudioFileInspector.computeUriSha256(resolver, uri) ?: continue
                 database.tracks().updateSha256(track.id, digest)
             }
         }
@@ -728,7 +679,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         val cleanDisplayName = LibraryRules.renamedDisplayName("audio.$ext", rawBase.ifBlank { "Audio.$ext" })
         val cleanPlaylist = playlistName?.let(LibraryRules::validatedPlaylistName)
 
-        validateAudioFileContent(stagedFile)
+        AudioFileInspector.validateAudioFileContent(stagedFile)
 
         // Check existing track by SHA-256 + byte size first; avoid unnecessary write outside lock.
         val preExisting = findTrackBySha256AndSize(cleanHex, stagedFile.length())
@@ -796,94 +747,7 @@ class MediaLibrary(private val context: Context, private val database: AudioData
 
     override suspend fun inspectTechnicalDetails(track: AudioTrack): TrackTechnicalDetails? = withContext(Dispatchers.IO) {
         if (!isManagedUri(track.uri) && !isLegacyUri(track.uri)) return@withContext null
-        val uri = Uri.parse(track.uri)
-        var mimeType: String? = null
-        var sampleRateHz: Int? = null
-        var channelCount: Int? = null
-        var extractorBitrateBps: Long? = null
-        var bitsPerSample: Int? = null
-        var durationMs: Long? = null
-
-        val extractor = MediaExtractor()
-        try {
-            if ("file".equals(uri.scheme, ignoreCase = true) && uri.path != null) {
-                extractor.setDataSource(uri.path!!)
-            } else {
-                extractor.setDataSource(context, uri, null)
-            }
-            for (idx in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(idx)
-                val mime = if (format.containsKey(MediaFormat.KEY_MIME)) format.getString(MediaFormat.KEY_MIME) else null
-                if (mime?.startsWith("audio/", ignoreCase = true) == true) {
-                    mimeType = mime
-                    if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
-                        sampleRateHz = format.getInteger(MediaFormat.KEY_SAMPLE_RATE).takeIf { it > 0 }
-                    }
-                    if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
-                        channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).takeIf { it > 0 }
-                    }
-                    if (format.containsKey(MediaFormat.KEY_BIT_RATE)) {
-                        extractorBitrateBps = format.getInteger(MediaFormat.KEY_BIT_RATE).toLong().takeIf { it > 0L }
-                    }
-                    if (format.containsKey(MediaFormat.KEY_DURATION)) {
-                        durationMs = (format.getLong(MediaFormat.KEY_DURATION) / 1000L).takeIf { it > 0L }
-                    }
-                    if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
-                        bitsPerSample = when (format.getInteger(MediaFormat.KEY_PCM_ENCODING)) {
-                            AudioFormat.ENCODING_PCM_8BIT -> 8
-                            AudioFormat.ENCODING_PCM_16BIT -> 16
-                            AudioFormat.ENCODING_PCM_24BIT_PACKED -> 24
-                            AudioFormat.ENCODING_PCM_32BIT,
-                            AudioFormat.ENCODING_PCM_FLOAT,
-                            -> 32
-                            else -> null
-                        }
-                    }
-                    break
-                }
-            }
-        } catch (_: Exception) {
-        } finally {
-            runCatching { extractor.release() }
-        }
-
-        var retrieverBitrateBps: Long? = null
-        var retrieverDurationMs: Long? = null
-        var retrieverMime: String? = null
-        var retrieverSampleRate: Int? = null
-        var retrieverBitsPerSample: Int? = null
-        val reader = MediaMetadataRetriever()
-        try {
-            if ("file".equals(uri.scheme, ignoreCase = true) && uri.path != null) {
-                reader.setDataSource(uri.path)
-            } else {
-                reader.setDataSource(context, uri)
-            }
-            retrieverBitrateBps = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
-                ?.toLongOrNull()?.takeIf { it > 0L }
-            retrieverDurationMs = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull()?.takeIf { it > 0L }
-            retrieverMime = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
-                ?.trim()?.takeIf { it.isNotEmpty() }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                retrieverSampleRate = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)
-                    ?.toIntOrNull()?.takeIf { it > 0 }
-                retrieverBitsPerSample = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITS_PER_SAMPLE)
-                    ?.toIntOrNull()?.takeIf { it > 0 }
-            }
-        } catch (_: Exception) {
-        } finally {
-            runCatching { reader.release() }
-        }
-
-        TrackTechnicalDetails(
-            mimeType = mimeType ?: retrieverMime,
-            bitrateBps = extractorBitrateBps ?: retrieverBitrateBps,
-            sampleRateHz = sampleRateHz ?: retrieverSampleRate,
-            channelCount = channelCount,
-            bitsPerSample = bitsPerSample ?: retrieverBitsPerSample,
-            durationMs = durationMs ?: retrieverDurationMs ?: track.durationMs,
-        )
+        AudioFileInspector.inspectTechnicalDetails(context, Uri.parse(track.uri), track.durationMs)
     }
 
     private suspend fun ensurePlaylistAndLink(playlistName: String, trackId: Long): Long = mutationMutex.withLock {
@@ -918,74 +782,6 @@ class MediaLibrary(private val context: Context, private val database: AudioData
             if (isFree(candidate)) return candidate
         }
         return LibraryRules.renamedDisplayName(requested, "${base.take(80)}-${System.currentTimeMillis()}")
-    }
-
-    private fun validateAudioFileContent(file: File) {
-        val extractor = MediaExtractor()
-        val hasAudioTrack = try {
-            extractor.setDataSource(file.absolutePath)
-            (0 until extractor.trackCount).any { idx ->
-                val mime = extractor.getTrackFormat(idx).getString(MediaFormat.KEY_MIME).orEmpty()
-                mime.startsWith("audio/", ignoreCase = true)
-            }
-        } catch (_: Exception) {
-            false
-        } finally {
-            runCatching { extractor.release() }
-        }
-        require(hasAudioTrack) { "File tidak berisi aliran audio yang valid." }
-
-        val reader = MediaMetadataRetriever()
-        val retrieverOk = try {
-            reader.setDataSource(file.absolutePath)
-            val hasAudio = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
-            val durationMs = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-            hasAudio.equals("yes", ignoreCase = true) || (durationMs != null && durationMs > 0L)
-        } catch (_: Exception) {
-            false
-        } finally {
-            runCatching { reader.release() }
-        }
-        require(retrieverOk) { "Metadata audio gagal diverifikasi." }
-    }
-
-    private suspend fun computeUriSha256AndSize(uri: Uri): Pair<String, Long>? = runCatching {
-        resolver.openInputStream(uri)?.use { input ->
-            val digest = MessageDigest.getInstance("SHA-256")
-            val buffer = ByteArray(64 * 1024)
-            var total = 0L
-            while (true) {
-                currentCoroutineContext().ensureActive()
-                val read = input.read(buffer)
-                if (read < 0) break
-                if (read > 0) {
-                    digest.update(buffer, 0, read)
-                    total += read
-                }
-            }
-            shaHex(digest.digest()) to total
-        }
-    }.getOrNull()
-
-    private fun computeUriSha256(uri: Uri): String? = runCatching {
-        resolver.openInputStream(uri)?.use { input ->
-            val digest = MessageDigest.getInstance("SHA-256")
-            val buffer = ByteArray(64 * 1024)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                if (read > 0) digest.update(buffer, 0, read)
-            }
-            shaHex(digest.digest())
-        }
-    }.getOrNull()
-
-    private fun shaHex(bytes: ByteArray): String = buildString(bytes.size * 2) {
-        for (b in bytes) {
-            val v = b.toInt() and 0xFF
-            append("0123456789abcdef"[v ushr 4])
-            append("0123456789abcdef"[v and 0x0F])
-        }
     }
 
     companion object {
