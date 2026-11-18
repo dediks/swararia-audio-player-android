@@ -74,12 +74,12 @@ class PlaybackService : MediaSessionService() {
             override val isFocusPausedByLoss: Boolean
                 get() = focusPausedByLoss
             override fun getPlayer(): ExoPlayer? = appPlayer
-            override fun effectiveTargetVolume(): Float = effectiveTargetVolume()
+            override fun effectiveTargetVolume(): Float = this@PlaybackService.effectiveTargetVolume()
             override fun currentFaderGain(): Float = faderState.effectiveGain
             override fun applySessionVolumeUpdate(clampedVolume: Float): Float {
                 faderState = FaderRules.withPosition(faderState, FaderRules.positionFromGain(clampedVolume))
                     .copy(muted = clampedVolume <= 0f)
-                return effectiveTargetVolume()
+                return this@PlaybackService.effectiveTargetVolume()
             }
             override fun applyCurrentMode() = applyMode(mode)
             override fun cancelPadDuckRamp() = this@PlaybackService.cancelPadDuckRamp()
