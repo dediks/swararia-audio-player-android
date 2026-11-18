@@ -63,7 +63,7 @@ fun SearchPreviewPlayer(state: PreviewState, controller: MediaController?, onSto
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 state.hit?.let { YoutubeThumbnail(it.thumbnailUrl, it.title, Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))) }
                 Column(Modifier.weight(1f)) {
-                    Text(when {
+                    val statusLabel = when {
                         state.canceling -> "Menutup Preview…"
                         state.error != null -> "Preview gagal"
                         state.loading -> "Resolving…"
@@ -71,7 +71,17 @@ fun SearchPreviewPlayer(state: PreviewState, controller: MediaController?, onSto
                         state.phase == "buffering" -> "Buffering…"
                         playing -> "PREVIEW"
                         else -> "Preview dijeda"
-                    }, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    }
+                    val qualitySuffix = if (!state.canceling && state.error == null && !state.loading) {
+                        UiPresentation.searchQualityLabel(state.bitrateKbps, state.audioCodec)
+                    } else null
+                    Text(
+                        text = if (qualitySuffix != null) "$statusLabel · $qualitySuffix" else statusLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Text(state.hit?.title.orEmpty(), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 if (waiting) FohSpinningIndicator(size = 22.dp, strokeWidth = 2.4.dp)

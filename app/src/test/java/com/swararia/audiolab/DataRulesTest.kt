@@ -113,4 +113,32 @@ class DataRulesTest {
         assertTrue(engineUpdating.busy)
         assertTrue(engineUpdating.engineBusy)
     }
+
+    @Test fun publicPlaylistUrlsExtractCanonicalIdsAndRejectUnsafeParams() {
+        assertEquals(
+            "PLZWOZMU6bkmA",
+            DownloadQueueRules.validatedPublicPlaylistId("https://music.youtube.com/playlist?list=PLZWOZMU6bkmA&si=OeGbPt4z1qVdNUcj"),
+        )
+        assertEquals(
+            "https://www.youtube.com/playlist?list=PLZWOZMU6bkmA",
+            DownloadQueueRules.validatedPublicPlaylistUrl("https://music.youtube.com/playlist?list=PLZWOZMU6bkmA&si=OeGbPt4z1qVdNUcj"),
+        )
+        assertEquals(
+            "PLZWOZMU6bkmA",
+            DownloadQueueRules.validatedPublicPlaylistId("https://www.youtube.com/watch?v=iprFNpkvChk&list=PLZWOZMU6bkmA&index=1&si=abc"),
+        )
+        for (bad in listOf(
+            "https://music.youtube.com/watch?v=iprFNpkvChk",
+            "https://music.youtube.com/playlist?list=bad",
+            "https://youtu.be/iprFNpkvChk?list=PLZWOZMU6bkmA",
+            "https://music.youtube.com/playlist?list=PLZWOZMU6bkmA&token=secret",
+            "https://music.youtube.com/playlist?list=PLZWOZMU6bkmA#frag",
+            "http://music.youtube.com/playlist?list=PLZWOZMU6bkmA",
+            "https://evil.example/playlist?list=PLZWOZMU6bkmA",
+        )) {
+            assertThrows(IllegalArgumentException::class.java) {
+                DownloadQueueRules.validatedPublicPlaylistId(bad)
+            }
+        }
+    }
 }

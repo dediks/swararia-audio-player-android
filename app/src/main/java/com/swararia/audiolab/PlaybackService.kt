@@ -617,6 +617,8 @@ class PlaybackService : MediaSessionService() {
             putString(PreviewProtocol.TOKEN, lease.token); putLong(PreviewProtocol.GENERATION, lease.generation)
             putString(PreviewProtocol.PHASE, if (state.canceling) "canceling" else previewPhase)
             putBoolean(PreviewProtocol.ERROR, state.error != null)
+            putInt(PreviewProtocol.BITRATE_KBPS, state.bitrateKbps ?: 0)
+            putString(PreviewProtocol.AUDIO_CODEC, state.audioCodec.orEmpty())
         }
     }
     private fun ensureSignalTicker() {

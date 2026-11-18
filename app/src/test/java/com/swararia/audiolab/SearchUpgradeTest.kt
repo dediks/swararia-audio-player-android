@@ -74,14 +74,24 @@ class SearchUpgradeTest {
         val media = OnlinePreviewRules.parsePlayerResponse(okJson, "BaW_jenozKc", "Track", mapOf("User-Agent" to "UA", "Authorization" to "drop"))
         assertNotNull(media)
         assertEquals("https://rr1.googlevideo.com/videoplayback?a=251", media!!.url)
+        assertEquals(132, media.bitrateKbps)
+        assertEquals("OPUS", media.audioCodec)
         assertEquals("UA", media.headers["User-Agent"])
         assertFalse(media.headers.containsKey("Authorization"))
         assertEquals(media, OnlinePreviewRules.parse(OnlinePreviewRules.toJson(media), "BaW_jenozKc", "Track"))
+        assertEquals(AudioStreamQuality(132, "OPUS"), OnlinePreviewRules.parseAudioQuality(okJson, "BaW_jenozKc"))
 
-        val cipherOnly = """{"playabilityStatus":{"status":"OK"},"videoDetails":{"videoId":"BaW_jenozKc","isLiveContent":false},"streamingData":{"adaptiveFormats":[{"itag":251,"mimeType":"audio/webm","signatureCipher":"s=abc"}]}}"""
+        val cipherOnly = """{"playabilityStatus":{"status":"OK"},"videoDetails":{"videoId":"BaW_jenozKc","isLiveContent":false},"streamingData":{"adaptiveFormats":[{"itag":251,"mimeType":"audio/webm","signatureCipher":"s=abc"},{"itag":140,"mimeType":"audio/mp4; codecs=\"mp4a.40.2\"","averageBitrate":128400,"signatureCipher":"s=xyz"}]}}"""
         assertNull(OnlinePreviewRules.parsePlayerResponse(cipherOnly, "BaW_jenozKc", "Track"))
+        assertEquals(AudioStreamQuality(128, "AAC"), OnlinePreviewRules.parseAudioQuality(cipherOnly, "BaW_jenozKc"))
+
+        val ytDlpJson = """{"id":"BaW_jenozKc","title":"Song","url":"https://rr1---sn-test.googlevideo.com/videoplayback?x=1","abr":141.6,"acodec":"opus","http_headers":{"User-Agent":"Agent"}}"""
+        val fromYtDlp = OnlinePreviewRules.parse(ytDlpJson, "BaW_jenozKc", "Song")
+        assertEquals(142, fromYtDlp.bitrateKbps)
+        assertEquals("OPUS", fromYtDlp.audioCodec)
 
         val live = """{"playabilityStatus":{"status":"OK"},"videoDetails":{"videoId":"BaW_jenozKc","isLiveContent":true},"streamingData":{"adaptiveFormats":[{"itag":251,"mimeType":"audio/webm","url":"https://rr1.googlevideo.com/videoplayback"}]}}"""
         assertNull(OnlinePreviewRules.parsePlayerResponse(live, "BaW_jenozKc", "Track"))
+        assertNull(OnlinePreviewRules.parseAudioQuality(live, "BaW_jenozKc"))
     }
 }

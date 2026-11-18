@@ -119,6 +119,11 @@ object UiPresentation {
         val kbps = effectiveBitrateKbps(sizeBytes, durationMs) ?: return null
         return if (kbps >= 192 && ext in audioExtensions) "HQ ${kbps}k" else null
     }
+    fun searchQualityLabel(bitrateKbps: Int?, audioCodec: String?): String? {
+        val kbps = bitrateKbps?.takeIf { it > 0 } ?: return null
+        val codec = audioCodec?.trim()?.takeIf { it.isNotEmpty() }
+        return if (codec != null) "$codec · $kbps kbps" else "$kbps kbps"
+    }
     fun compactTrackSpec(displayName: String, sizeBytes: Long, durationMs: Long?): String {
         val ext = LibraryRules.audioFormatLabel(displayName)
         val kbps = effectiveBitrateKbps(sizeBytes, durationMs)

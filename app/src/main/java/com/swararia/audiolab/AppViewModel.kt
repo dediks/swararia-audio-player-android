@@ -50,6 +50,7 @@ class AppViewModel(
     fun loadMore() = session.loadMore()
     fun retrySearch() = session.retrySearch()
     fun openPlaylist(hit: SearchHit) = session.openPlaylist(hit)
+    fun openPlaylistUrl(playlistId: String) = session.openPlaylistUrl(playlistId)
     fun leavePlaylist() = session.leavePlaylist()
     fun sortSearch(sort: SearchSort) = session.sortSearch(sort)
     fun cancelSearch() = session.cancelSearch()

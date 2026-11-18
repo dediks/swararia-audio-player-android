@@ -52,15 +52,33 @@ object DownloadQueueRules {
         require(urls.size in 1..50) { "Pilih 1–50 audio per batch." }
         return urls.map(::validatedPublicSourceUrl).distinct()
     }
-    /** Durable requests contain public page identifiers only, never extractor/stream credentials. */
-    fun validatedPublicSourceUrl(value: String): String {
+    private val youtubeHosts = setOf("youtu.be", "youtube.com", "www.youtube.com", "music.youtube.com", "m.youtube.com")
+
+    private fun parsePublicYoutubeUri(
+        value: String,
+        allowedQueryKeys: Set<String>,
+        invalidHostMessage: String,
+    ): Pair<java.net.URI, List<List<String>>> {
         require(value.length <= 8192 && value.none { it.isISOControl() }) { "URL tidak valid." }
         val uri = runCatching { java.net.URI(value.trim()) }.getOrElse { throw IllegalArgumentException("URL tidak valid.") }
-        require(uri.scheme == "https" && uri.rawUserInfo == null && uri.port == -1 && uri.rawFragment == null) { "Gunakan tautan video YouTube publik." }
-        require(uri.host in setOf("youtu.be", "youtube.com", "www.youtube.com", "music.youtube.com", "m.youtube.com")) { "Gunakan tautan video YouTube publik." }
+        require(uri.scheme == "https" && uri.rawUserInfo == null && uri.port == -1 && uri.rawFragment == null) { invalidHostMessage }
+        require(uri.host in youtubeHosts) { invalidHostMessage }
         val pairs = uri.rawQuery?.split('&')?.map { it.split('=', limit = 2) }.orEmpty()
-        // Strict allowlist rejects signed/auth-bearing and unknown parameters, even if a video ID is valid.
-        require(pairs.all { it.size == 2 && it[0] in setOf("v", "si", "feature", "t", "start") && it[1].matches(Regex("[A-Za-z0-9_.-]{1,128}")) } && pairs.map { it[0] }.distinct().size == pairs.size) { "Parameter tautan tidak didukung." }
+        // Strict allowlist rejects signed/auth-bearing and unknown parameters, even if the ID is valid.
+        require(
+            pairs.all { it.size == 2 && it[0] in allowedQueryKeys && it[1].matches(Regex("[A-Za-z0-9_.-]{1,128}")) } &&
+                pairs.map { it[0] }.distinct().size == pairs.size
+        ) { "Parameter tautan tidak didukung." }
+        return uri to pairs
+    }
+
+    /** Durable requests contain public page identifiers only, never extractor/stream credentials. */
+    fun validatedPublicSourceUrl(value: String): String {
+        val (uri, pairs) = parsePublicYoutubeUri(
+            value = value,
+            allowedQueryKeys = setOf("v", "si", "feature", "t", "start"),
+            invalidHostMessage = "Gunakan tautan video YouTube publik.",
+        )
         val id = if (uri.host == "youtu.be") {
             require(pairs.none { it[0] == "v" }); uri.rawPath.removePrefix("/")
         } else if (uri.rawPath == "/watch") pairs.singleOrNull { it[0] == "v" }?.get(1).orEmpty()
@@ -71,6 +89,29 @@ object DownloadQueueRules {
         require(id.matches(Regex("[A-Za-z0-9_-]{11}"))) { "ID video tidak valid." }
         return "https://www.youtube.com/watch?v=$id"
     }
+
+    /** Extracts a validated public YouTube / YT Music playlist ID from `/playlist?list=...` or `/watch?v=...&list=...`. */
+    fun validatedPublicPlaylistId(value: String): String {
+        val (uri, pairs) = parsePublicYoutubeUri(
+            value = value,
+            allowedQueryKeys = setOf("list", "v", "index", "si", "feature", "pp", "t", "start"),
+            invalidHostMessage = "Gunakan tautan playlist YouTube publik.",
+        )
+        require(uri.host != "youtu.be") { "Gunakan tautan playlist YouTube publik." }
+        when (uri.rawPath) {
+            "/playlist" -> require(pairs.none { it[0] == "v" }) { "Parameter tautan tidak didukung." }
+            "/watch" -> {
+                val vid = pairs.singleOrNull { it[0] == "v" }?.get(1).orEmpty()
+                require(vid.matches(Regex("[A-Za-z0-9_-]{11}"))) { "ID video tidak valid." }
+            }
+            else -> throw IllegalArgumentException("Gunakan tautan playlist YouTube publik.")
+        }
+        val listId = pairs.singleOrNull { it[0] == "list" }?.get(1).orEmpty()
+        return YoutubeSearchRules.validatedPlaylistId(listId)
+    }
+
+    fun validatedPublicPlaylistUrl(value: String): String =
+        "https://www.youtube.com/playlist?list=${validatedPublicPlaylistId(value)}"
     fun durableThumbnail(value: String?): String? = value?.takeIf {
         ThumbnailPolicy.allowed(it) && runCatching { val uri = java.net.URI(it); uri.rawQuery == null && uri.rawFragment == null }.getOrDefault(false)
     }

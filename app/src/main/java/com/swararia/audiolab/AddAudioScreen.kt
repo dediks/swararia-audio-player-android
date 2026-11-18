@@ -39,6 +39,7 @@ data class SearchActions(
     val loadMore: () -> Unit,
     val retry: () -> Unit,
     val openPlaylist: (SearchHit) -> Unit,
+    val openPlaylistUrl: (String) -> Unit = {},
     val leavePlaylist: () -> Unit,
     val previewSong: (SearchHit) -> Unit,
     val stopPreview: () -> Unit,
@@ -103,6 +104,7 @@ fun AddAudioScreen(
     val queueIdle = !upgrade.operationBusy && !search.busy && !actions.preview.loading
     val validQuery = remember(query) { runCatching { YoutubeSearchRules.validatedQuery(query) }.isSuccess }
     val detectedUrl = remember(query) { runCatching { DownloadQueueRules.validatedPublicSourceUrl(query) }.getOrNull() }
+    val detectedPlaylistUrl = remember(query) { runCatching { DownloadQueueRules.validatedPublicPlaylistUrl(query) }.getOrNull() }
     val keyboard = LocalSoftwareKeyboardController.current
     val resultScroll = rememberLazyListState()
     val playlistScroll = rememberLazyListState()
@@ -111,6 +113,22 @@ fun AddAudioScreen(
     val loadedSongs = remember(sorted) { sorted.filter { it.kind == SearchKind.SONGS } }
     val selectedSongs = remember(loadedSongs, selectedIds) { loadedSongs.filter { it.videoId in selectedIds } }
     val recentLocalTracks = remember(tracks) { tracks.take(8) }
+    var pendingPlaylistAutoDownloadId by rememberSaveable { mutableStateOf<String?>(null) }
+    val previewQualities = remember { mutableStateMapOf<String, AudioStreamQuality>() }
+    LaunchedEffect(
+        actions.preview.hit?.videoId,
+        actions.preview.bitrateKbps,
+        actions.preview.audioCodec,
+        actions.preview.media?.bitrateKbps,
+        actions.preview.media?.audioCodec,
+    ) {
+        val id = actions.preview.hit?.videoId
+        val kbps = (actions.preview.bitrateKbps ?: actions.preview.media?.bitrateKbps)?.takeIf { it > 0 }
+        val codec = actions.preview.audioCodec ?: actions.preview.media?.audioCodec
+        if (id != null && kbps != null) {
+            previewQualities[id] = AudioStreamQuality(kbps, codec)
+        }
+    }
 
     val queuedUrls = remember(upgrade.jobs) {
         upgrade.jobs.asSequence()
@@ -122,8 +140,44 @@ fun AddAudioScreen(
             .filter { it.status == "COMPLETED" && it.trackId != null && it.trackId in downloadedTrackIds }
             .mapTo(HashSet()) { it.sourceUrl }
     }
+    val downloadablePlaylistSongs = remember(loadedSongs, queuedUrls, savedUrls, downloadedVideoIds) {
+        loadedSongs.filter { hit ->
+            hit.url !in queuedUrls && hit.url !in savedUrls && hit.videoId !in downloadedVideoIds
+        }.take(YoutubeSearchRules.MAX_RESULTS)
+    }
 
-    val leave = { actions.leavePlaylist() }
+    val leave = {
+        pendingPlaylistAutoDownloadId = null
+        actions.leavePlaylist()
+    }
+    val openPlaylistFromUrl: (String, Boolean) -> Unit = { rawPlaylistUrl, downloadAll ->
+        val pid = runCatching { DownloadQueueRules.validatedPublicPlaylistId(rawPlaylistUrl) }.getOrNull()
+        if (pid != null && idle) {
+            keyboard?.hide()
+            selectionMode = false
+            selectedIds = arrayListOf()
+            playlistChannel = null
+            playlistThumbnail = null
+            pendingPlaylistAutoDownloadId = if (downloadAll) pid else null
+            actions.stopPreview()
+            actions.openPlaylistUrl(pid)
+        }
+    }
+    LaunchedEffect(inPlaylist, search.playlistId, search.busy, search.error, loadedSongs.size) {
+        val pendingId = pendingPlaylistAutoDownloadId ?: return@LaunchedEffect
+        if (search.playlistId == pendingId && !search.busy) {
+            pendingPlaylistAutoDownloadId = null
+            if (search.error == null) {
+                val targets = downloadablePlaylistSongs
+                if (targets.isNotEmpty() && !upgrade.operationBusy) {
+                    onDownloadBatch(targets, true)
+                    quickToast = "${targets.size} lagu playlist masuk antrean"
+                } else if (loadedSongs.isNotEmpty()) {
+                    quickToast = "Semua lagu playlist sudah tersimpan atau ada di antrean"
+                }
+            }
+        }
+    }
     val executeSearch: (String, SearchProvider, SearchKind, SearchSort, Boolean) -> Unit = { q, targetProvider, targetKind, targetSort, preferSwitch ->
         val valid = runCatching { YoutubeSearchRules.validatedQuery(q) }.isSuccess
         if (controlsEnabled && valid && (preferSwitch || idle)) {
@@ -151,8 +205,8 @@ fun AddAudioScreen(
             val nextSort = if (nextKind == SearchKind.PLAYLISTS &&
                 (search.sort == SearchSort.DURATION_ASC || search.sort == SearchSort.DURATION_DESC)
             ) SearchSort.RELEVANCE else search.sort
-            val activeQuery = query.takeIf { validQuery && detectedUrl == null }
-                ?: search.query.takeIf { search.hasSearched && detectedUrl == null }
+            val activeQuery = query.takeIf { validQuery && detectedUrl == null && detectedPlaylistUrl == null }
+                ?: search.query.takeIf { search.hasSearched && detectedUrl == null && detectedPlaylistUrl == null }
             val shouldSwitch = activeQuery != null && (
                 nextProvider != search.provider ||
                     nextKind != search.kind ||
@@ -240,7 +294,7 @@ fun AddAudioScreen(
                     onBack = onBack,
                     onOpenDownloads = onOpenDownloads,
                     onLeavePlaylist = leave,
-                    onOpenLink = { openLinkModal(detectedUrl.orEmpty()) },
+                    onOpenLink = { openLinkModal((detectedUrl ?: detectedPlaylistUrl).orEmpty()) },
                     onOpenImport = triggerLocalImport,
                     onEnterSelection = { actions.stopPreview(); selectionMode = true },
                     onExitSelection = { selectionMode = false; selectedIds = arrayListOf() },
@@ -265,9 +319,19 @@ fun AddAudioScreen(
                 item(key = "playlist-context", contentType = "playlist-context") {
                     SearchPlaylistContextHeader(
                         title = search.playlistTitle.orEmpty(),
-                        channel = playlistChannel,
-                        thumbnailUrl = playlistThumbnail,
+                        channel = playlistChannel ?: search.playlistChannel,
+                        thumbnailUrl = playlistThumbnail ?: search.playlistThumbnailUrl,
                         songCount = loadedSongs.size,
+                        totalCount = search.playlistTotalCount,
+                        downloadableCount = downloadablePlaylistSongs.size,
+                        loading = search.busy && !search.loadingMore,
+                        queueIdle = queueIdle,
+                        onDownloadAll = {
+                            if (queueIdle && downloadablePlaylistSongs.isNotEmpty()) {
+                                onDownloadBatch(downloadablePlaylistSongs, true)
+                                quickToast = "${downloadablePlaylistSongs.size} lagu playlist masuk antrean"
+                            }
+                        },
                     )
                 }
             }
@@ -283,8 +347,9 @@ fun AddAudioScreen(
                         controlsEnabled = controlsEnabled,
                         validQuery = validQuery,
                         detectedUrl = detectedUrl,
+                        detectedPlaylistUrl = detectedPlaylistUrl,
                         recentQueries = recentQueries,
-                        showRecent = !search.hasSearched && recentQueries.isNotEmpty() && detectedUrl == null,
+                        showRecent = !search.hasSearched && recentQueries.isNotEmpty() && detectedUrl == null && detectedPlaylistUrl == null,
                         hasResults = sorted.isNotEmpty(),
                         inPlaylist = inPlaylist,
                         searchBusy = search.busy,
@@ -306,6 +371,10 @@ fun AddAudioScreen(
                                 query = ""
                                 quickToast = "Tautan masuk antrean"
                             }
+                        },
+                        onOpenDetectedPlaylist = { playlistUrl, downloadAll ->
+                            query = ""
+                            openPlaylistFromUrl(playlistUrl, downloadAll)
                         },
                     )
                 }
@@ -502,6 +571,10 @@ fun AddAudioScreen(
                             actions.preview.canceling ||
                             actions.preview.phase in setOf("resolving", "connecting", "buffering")
                         )
+                    val hitQuality = if (hit.kind == SearchKind.SONGS) {
+                        hit.bitrateKbps?.takeIf { it > 0 }?.let { AudioStreamQuality(it, hit.audioCodec) }
+                            ?: previewQualities[hit.videoId]
+                    } else null
                     CatalogResult(
                         hit = hit,
                         enabled = idle,
@@ -511,6 +584,7 @@ fun AddAudioScreen(
                         previewActive = previewThisHit,
                         previewLoading = previewLoading,
                         status = hitStatus,
+                        quality = hitQuality,
                         onTap = {
                             if (selectionMode) toggle(hit)
                             else if (hit.kind == SearchKind.PLAYLISTS) {
@@ -669,6 +743,11 @@ fun AddAudioScreen(
                     onDownload(url, true)
                     quickToast = "Tautan masuk antrean"
                 }
+            },
+            onOpenPlaylistUrl = { playlistUrl, downloadAll ->
+                linkDialog = false
+                query = ""
+                openPlaylistFromUrl(playlistUrl, downloadAll)
             },
         )
     }
@@ -840,6 +919,7 @@ private fun SearchControlsPanel(
     controlsEnabled: Boolean,
     validQuery: Boolean,
     detectedUrl: String?,
+    detectedPlaylistUrl: String?,
     recentQueries: List<String>,
     showRecent: Boolean,
     hasResults: Boolean,
@@ -855,6 +935,7 @@ private fun SearchControlsPanel(
     onSelectKind: (SearchKind) -> Unit,
     onSort: (SearchSort) -> Unit,
     onDownloadDetectedUrl: (String) -> Unit,
+    onOpenDetectedPlaylist: (String, Boolean) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         FohSegmentedBar(
@@ -900,7 +981,7 @@ private fun SearchControlsPanel(
                         IconButton(onClick = onClearQuery, enabled = controlsEnabled && !searchBusy) {
                             Icon(UiIcons.Close, contentDescription = "Hapus kata kunci", modifier = Modifier.size(18.dp))
                         }
-                        if (detectedUrl == null) {
+                        if (detectedUrl == null && detectedPlaylistUrl == null) {
                             Surface(
                                 onClick = onSubmit,
                                 enabled = controlsEnabled && validQuery,
@@ -935,7 +1016,11 @@ private fun SearchControlsPanel(
             },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = {
-                if (detectedUrl != null) onDownloadDetectedUrl(detectedUrl) else onSubmit()
+                when {
+                    detectedUrl != null -> onDownloadDetectedUrl(detectedUrl)
+                    detectedPlaylistUrl != null -> onOpenDetectedPlaylist(detectedPlaylistUrl, false)
+                    else -> onSubmit()
+                }
             }),
         )
 
@@ -968,6 +1053,50 @@ private fun SearchControlsPanel(
                             color = FohTheme.colors.surfaceDeep,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                         )
+                    }
+                }
+            }
+        } else if (detectedPlaylistUrl != null) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = FohTheme.colors.safeBg,
+                border = BorderStroke(1.dp, FohTheme.colors.safeBorder),
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(UiIcons.Link, contentDescription = null, tint = FohTheme.colors.safeAccent, modifier = Modifier.size(18.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Playlist YouTube terdeteksi", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = FohTheme.colors.safeAccent)
+                            Text(detectedPlaylistUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = { onOpenDetectedPlaylist(detectedPlaylistUrl, false) },
+                            enabled = controlsEnabled && queueIdle && !searchBusy,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(999.dp),
+                        ) {
+                            Text("Lihat Lagu", maxLines = 1)
+                        }
+                        Button(
+                            onClick = { onOpenDetectedPlaylist(detectedPlaylistUrl, true) },
+                            enabled = controlsEnabled && queueIdle && !searchBusy,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(999.dp),
+                        ) {
+                            Text("Unduh Semua", maxLines = 1)
+                        }
                     }
                 }
             }
@@ -1049,6 +1178,7 @@ private fun CatalogResult(
     previewActive: Boolean,
     previewLoading: Boolean,
     status: HitLibraryStatus,
+    quality: AudioStreamQuality? = null,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
     onDownload: () -> Unit,
@@ -1136,14 +1266,49 @@ private fun CatalogResult(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (previewActive) {
-                    Text(
-                        text = if (previewLoading) "MEMUAT" else "PREVIEW",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = FohTheme.colors.safeAccent,
-                        maxLines = 1,
-                    )
+                val qualityLabel = if (hit.kind == SearchKind.SONGS) {
+                    UiPresentation.searchQualityLabel(quality?.bitrateKbps, quality?.audioCodec)
+                } else null
+                if (qualityLabel != null || previewActive) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (qualityLabel != null && quality != null) {
+                            val (qBg, qBorder, qAccent) = when {
+                                quality.bitrateKbps >= 192 -> Triple(
+                                    FohTheme.colors.safeBg,
+                                    FohTheme.colors.safeBorder,
+                                    FohTheme.colors.safeAccent,
+                                )
+                                quality.bitrateKbps < 96 -> Triple(
+                                    FohTheme.colors.warnBg,
+                                    FohTheme.colors.warnBorder,
+                                    FohTheme.colors.warnAccent,
+                                )
+                                else -> Triple(
+                                    FohTheme.colors.surfaceDeep,
+                                    FohTheme.colors.borderSubtle,
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            LibraryMiniBadge(
+                                label = qualityLabel,
+                                containerColor = qBg,
+                                borderColor = qBorder,
+                                contentColor = qAccent,
+                            )
+                        }
+                        if (previewActive) {
+                            Text(
+                                text = if (previewLoading) "MEMUAT" else "PREVIEW",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = FohTheme.colors.safeAccent,
+                                maxLines = 1,
+                            )
+                        }
+                    }
                 }
             }
             if (selectionMode && hit.kind == SearchKind.SONGS) {

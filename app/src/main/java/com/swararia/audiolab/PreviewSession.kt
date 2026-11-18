@@ -37,7 +37,13 @@ class PreviewSession(
                 val media = searchRepository.preview(hit)
                 if (previewGeneration.isCurrent(ticket)) {
                     PreviewLease.validate(media)
-                    previewState.value = PreviewState(hit = hit, media = media, requestStartedNanos = started)
+                    previewState.value = PreviewState(
+                        hit = hit,
+                        media = media,
+                        requestStartedNanos = started,
+                        bitrateKbps = media.bitrateKbps,
+                        audioCodec = media.audioCodec,
+                    )
                     onResolved(media) // Direct dispatch: no Compose collector/lifecycle dependency.
                 }
             } catch (cancel: CancellationException) { throw cancel }

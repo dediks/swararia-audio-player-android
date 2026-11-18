@@ -26,6 +26,8 @@ data class SearchHit(
     val artist: String? = null,
     val itemCount: Int? = null,
     val album: String? = null,
+    val bitrateKbps: Int? = null,
+    val audioCodec: String? = null,
 )
 
 data class YoutubeSearchState(
@@ -42,7 +44,17 @@ data class YoutubeSearchState(
     val loadingMore: Boolean = false,
     val incompleteCount: Int = 0,
     val playlistId: String? = null,
-    val playlistTitle: String? = null
+    val playlistTitle: String? = null,
+    val playlistChannel: String? = null,
+    val playlistThumbnailUrl: String? = null,
+    val playlistTotalCount: Int? = null,
+)
+
+data class PlaylistHeaderMeta(
+    val title: String? = null,
+    val channel: String? = null,
+    val thumbnailUrl: String? = null,
+    val totalCount: Int? = null,
 )
 
 /** Tickets invalidate older/cancelled calls before any result is published. */
@@ -103,9 +115,10 @@ object YoutubeSearchRules {
         }
     }
     @JvmOverloads fun arguments(query: String, provider: SearchProvider, kind: SearchKind = SearchKind.SONGS,
-        offset: Int = 0, playlistId: String? = null): List<String> {
+        offset: Int = 0, playlistId: String? = null, limit: Int = RESULT_LIMIT): List<String> {
+        require(limit in 1..MAX_RESULTS) { "Batas hasil pencarian tidak valid." }
         require(offset in 0 until MAX_RESULTS && offset % RESULT_LIMIT == 0) { "Halaman pencarian tidak valid." }
-        val end = minOf(offset + RESULT_LIMIT, MAX_RESULTS)
+        val end = minOf(offset + limit, MAX_RESULTS)
         val target = if (playlistId == null) input(query, provider, kind, end)
             else "https://www.youtube.com/playlist?list=${validatedPlaylistId(playlistId)}"
         return listOf("--ignore-config", "--no-cache-dir", "--flat-playlist", "--dump-single-json", "--skip-download",
@@ -138,6 +151,22 @@ object YoutubeSearchJson {
         ?: throw IllegalArgumentException("Daftar hasil tidak valid.")
     fun oembedChannel(output: String): String? = objectNode(output).get("author_name")?.takeIf { it.isTextual }
         ?.asText()?.let { displayText(it, 160) }?.takeIf { it.isNotBlank() }
+    fun playlistMeta(output: String): PlaylistHeaderMeta? {
+        val root = objectNode(output)
+        if (!root.path("entries").isArray) return null
+        val title = root.get("title")?.takeIf { it.isTextual }?.asText()?.let { displayText(it, 200) }?.takeIf { it.isNotBlank() }
+        val channel = sequenceOf("channel", "uploader").mapNotNull { key ->
+            root.get(key)?.takeIf { it.isTextual }?.asText()?.let { displayText(it, 160) }?.takeIf { it.isNotBlank() }
+        }.firstOrNull()
+        val thumb = root.get("thumbnail")?.takeIf { it.isTextual }?.asText()?.takeIf(ThumbnailPolicy::allowed)
+            ?: root.path("thumbnails").takeIf { it.isArray }?.asSequence()?.take(32)?.mapNotNull {
+                it.path("url").takeIf { url -> url.isTextual }?.asText()?.takeIf(ThumbnailPolicy::allowed)
+            }?.lastOrNull()
+        val total = sequenceOf("playlist_count", "n_entries").mapNotNull { key ->
+            root.get(key)?.takeIf { it.isIntegralNumber && it.canConvertToInt() }?.asInt()?.takeIf { it in 0..100_000 }
+        }.firstOrNull()
+        return PlaylistHeaderMeta(title = title, channel = channel, thumbnailUrl = thumb, totalCount = total)
+    }
     fun metadata(output: String, expectedId: String): SearchHit? {
         val root = objectNode(output)
         require(root.path("id").asText() == expectedId) { "Metadata lagu tidak cocok." }

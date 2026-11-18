@@ -8,13 +8,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -257,28 +261,67 @@ internal fun SearchPlaylistContextHeader(
     channel: String?,
     thumbnailUrl: String?,
     songCount: Int,
+    totalCount: Int? = null,
+    downloadableCount: Int = 0,
+    loading: Boolean = false,
+    queueIdle: Boolean = true,
+    onDownloadAll: (() -> Unit)? = null,
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = FohTheme.colors.surfaceCard,
         border = BorderStroke(1.dp, FohTheme.colors.borderSubtle),
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            YoutubeThumbnail(thumbnailUrl, title, Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Playlist", style = MaterialTheme.typography.labelSmall, color = FohTheme.colors.safeAccent)
-                Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(
-                    listOfNotNull(channel, "$songCount lagu").joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                YoutubeThumbnail(thumbnailUrl, title, Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Playlist", style = MaterialTheme.typography.labelSmall, color = FohTheme.colors.safeAccent)
+                    Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    val countText = when {
+                        loading && songCount == 0 -> "Memuat daftar lagu…"
+                        totalCount != null && totalCount > songCount -> "$songCount dari $totalCount lagu dimuat"
+                        else -> "$songCount lagu"
+                    }
+                    Text(
+                        listOfNotNull(channel, countText).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (onDownloadAll != null && songCount > 0 && !loading) {
+                if (downloadableCount > 0) {
+                    Button(
+                        onClick = onDownloadAll,
+                        enabled = queueIdle,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp),
+                    ) {
+                        Icon(UiIcons.Download, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Unduh Semua ($downloadableCount Lagu)",
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Semua lagu di daftar ini sudah tersimpan atau dalam antrean.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = FohTheme.colors.safeAccent,
+                    )
+                }
             }
         }
     }

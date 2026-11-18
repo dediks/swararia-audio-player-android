@@ -26,6 +26,8 @@ object PreviewProtocol {
     const val TITLE = "preview_title"
     const val PHASE = "preview_phase"
     const val ERROR = "preview_error"
+    const val BITRATE_KBPS = "preview_bitrate_kbps"
+    const val AUDIO_CODEC = "preview_audio_codec"
     val start = SessionCommand(START, Bundle.EMPTY)
     val stop = SessionCommand(STOP, Bundle.EMPTY)
     val forget = SessionCommand(FORGET, Bundle.EMPTY)
@@ -96,9 +98,17 @@ class PreviewRemote(context: Context) : PreviewPlayback {
         val hit = id?.takeIf { Regex("[A-Za-z0-9_-]{11}").matches(it) }?.let {
             SearchHit(it, extras.getString(PreviewProtocol.TITLE).orEmpty(), null, null, null, "https://www.youtube.com/watch?v=$it")
         }
-        state.value = PreviewState(hit = hit, loading = phase == "resolving" || phase == "canceling",
-            canceling = phase == "canceling", error = if (extras.getBoolean(PreviewProtocol.ERROR)) "Preview tidak dapat diputar. Coba lagi atau pilih lagu lain." else null,
-            phase = phase)
+        val bitrateKbps = extras.getInt(PreviewProtocol.BITRATE_KBPS, 0).takeIf { it > 0 }
+        val audioCodec = extras.getString(PreviewProtocol.AUDIO_CODEC)?.takeIf { it.isNotBlank() }
+        state.value = PreviewState(
+            hit = hit,
+            loading = phase == "resolving" || phase == "canceling",
+            canceling = phase == "canceling",
+            error = if (extras.getBoolean(PreviewProtocol.ERROR)) "Preview tidak dapat diputar. Coba lagi atau pilih lagu lain." else null,
+            phase = phase,
+            bitrateKbps = bitrateKbps,
+            audioCodec = audioCodec,
+        )
     }
     private fun send(command: SessionCommand, args: Bundle) {
         val ticket = ++commandGeneration

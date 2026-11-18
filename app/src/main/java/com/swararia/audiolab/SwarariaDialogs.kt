@@ -118,11 +118,13 @@ internal fun DownloadLinkDialog(
     initialUrl: String = "",
     onDismiss: () -> Unit,
     onDownload: (String) -> Unit,
+    onOpenPlaylistUrl: (String, Boolean) -> Unit = { _, _ -> },
 ) {
     var url by remember(initialUrl) { mutableStateOf(initialUrl) }
     var authorized by remember { mutableStateOf(true) }
     val context = LocalContext.current
     val validUrl = remember(url) { runCatching { DownloadQueueRules.validatedPublicSourceUrl(url) }.getOrNull() }
+    val validPlaylistUrl = remember(url) { runCatching { DownloadQueueRules.validatedPublicPlaylistUrl(url) }.getOrNull() }
     val pasteFromClipboard = {
         readPlainTextFromClipboard(context)?.let {
             url = it.trim()
@@ -137,7 +139,7 @@ internal fun DownloadLinkDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    text = "Salin link video dari YouTube / YT Music, lalu tempel di bawah ini.",
+                    text = "Salin link lagu atau playlist publik dari YouTube / YT Music, lalu tempel di bawah ini.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -164,9 +166,27 @@ internal fun DownloadLinkDialog(
                         Text("Tempel Link dari Clipboard")
                     }
                 }
-                if (url.isNotBlank() && validUrl == null) {
+                if (validPlaylistUrl != null) {
                     Text(
-                        text = "Gunakan link video YouTube / YT Music publik biasa (bukan link playlist atau privat).",
+                        text = "Link playlist terdeteksi — langsung unduh semua lagu atau buka daftar lagunya dulu.",
+                        color = FohTheme.colors.safeAccent,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            if (!busy && authorized) {
+                                authorized = false
+                                onOpenPlaylistUrl(validPlaylistUrl, false)
+                            }
+                        },
+                        enabled = !busy && authorized,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Lihat Daftar Lagu Playlist")
+                    }
+                } else if (url.isNotBlank() && validUrl == null) {
+                    Text(
+                        text = "Gunakan link lagu atau playlist YouTube / YT Music publik.",
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -174,10 +194,21 @@ internal fun DownloadLinkDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { if (!busy && authorized && validUrl != null) { authorized = false; onDownload(validUrl) } },
-                enabled = !busy && authorized && validUrl != null,
-            ) { Text("Download") }
+            when {
+                validPlaylistUrl != null -> TextButton(
+                    onClick = {
+                        if (!busy && authorized) {
+                            authorized = false
+                            onOpenPlaylistUrl(validPlaylistUrl, true)
+                        }
+                    },
+                    enabled = !busy && authorized,
+                ) { Text("Unduh Semua") }
+                else -> TextButton(
+                    onClick = { if (!busy && authorized && validUrl != null) { authorized = false; onDownload(validUrl) } },
+                    enabled = !busy && authorized && validUrl != null,
+                ) { Text("Download") }
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

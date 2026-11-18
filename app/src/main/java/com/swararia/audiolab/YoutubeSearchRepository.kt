@@ -33,6 +33,19 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
     private val channelCache = object : LinkedHashMap<String, String>(128, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 128
     }
+    private val qualityCache = object : LinkedHashMap<String, AudioStreamQuality>(128, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AudioStreamQuality>?): Boolean = size > 128
+    }
+
+    private fun cacheQuality(videoId: String, bitrateKbps: Int?, audioCodec: String?): AudioStreamQuality? {
+        val kbps = bitrateKbps?.takeIf { it > 0 } ?: return null
+        val quality = AudioStreamQuality(kbps, audioCodec)
+        synchronized(qualityCache) { qualityCache[videoId] = quality }
+        return quality
+    }
+
+    private fun cachedQuality(videoId: String): AudioStreamQuality? =
+        synchronized(qualityCache) { qualityCache[videoId] }
 
     private fun activeNetworkKey(): Any? =
         runCatching { appContext.getSystemService(ConnectivityManager::class.java)?.activeNetwork?.networkHandle }.getOrNull()
@@ -41,12 +54,28 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
         searchPage(query, provider, SearchKind.SONGS).hits
 
     override suspend fun searchPage(query: String, provider: SearchProvider, kind: SearchKind,
-        offset: Int, playlistId: String?): SearchPage = withTimeoutOrNull(60_000L) {
-        val base = YoutubeSearchRules.arguments(query, provider, kind, offset, playlistId)
+        offset: Int, playlistId: String?): SearchPage =
+        executeSearchOrPlaylist(query, provider, kind, offset, playlistId, YoutubeSearchRules.RESULT_LIMIT)
+
+    override suspend fun playlistPage(playlistId: String, offset: Int, limit: Int): SearchPage =
+        executeSearchOrPlaylist("", SearchProvider.YOUTUBE_MUSIC, SearchKind.SONGS, offset, playlistId, limit)
+
+    private suspend fun executeSearchOrPlaylist(
+        query: String,
+        provider: SearchProvider,
+        kind: SearchKind,
+        offset: Int,
+        playlistId: String?,
+        limit: Int,
+    ): SearchPage = withTimeoutOrNull(60_000L) {
+        val base = YoutubeSearchRules.arguments(query, provider, kind, offset, playlistId, limit)
         val plugin = withContext(Dispatchers.IO) { pluginDirectory() }
         val args = base.dropLast(1) + listOf("--no-plugin-dirs", "--plugin-dirs", plugin.absolutePath, base.last())
         val output = executeMetadata(args, "search", 30_000L)
-        val raw = withContext(Dispatchers.Default) { YoutubeSearchJson.parse(output, kind) }
+        val raw = withContext(Dispatchers.Default) { YoutubeSearchJson.parse(output, kind, limit) }
+        val playlistMeta = if (playlistId != null) {
+            withContext(Dispatchers.Default) { runCatching { YoutubeSearchJson.playlistMeta(output) }.getOrNull() }
+        } else null
         val permits = Semaphore(6)
         val enriched = coroutineScope {
             raw.map { hit -> async {
@@ -76,15 +105,42 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
             } catch (cancel: CancellationException) { throw cancel }
               catch (_: Exception) { /* Incomplete items remain explicitly excluded, not fabricated. */ }
         }
-        val complete = enriched.filter(YoutubeSearchRules::complete)
+        val complete = enriched.filter(YoutubeSearchRules::complete).map { hit ->
+            if (hit.kind == SearchKind.SONGS && hit.bitrateKbps == null) {
+                cachedQuality(hit.videoId)?.let { q ->
+                    hit.copy(bitrateKbps = q.bitrateKbps, audioCodec = q.audioCodec ?: hit.audioCodec)
+                } ?: hit
+            } else hit
+        }
         if (complete.any { it.kind == SearchKind.SONGS }) warmVisitorSessionAsync()
         val entryCount = withContext(Dispatchers.Default) { YoutubeSearchJson.entryCount(output) }
-        SearchPage(complete, entryCount, enriched.size - complete.size)
+        SearchPage(complete, entryCount, enriched.size - complete.size, playlistMeta)
     } ?: throw IOException("Pencarian terlalu lama. Coba lagi saat koneksi lebih stabil.")
 
     override suspend fun preview(hit: SearchHit): PreviewMedia {
         require(hit.kind == SearchKind.SONGS) { "Buka playlist lalu pilih satu lagu untuk preview." }
-        return previewResolver.resolve(hit)
+        return previewResolver.resolve(hit).also { resolved ->
+            cacheQuality(resolved.videoId, resolved.bitrateKbps, resolved.audioCodec)
+        }
+    }
+
+    override suspend fun audioQuality(videoId: String): AudioStreamQuality? {
+        if (!Regex("[A-Za-z0-9_-]{11}").matches(videoId)) return null
+        cachedQuality(videoId)?.let { return it }
+        if (ingestBusy() || isFastSkipped(videoId)) return null
+        val raw = try {
+            withTimeoutOrNull(5_000L) {
+                runInterruptible(Dispatchers.IO) {
+                    fetchInnerTubePlayerJson(videoId, connectMs = 3000, readMs = 4000)
+                }
+            }
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        val parsed = runCatching { OnlinePreviewRules.parseAudioQuality(raw, videoId) }.getOrNull() ?: return null
+        return cacheQuality(videoId, parsed.bitrateKbps, parsed.audioCodec)
     }
     override fun invalidatePreview(videoId: String) {
         previewResolver.invalidate(videoId)
@@ -134,10 +190,9 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
         return executeMetadata(OnlinePreviewRules.arguments(id), "preview", 30_000L)
     }
 
-    private fun resolveFastPreviewJson(id: String): String? {
-        val started = System.nanoTime()
+    private fun fetchInnerTubePlayerJson(id: String, connectMs: Int, readMs: Int): String? {
         if (Thread.currentThread().isInterrupted) throw InterruptedException()
-        check(!ingestBusy()) { "Tunggu proses audio selesai terlebih dahulu." }
+        if (ingestBusy()) return null
         val network = activeNetworkKey()
         val visitor = ensureVisitorData(network) ?: return null
         if (Thread.currentThread().isInterrupted) throw InterruptedException()
@@ -168,22 +223,31 @@ class YoutubeSearchRepository(context: Context, private val ingestBusy: () -> Bo
                 "X-Goog-Visitor-Id" to visitor,
                 "Origin" to "https://www.youtube.com",
             ),
-            connectMs = 4000,
-            readMs = 5000,
+            connectMs = connectMs,
+            readMs = readMs,
         ) ?: run {
             clearVisitorData(network)
             return null
         }
+        val status = runCatching { YoutubeSearchJson.objectNode(raw).path("playabilityStatus").path("status").asText("") }.getOrDefault("")
+        if (status == "LOGIN_REQUIRED") {
+            clearVisitorData(network)
+            return null
+        }
+        return raw
+    }
+
+    private fun resolveFastPreviewJson(id: String): String? {
+        val started = System.nanoTime()
+        check(!ingestBusy()) { "Tunggu proses audio selesai terlebih dahulu." }
+        val raw = fetchInnerTubePlayerJson(id, connectMs = 4000, readMs = 5000) ?: return null
         val media = OnlinePreviewRules.parsePlayerResponse(
             output = raw,
             expectedId = id,
             title = id,
             requestHeaders = mapOf("User-Agent" to VISIONOS_UA),
-        ) ?: run {
-            val status = runCatching { YoutubeSearchJson.objectNode(raw).path("playabilityStatus").path("status").asText("") }.getOrDefault("")
-            if (status == "LOGIN_REQUIRED") clearVisitorData(network)
-            return null
-        }
+        ) ?: return null
+        cacheQuality(id, media.bitrateKbps, media.audioCodec)
         val elapsedMs = ((System.nanoTime() - started) / 1_000_000L).coerceAtLeast(0L)
         android.util.Log.d("SwarariaTiming", "preview_fast_ms=$elapsedMs")
         return OnlinePreviewRules.toJson(media)

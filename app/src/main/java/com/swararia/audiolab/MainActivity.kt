@@ -177,6 +177,7 @@ class MainActivity : ComponentActivity() {
                         sort = { model.sortSearch(it) }, loadMore = { whenOnlineIdle { model.loadMore() } },
                         retry = { whenOnlineIdle { model.retrySearch() } },
                         openPlaylist = { hit -> whenOnlineIdle { model.openPlaylist(hit) } },
+                        openPlaylistUrl = { playlistId -> whenOnlineIdle { model.openPlaylistUrl(playlistId) } },
                         leavePlaylist = { model.leavePlaylist() },
                         previewSong = { hit -> withNotificationPermission { whenOnlineIdle { if (pauseForPreview()) model.preview(hit) } } },
                         stopPreview = { model.cancelPreview() }, previewError = { model.previewError() }),

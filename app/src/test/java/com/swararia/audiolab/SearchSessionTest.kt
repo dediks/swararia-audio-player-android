@@ -11,10 +11,12 @@ class SearchSessionTest {
         val calls=mutableListOf<Request>()
         var page: suspend (Request)->SearchPage = { SearchPage(emptyList(),0,0) }
         var stream: suspend (SearchHit)->PreviewMedia = { error("not configured") }
+        var quality: suspend (String)->AudioStreamQuality? = { null }
         override suspend fun searchPage(query:String,provider:SearchProvider,kind:SearchKind,offset:Int,playlistId:String?):SearchPage {
             val request=Request(query,provider,kind,offset,playlistId);calls.add(request);return page(request)
         }
         override suspend fun preview(hit:SearchHit)=stream(hit)
+        override suspend fun audioQuality(videoId: String)=quality(videoId)
     }
     private class Fixture : AutoCloseable {
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
@@ -362,6 +364,78 @@ class SearchSessionTest {
         } finally {
             session.close()
             scope.cancel()
+        }
+    }
+
+    @Test(timeout = 5000) fun backgroundQualityProbeEnrichesSongsWithoutBlockingAndRespectsCancellation() = runBlocking {
+        Fixture().use { f ->
+            val firstHit = hit("aaaaaaaaaaa")
+            val playlistHit = hit("PLabcdefghij12").copy(kind = SearchKind.PLAYLISTS)
+            val gate = CompletableDeferred<Unit>()
+            f.gateway.page = { SearchPage(listOf(firstHit, playlistHit), 2, 0) }
+            f.gateway.quality = { id ->
+                gate.await()
+                if (id == "aaaaaaaaaaa") AudioStreamQuality(134, "OPUS") else AudioStreamQuality(128, "AAC")
+            }
+
+            f.session.search("lagu uji", SearchProvider.YOUTUBE_MUSIC)
+            assertFalse(f.session.search.value.busy)
+            assertTrue(f.session.canStartOnlineOperation())
+            assertNull(f.session.search.value.results.first().bitrateKbps)
+
+            gate.complete(Unit)
+            yield()
+            val updated = f.session.search.value.results
+            assertEquals(134, updated[0].bitrateKbps)
+            assertEquals("OPUS", updated[0].audioCodec)
+            assertNull(updated[1].bitrateKbps)
+
+            // Switching tabs/queries cancels stale background quality probes.
+            val staleGate = CompletableDeferred<Unit>()
+            f.gateway.page = { req ->
+                if (req.query == "pertama") SearchPage(listOf(hit("ccccccccccc")), 1, 0)
+                else SearchPage(listOf(hit("ddddddddddd").copy(bitrateKbps = 256, audioCodec = "AAC")), 1, 0)
+            }
+            f.gateway.quality = { id ->
+                if (id == "ccccccccccc") staleGate.await()
+                AudioStreamQuality(64, "OPUS")
+            }
+            f.session.search("pertama", SearchProvider.YOUTUBE)
+            f.session.search("kedua", SearchProvider.YOUTUBE)
+            staleGate.complete(Unit)
+            yield()
+            assertEquals("kedua", f.session.search.value.query)
+            assertEquals(256, f.session.search.value.results.single().bitrateKbps)
+        }
+    }
+
+    @Test(timeout = 5000) fun openingPlaylistFromDirectUrlWorksWithoutPriorQueryAndAppliesMetadata() = runBlocking {
+        Fixture().use { f ->
+            f.gateway.page = {
+                SearchPage(
+                    hits = listOf(hit("iprFNpkvChk"), hit("rf33vhI_E98")),
+                    rawCount = 2,
+                    incompleteCount = 0,
+                    playlistMeta = PlaylistHeaderMeta(
+                        title = "Sholawat Pop Terpopuler",
+                        channel = "Jatim Events",
+                        thumbnailUrl = "https://i.ytimg.com/pl_c/PLZWOZMU6bkmA/generated_thumbnail.jpg",
+                        totalCount = 25,
+                    ),
+                )
+            }
+            f.session.openPlaylistUrl("PLZWOZMU6bkmA")
+            val state = f.session.search.value
+            assertEquals("PLZWOZMU6bkmA", state.playlistId)
+            assertEquals("Sholawat Pop Terpopuler", state.playlistTitle)
+            assertEquals("Jatim Events", state.playlistChannel)
+            assertEquals(25, state.playlistTotalCount)
+            assertEquals(2, state.results.size)
+
+            f.session.leavePlaylist()
+            assertNull(f.session.search.value.playlistId)
+            assertFalse(f.session.search.value.busy)
+            assertNull(f.session.search.value.error)
         }
     }
 }

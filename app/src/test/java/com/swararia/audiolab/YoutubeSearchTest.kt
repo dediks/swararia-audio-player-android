@@ -72,4 +72,24 @@ class YoutubeSearchTest {
         assertEquals("https://yt3.googleusercontent.com/art=w544-h544", hit.thumbnailUrl)
         assertEquals(205L, hit.durationSeconds)
     }
+
+    @Test fun playlistMetaExtractsTitleCreatorCountAndAllowedThumbnail() {
+        val json = """{
+          "id": "PLZWOZMU6bkmA",
+          "title": "Sholawat Pop Terpopuler",
+          "channel": "Jatim Events",
+          "playlist_count": 25,
+          "thumbnails": [
+            {"url": "https://i.ytimg.com/pl_c/PLZWOZMU6bkmA/generated_thumbnail.jpg?sqp=1", "width": 720},
+            {"url": "https://evil.example/cover.jpg", "width": 900}
+          ],
+          "entries": []
+        }"""
+        val meta = YoutubeSearchJson.playlistMeta(json)
+        assertNotNull(meta)
+        assertEquals("Sholawat Pop Terpopuler", meta!!.title)
+        assertEquals("Jatim Events", meta.channel)
+        assertEquals(25, meta.totalCount)
+        assertEquals("https://i.ytimg.com/pl_c/PLZWOZMU6bkmA/generated_thumbnail.jpg?sqp=1", meta.thumbnailUrl)
+    }
 }

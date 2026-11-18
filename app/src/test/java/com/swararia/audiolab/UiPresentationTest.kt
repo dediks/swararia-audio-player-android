@@ -114,6 +114,10 @@ class UiPresentationTest {
         assertNull(UiPresentation.effectiveBitrateKbps(0L, 185_000L))
         assertNull(UiPresentation.effectiveBitrateKbps(5_000_000L, null))
         assertEquals("FLAC · --:--", UiPresentation.qualitySummary("Monokrom.flac", 0L, null))
+        assertEquals("OPUS · 132 kbps", UiPresentation.searchQualityLabel(132, "OPUS"))
+        assertEquals("128 kbps", UiPresentation.searchQualityLabel(128, null))
+        assertNull(UiPresentation.searchQualityLabel(null, "OPUS"))
+        assertNull(UiPresentation.searchQualityLabel(0, "OPUS"))
     }
 
     @Test fun downloadSummaryAndFiltersGroupStatusesAccurately() {
