@@ -739,10 +739,17 @@ class MediaLibrary(private val context: Context, private val database: AudioData
 
     override suspend fun openReadableTrack(trackId: Long): ReadableManagedMedia? = withContext(Dispatchers.IO) {
         if (trackId <= 0L) return@withContext null
-        val track = database.tracks().find(trackId) ?: return@withContext null
+        var track = database.tracks().find(trackId) ?: return@withContext null
         if (!isManagedUri(track.uri)) return@withContext null
         val ext = track.displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
         val mime = AUDIO_TYPES[ext] ?: return@withContext null
+        if (track.sha256.isNullOrBlank()) {
+            val digest = AudioFileInspector.computeUriSha256(resolver, Uri.parse(track.uri))
+            if (digest != null) {
+                database.tracks().updateSha256(track.id, digest)
+                track = track.copy(sha256 = digest)
+            }
+        }
         if (isLegacyUri(track.uri)) {
             val (stream, size) = legacyStorage.openReadable(track.uri) ?: return@withContext null
             return@withContext ReadableManagedMedia(

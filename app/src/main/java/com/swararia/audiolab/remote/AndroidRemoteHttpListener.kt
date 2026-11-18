@@ -28,6 +28,7 @@ data class RemoteDownloadMedia(
     val mimeType: String,
     val sizeBytes: Long,
     val inputStream: InputStream,
+    val sha256: String? = null,
 )
 
 data class RemoteUploadImportResult(
@@ -305,7 +306,7 @@ class AndroidRemoteHttpListener(
         socket: SSLSocket,
         armDeadline: (Long) -> Unit,
     ) {
-        if (req.method != "GET" && req.method != "POST") {
+        if (req.method != "GET" && req.method != "POST" && req.method != "HEAD") {
             throw RemoteServerError("method_not_allowed", 405)
         }
         engine.checkRateLimit("all")
@@ -337,10 +338,16 @@ class AndroidRemoteHttpListener(
         val path = req.path
         val cmdStatusId = CMD_STATUS_V1_REGEX.matchEntire(path)?.groupValues?.get(1)
         val mediaDownloadId = MEDIA_DOWNLOAD_V1_REGEX.matchEntire(path)?.groupValues?.get(1)
+            ?: MEDIA_TRACK_V1_REGEX.matchEntire(path)?.groupValues?.get(1)
 
         val knownPost = path == "/v1/pair" || path == "/v1/commands" || path == "/v1/library/upload"
         val knownGet = path == "/v1/session" || path == "/v1/capabilities" || path == "/v1/state" ||
             path == "/v1/tracks" || path == "/v1/library/manifest" || cmdStatusId != null || mediaDownloadId != null
+
+        if (req.method == "HEAD" && mediaDownloadId == null) {
+            val known = knownGet || knownPost
+            throw RemoteServerError(if (known) "method_not_allowed" else "unknown_route", if (known) 405 else 404)
+        }
 
         if (req.method == "POST") {
             if (!knownPost) {
@@ -401,7 +408,7 @@ class AndroidRemoteHttpListener(
             }
             mediaDownloadId != null -> {
                 engine.authenticateNative(bearer, requireActive = true, requireControl = true, requireTransfer = true)
-                handleMediaDownload(output, socket, armDeadline, mediaDownloadId)
+                handleMediaDownload(output, socket, armDeadline, mediaDownloadId, headOnly = (req.method == "HEAD"))
             }
         }
     }
@@ -413,6 +420,9 @@ class AndroidRemoteHttpListener(
         socket: SSLSocket,
         armDeadline: (Long) -> Unit,
     ) {
+        if (req.method != "GET" && req.method != "POST") {
+            throw RemoteServerError("method_not_allowed", 405)
+        }
         val path = req.path
         if (req.method == "GET") {
             assertZeroContentLength(req)
@@ -578,6 +588,7 @@ class AndroidRemoteHttpListener(
         socket: SSLSocket,
         armDeadline: (Long) -> Unit,
         rawTrackId: String,
+        headOnly: Boolean = false,
     ) {
         val port = mediaPort ?: throw RemoteServerError("transfer_unavailable", 503)
         if (engine.isMediaTransferPausedByPlayback()) {
@@ -597,22 +608,34 @@ class AndroidRemoteHttpListener(
             media.inputStream.use { stream ->
                 armDeadline(MEDIA_CONNECTION_TTL_MS)
                 socket.soTimeout = MEDIA_SOCKET_TIMEOUT_MS
+                val cleanName = sanitizeAttachmentName(media.displayName)
+                val encodedName = percentEncodeUtf8(cleanName)
+                val shaHex = (media.sha256 ?: engine.trackSha256(trackNumId))
+                    ?.trim()
+                    ?.lowercase(Locale.ROOT)
+                    ?.takeIf { SHA256_HEX_REGEX.matches(it) }
                 val disposition = buildAttachmentDisposition(media.displayName)
                 val header = buildString {
                     append("HTTP/1.1 200 OK\r\n")
                     append("Content-Type: ").append(media.mimeType).append("\r\n")
                     append("Content-Length: ").append(media.sizeBytes).append("\r\n")
+                    if (shaHex != null) {
+                        append("X-Swararia-Sha256: ").append(shaHex).append("\r\n")
+                    }
+                    append("X-Swararia-Filename: ").append(encodedName).append("\r\n")
                     append("Content-Disposition: ").append(disposition).append("\r\n")
                     appendSecurityHeaders()
                     append("Connection: close\r\n\r\n")
                 }.toByteArray(Charsets.US_ASCII)
                 output.write(header)
 
-                val buf = ByteArray(MEDIA_BUFFER_BYTES)
-                while (true) {
-                    val read = stream.read(buf)
-                    if (read < 0) break
-                    if (read > 0) output.write(buf, 0, read)
+                if (!headOnly) {
+                    val buf = ByteArray(MEDIA_BUFFER_BYTES)
+                    while (true) {
+                        val read = stream.read(buf)
+                        if (read < 0) break
+                        if (read > 0) output.write(buf, 0, read)
+                    }
                 }
                 output.flush()
             }
@@ -971,16 +994,12 @@ class AndroidRemoteHttpListener(
         return runCatching { String(out.toByteArray(), Charsets.UTF_8) }.getOrNull()
     }
 
-    private fun buildAttachmentDisposition(displayName: String): String {
-        val clean = displayName.replace('\\', '_').replace('/', '_').filter { !it.isISOControl() }.ifBlank { "audio" }
-        val asciiFallback = buildString {
-            for (ch in clean.take(120)) {
-                val safe = ch.code in 0x20..0x7E && ch != '"' && ch != ';'
-                append(if (safe) ch else '_')
-            }
-        }.ifBlank { "audio" }
-        val utf8Bytes = clean.toByteArray(Charsets.UTF_8)
-        val rfc5987 = buildString {
+    private fun sanitizeAttachmentName(displayName: String): String =
+        displayName.replace('\\', '_').replace('/', '_').filter { !it.isISOControl() }.ifBlank { "audio" }
+
+    private fun percentEncodeUtf8(raw: String): String {
+        val utf8Bytes = raw.toByteArray(Charsets.UTF_8)
+        return buildString(utf8Bytes.size) {
             for (b in utf8Bytes) {
                 val c = b.toInt() and 0xFF
                 val unreserved = c in 'a'.code..'z'.code || c in 'A'.code..'Z'.code ||
@@ -988,6 +1007,17 @@ class AndroidRemoteHttpListener(
                 if (unreserved) append(c.toChar()) else append("%%%02X".format(Locale.ROOT, c))
             }
         }
+    }
+
+    private fun buildAttachmentDisposition(displayName: String): String {
+        val clean = sanitizeAttachmentName(displayName)
+        val asciiFallback = buildString {
+            for (ch in clean.take(120)) {
+                val safe = ch.code in 0x20..0x7E && ch != '"' && ch != ';'
+                append(if (safe) ch else '_')
+            }
+        }.ifBlank { "audio" }
+        val rfc5987 = percentEncodeUtf8(clean)
         return "attachment; filename=\"$asciiFallback\"; filename*=UTF-8''$rfc5987"
     }
 
@@ -1016,6 +1046,7 @@ class AndroidRemoteHttpListener(
         private val SHA256_HEX_REGEX = Regex("[0-9a-f]{64}")
         private val CMD_STATUS_V1_REGEX = Regex("/v1/commands/([A-Za-z0-9_-]{24})")
         private val MEDIA_DOWNLOAD_V1_REGEX = Regex("/v1/library/media/((?:trk_)?[1-9][0-9]{0,18})")
+        private val MEDIA_TRACK_V1_REGEX = Regex("/v1/tracks/([A-Za-z0-9_-]{3,32})/media")
         private val CMD_STATUS_WEB_REGEX = Regex("/web/commands/([A-Za-z0-9_-]{24})")
         private val MEDIA_DOWNLOAD_WEB_REGEX = Regex("/web/media/((?:trk_)?[1-9][0-9]{0,18})")
     }

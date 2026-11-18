@@ -446,4 +446,32 @@ class DesktopRemoteSessionTest {
         } finally { scope.cancel() }
     }
 
+    @Test fun connectReportsDistinctStaticMessagesByFailureKind() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            var pairError: DesktopRemoteFailure.Kind = DesktopRemoteFailure.Kind.TRUST
+            val port = object : DesktopRemoteApi {
+                override suspend fun pair(pairing: DesktopRemotePairing) = throw DesktopRemoteFailure(pairError)
+                override suspend fun session(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) = error("unused")
+                override suspend fun capabilities(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) = emptySet<String>()
+                override suspend fun state(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) = error("unused")
+                override suspend fun command(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, action: String, key: String) = error("unused")
+                override suspend fun commandStatus(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, id: String) = error("unused")
+            }
+            val session = DesktopRemoteSession(port, scope, 100_000)
+            session.visible(Any())
+
+            session.connect(pairing); settle()
+            assertTrue(session.state.value.message?.contains("TLS") == true)
+
+            pairError = DesktopRemoteFailure.Kind.AUTH
+            session.connect(pairing); settle()
+            assertTrue(session.state.value.message?.contains("kedaluwarsa") == true)
+
+            pairError = DesktopRemoteFailure.Kind.UNAVAILABLE
+            session.connect(pairing); settle()
+            assertTrue(session.state.value.message?.contains("Firewall") == true)
+        } finally { scope.cancel() }
+    }
+
 }

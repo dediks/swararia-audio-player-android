@@ -57,6 +57,7 @@ object DesktopRemoteWireProbe {
             }
             val catalog = api.tracks(connection, grant)
             check(catalog.online)
+            check(catalog.tracks.any { it.id == "trk_1" })
             val state = api.state(connection, grant)
             check(state.online && state.title == "Wire fixture.wav")
             val sent = api.command(connection, grant, "play", UUID.randomUUID().toString())
@@ -67,6 +68,27 @@ object DesktopRemoteWireProbe {
             }
             check(result.status == "rejected") { "Fixture has no audio and must never report applied" }
             println("PASS wire desktop: actual HTTPS pairing, approval, capabilities, state and accepted-to-rejected command")
+
+            check(control("MEDIA_ON") == "OK")
+            val mediaMeta = DesktopRemoteJson.objectValue(control("MEDIA_META").toByteArray())
+            val capsWithMedia = api.capabilitiesInfo(connection, grant)
+            check(capsWithMedia.media && capsWithMedia.mediaMaxBytes > 0L) { "Desktop media capability missing" }
+            val expectedTrackId = mediaMeta["track_id"].textValue()
+            val expectedFilename = mediaMeta["filename"].textValue()
+            val expectedSize = mediaMeta["size_bytes"].longValue()
+            val expectedSha = mediaMeta["sha256"].textValue()
+            val head = api.headTrackMedia(connection, grant, expectedTrackId)
+            check(head.filename == expectedFilename && head.mimeType == "audio/mpeg" && head.sizeBytes == expectedSize && head.sha256 == expectedSha) {
+                "Media HEAD mismatch: $head"
+            }
+            val downloadedFile = directory.resolve("downloaded-track.mp3").toFile()
+            val downloaded = api.downloadTrackMedia(connection, grant, expectedTrackId, downloadedFile, capsWithMedia.mediaMaxBytes)
+            check(downloaded.sha256 == expectedSha && downloadedFile.length() == expectedSize)
+            Files.deleteIfExists(downloadedFile.toPath())
+            check(control("MEDIA_OFF") == "OK")
+            try { api.headTrackMedia(connection, grant, expectedTrackId); error("Disabled media accepted") }
+            catch (failure: DesktopRemoteFailure) { check(failure.reason == DesktopRemoteFailure.Reason.MEDIA_DISABLED) }
+            println("PASS wire media: actual HEAD/GET audio streaming, decoded filename, and SHA-256 verification")
 
             fun posts(): Int = DesktopRemoteJson.objectValue(control("STATS").toByteArray())["command_posts"].intValue()
             val before = posts()

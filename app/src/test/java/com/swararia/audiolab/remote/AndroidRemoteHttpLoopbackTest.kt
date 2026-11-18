@@ -122,6 +122,18 @@ class AndroidRemoteHttpLoopbackTest {
                 executedActions.add(req.action)
                 RemoteCommandExecutionResult(applied = true)
             },
+            mediaPort = object : RemoteServerMediaPort {
+                override fun createTempUploadFile(): File = tempFolder.newFile("native-dl-${System.nanoTime()}.part")
+                override fun openMediaForDownload(trackNumericId: Long): RemoteDownloadMedia? =
+                    if (trackNumericId == 11L) RemoteDownloadMedia("Stage + Intro.mp3", "audio/mpeg", sampleBytes.size.toLong(), ByteArrayInputStream(sampleBytes), sampleSha)
+                    else null
+                override fun importValidatedUpload(
+                    stagedFile: File,
+                    requestedName: String,
+                    expectedSha256: String,
+                    playlistName: String?,
+                ): RemoteUploadImportResult = error("Unused in native read test")
+            },
         )
         try {
             val port = listener.actualPort
@@ -159,8 +171,11 @@ class AndroidRemoteHttpLoopbackTest {
 
             val capResp = sendHttp(ssl, port, "GET", "/v1/capabilities", headers = listOf("Authorization" to grant.authorization().bearer()))
             assertEquals(200, capResp.status)
-            val caps = DesktopRemoteJson.capabilities(DesktopRemoteJson.objectValue(capResp.body))
-            assertTrue("fade_out" in caps && "select_group" in caps)
+            val capNode = DesktopRemoteJson.objectValue(capResp.body)
+            val caps = DesktopRemoteJson.capabilitiesInfo(capNode)
+            assertTrue("fade_out" in caps.commands && "select_group" in caps.commands)
+            assertFalse(caps.media)
+            assertTrue(caps.mediaMaxBytes > 0L)
 
             val stateResp = sendHttp(ssl, port, "GET", "/v1/state", headers = listOf("Authorization" to grant.authorization().bearer()))
             val playback = DesktopRemoteJson.playback(DesktopRemoteJson.objectValue(stateResp.body))
@@ -172,6 +187,17 @@ class AndroidRemoteHttpLoopbackTest {
             assertEquals("trk_11", catalog.currentTrackId)
             assertEquals(2, catalog.groups.size)
 
+            // Native v1 media compatibility: paused-by-playback returns 409; once paused, HEAD + GET return SHA-256 & encoded filename.
+            engine.setMediaTransferEnabled(true)
+            engine.setDeviceTransferAllowed(grant.deviceId, true)
+            val capMedia = DesktopRemoteJson.capabilitiesInfo(
+                DesktopRemoteJson.objectValue(
+                    sendHttp(ssl, port, "GET", "/v1/capabilities", headers = listOf("Authorization" to grant.authorization().bearer())).body,
+                ),
+            )
+            assertTrue(capMedia.media)
+            assertEquals(409, sendHttp(ssl, port, "HEAD", "/v1/tracks/trk_11/media", headers = listOf("Authorization" to grant.authorization().bearer())).status)
+
             val cmdResp = sendHttp(
                 ssl, port, "POST", "/v1/commands",
                 headers = listOf("Authorization" to grant.authorization().bearer(), "Content-Type" to "application/json"),
@@ -181,6 +207,19 @@ class AndroidRemoteHttpLoopbackTest {
             val cmd = DesktopRemoteJson.command(DesktopRemoteJson.objectValue(cmdResp.body))
             assertEquals("applied", cmd.status)
             assertEquals(listOf("pause"), executedActions)
+
+            engine.updatePlayback(RemoteServerPlaybackSnapshot(online = true, playing = false, transportState = "PAUSED", currentTimeSec = 2.5, durationSec = 9.5, currentTrackNumericId = 11L))
+            val headMedia = sendHttp(ssl, port, "HEAD", "/v1/tracks/trk_11/media", headers = listOf("Authorization" to grant.authorization().bearer()))
+            assertEquals(200, headMedia.status)
+            assertEquals(0, headMedia.body.size)
+            assertEquals(sampleSha, headMedia.header("x-swararia-sha256"))
+            assertEquals("Stage%20%2B%20Intro.mp3", headMedia.header("x-swararia-filename"))
+            assertEquals(sampleBytes.size.toString(), headMedia.header("content-length"))
+            val getMedia = sendHttp(ssl, port, "GET", "/v1/tracks/trk_11/media", headers = listOf("Authorization" to grant.authorization().bearer()))
+            assertEquals(200, getMedia.status)
+            assertArrayEquals(sampleBytes, getMedia.body)
+            assertEquals(405, sendHttp(ssl, port, "HEAD", "/v1/state", headers = listOf("Authorization" to grant.authorization().bearer())).status)
+            assertEquals(405, sendHttp(ssl, port, "HEAD", "/").status)
         } finally {
             listener.close()
         }

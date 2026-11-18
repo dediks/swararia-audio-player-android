@@ -397,10 +397,6 @@ internal fun MiniPlayer(
                         positionMsProvider = positionMsProvider,
                     )
                 }
-                CompactSignalVisualizer(
-                    playing = playback.playing,
-                    barCount = 5,
-                )
                 if (faderState.isAttenuated) {
                     LocalFohLevelPill(faderState = faderState, compact = true)
                 }

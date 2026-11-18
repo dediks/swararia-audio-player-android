@@ -78,7 +78,6 @@ internal fun LibraryPage(
         if (cueOnly) onCueQueue(track, queue) else onPlayQueue(track, queue)
     },
     onToggleCurrentPlayPause: () -> Unit = {},
-    onOpenPlayer: () -> Unit = {},
     onOpenStageRta: () -> Unit = {},
     onOpenBrandStudio: () -> Unit = {},
     activeDownloadCount: Int = 0,
@@ -234,7 +233,6 @@ internal fun LibraryPage(
                                 onPlay = { track -> onPlayQueue(track, sortedMatching) },
                                 onCue = { track -> onCueQueue(track, sortedMatching) },
                                 onTogglePlayPause = onToggleCurrentPlayPause,
-                                onOpenPlayer = onOpenPlayer,
                                 onInspectDetails = onInspectDetails,
                                 onRename = onRename,
                                 onAddToPlaylist = { track -> state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
@@ -282,7 +280,6 @@ internal fun LibraryPage(
                                         onPlay = { track -> onPlayQueue(track, group.items) },
                                         onCue = { track -> onCueQueue(track, group.items) },
                                         onTogglePlayPause = onToggleCurrentPlayPause,
-                                        onOpenPlayer = onOpenPlayer,
                                         onInspectDetails = onInspectDetails,
                                         onRename = onRename,
                                         onAddToPlaylist = { track -> state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
@@ -370,7 +367,6 @@ internal fun LibraryPage(
                                     onPlay = { onPlayQueue(track, activePlaylistTracks) },
                                     onCue = { onCueQueue(track, activePlaylistTracks) },
                                     onTogglePlayPause = onToggleCurrentPlayPause,
-                                    onOpenPlayer = onOpenPlayer,
                                     onInspectDetails = { onInspectDetails(track) },
                                     onRename = { onRename(track) },
                                     onAddToPlaylist = { state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
@@ -404,7 +400,6 @@ internal fun LibraryPage(
                                 onPlay = { track -> onPlayQueue(track, activePlaylistTracks) },
                                 onCue = { track -> onCueQueue(track, activePlaylistTracks) },
                                 onTogglePlayPause = onToggleCurrentPlayPause,
-                                onOpenPlayer = onOpenPlayer,
                                 onInspectDetails = onInspectDetails,
                                 onRename = onRename,
                                 onAddToPlaylist = { track -> state.dialog = LibraryDialog.PickPlaylistForTrack(track) },
@@ -530,7 +525,6 @@ private fun LazyListScope.libraryTracksItems(
     onPlay: (AudioTrack) -> Unit,
     onCue: (AudioTrack) -> Unit,
     onTogglePlayPause: () -> Unit,
-    onOpenPlayer: () -> Unit,
     onInspectDetails: (AudioTrack) -> Unit,
     onRename: (AudioTrack) -> Unit,
     onAddToPlaylist: (AudioTrack) -> Unit,
@@ -566,7 +560,6 @@ private fun LazyListScope.libraryTracksItems(
                             onPlay = { onPlay(track) },
                             onCue = { onCue(track) },
                             onTogglePlayPause = onTogglePlayPause,
-                            onOpenPlayer = onOpenPlayer,
                             onInspectDetails = { onInspectDetails(track) },
                             onRename = { onRename(track) },
                             onAddToPlaylist = { onAddToPlaylist(track) },
@@ -601,7 +594,6 @@ private fun LazyListScope.libraryTracksItems(
                     onPlay = { onPlay(track) },
                     onCue = { onCue(track) },
                     onTogglePlayPause = onTogglePlayPause,
-                    onOpenPlayer = onOpenPlayer,
                     onInspectDetails = { onInspectDetails(track) },
                     onRename = { onRename(track) },
                     onAddToPlaylist = { onAddToPlaylist(track) },
@@ -630,7 +622,6 @@ private fun LazyListScope.libraryTracksItems(
                     onPlay = { onPlay(track) },
                     onCue = { onCue(track) },
                     onTogglePlayPause = onTogglePlayPause,
-                    onOpenPlayer = onOpenPlayer,
                     onInspectDetails = { onInspectDetails(track) },
                     onRename = { onRename(track) },
                     onAddToPlaylist = { onAddToPlaylist(track) },
@@ -734,7 +725,6 @@ private fun LibraryAudioRow(
     onPlay: () -> Unit,
     onCue: () -> Unit,
     onTogglePlayPause: () -> Unit = {},
-    onOpenPlayer: () -> Unit = {},
     onInspectDetails: () -> Unit = {},
     onRename: () -> Unit,
     onAddToPlaylist: () -> Unit,
@@ -757,7 +747,7 @@ private fun LibraryAudioRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 66.dp)
+                .heightIn(min = 72.dp)
                 .semantics { this.selected = selected || selectionChecked == true }
                 .combinedClickable(
                     enabled = inSelection || (connected && reorderControls == null),
@@ -770,7 +760,7 @@ private fun LibraryAudioRow(
                     onClick = { if (inSelection) onToggleSelect() else onPlay() },
                     onLongClick = { if (reorderControls == null) onLongPress() },
                 )
-                .padding(start = 10.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                .padding(start = 10.dp, end = 6.dp, top = 9.dp, bottom = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -788,26 +778,61 @@ private fun LibraryAudioRow(
                 )
             }
 
-            FohAnimatedTrackArtwork(
+            LibraryPlayableArtwork(
                 artworkKey = track.artworkKey,
-                active = selected,
-                playing = wantsPlay,
-                size = 46.dp,
-                cornerRadius = 9.dp,
+                selected = selected,
+                wantsPlay = wantsPlay,
+                connected = connected,
+                showPlayControl = !inSelection && reorderControls == null,
+                onTogglePlay = { if (selected) onTogglePlayPause() else onPlay() },
+                size = 52.dp,
+                cornerRadius = 11.dp,
+                buttonSize = 28.dp,
+                iconSize = 14.dp,
             )
 
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = UiPresentation.title(track.displayName),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = when {
-                        (selected && wantsPlay) || highlighted -> FohTheme.colors.safeAccent
-                        selected -> FohTheme.colors.warnAccent
-                        else -> MaterialTheme.colorScheme.onSurface
-                    },
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                val hasDuration = track.durationMs != null && track.durationMs >= 0L
+                val showPlayingWaves = selected && !inSelection && reorderControls == null && wantsPlay
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = UiPresentation.title(track.displayName),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                        color = when {
+                            (selected && wantsPlay) || highlighted -> FohTheme.colors.safeAccent
+                            selected -> FohTheme.colors.warnAccent
+                            else -> MaterialTheme.colorScheme.onSurface
+                        },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (hasDuration || showPlayingWaves) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(top = 2.dp),
+                        ) {
+                            if (showPlayingWaves) {
+                                FohWaveBarsIndicator(width = 11.dp, height = 10.dp)
+                            }
+                            if (hasDuration) {
+                                Text(
+                                    text = LibraryRules.durationLabel(track.durationMs),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = if (selected && wantsPlay) FohTheme.colors.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
+                            }
+                        }
+                    }
+                }
                 val creatorLine = listOfNotNull(
                     LibraryRules.sanitizedTag(track.artist),
                     LibraryRules.sanitizedTag(track.album),
@@ -821,41 +846,44 @@ private fun LibraryAudioRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Text(
-                    text = UiPresentation.qualitySummary(track.displayName, track.sizeBytes, track.durationMs),
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                )
                 val qualityBadge = UiPresentation.highBitrateBadge(track.displayName, track.sizeBytes, track.durationMs)
-                if (playlistBadge != null || reorderBadge != null || qualityBadge != null) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (reorderBadge != null) {
-                            LibraryMiniBadge(
-                                label = reorderBadge,
-                                containerColor = FohTheme.colors.safeBg,
-                                borderColor = FohTheme.colors.safeBorder,
-                                contentColor = FohTheme.colors.safeAccent,
-                            )
-                        } else if (playlistBadge != null) {
-                            LibraryMiniBadge(
-                                label = "↳ $playlistBadge",
-                                containerColor = FohTheme.colors.surfaceDeep,
-                                borderColor = FohTheme.colors.borderSubtle,
-                                contentColor = FohTheme.colors.safeAccent,
-                            )
-                        }
-                        if (qualityBadge != null) {
-                            LibraryMiniBadge(
-                                label = qualityBadge,
-                                containerColor = FohTheme.colors.safeBg,
-                                borderColor = FohTheme.colors.safeBorder,
-                                contentColor = FohTheme.colors.safeAccent,
-                            )
-                        }
+                val techSpec = libraryTrackTechSpec(track)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (reorderBadge != null) {
+                        LibraryMiniBadge(
+                            label = reorderBadge,
+                            containerColor = FohTheme.colors.safeBg,
+                            borderColor = FohTheme.colors.safeBorder,
+                            contentColor = FohTheme.colors.safeAccent,
+                        )
+                    } else if (playlistBadge != null) {
+                        LibraryMiniBadge(
+                            label = "↳ $playlistBadge",
+                            containerColor = FohTheme.colors.surfaceDeep,
+                            borderColor = FohTheme.colors.borderSubtle,
+                            contentColor = FohTheme.colors.safeAccent,
+                        )
+                    }
+                    if (qualityBadge != null) {
+                        LibraryMiniBadge(
+                            label = qualityBadge,
+                            containerColor = FohTheme.colors.safeBg,
+                            borderColor = FohTheme.colors.safeBorder,
+                            contentColor = FohTheme.colors.safeAccent,
+                        )
+                    }
+                    if (techSpec.isNotEmpty()) {
+                        Text(
+                            text = techSpec,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
@@ -894,46 +922,19 @@ private fun LibraryAudioRow(
                     )
                 }
             } else if (!inSelection) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    if (selected) {
-                        CompactCircleButton(
-                            icon = if (wantsPlay) UiIcons.Pause else UiIcons.Play,
-                            description = if (wantsPlay) "Jeda audio" else "Putar audio",
-                            onClick = onTogglePlayPause,
-                            enabled = connected,
-                            size = 32.dp,
-                            iconSize = 16.dp,
-                            containerColor = if (wantsPlay) FohTheme.colors.safeBg else FohTheme.colors.warnBg,
-                            contentColor = if (wantsPlay) FohTheme.colors.safeAccent else FohTheme.colors.warnAccent,
-                        )
-                        CompactCircleButton(
-                            icon = UiIcons.ChevronUp,
-                            description = "Buka pemutar lengkap",
-                            onClick = onOpenPlayer,
-                            enabled = connected,
-                            size = 32.dp,
-                            iconSize = 18.dp,
-                            containerColor = FohTheme.colors.surfaceDeep,
-                            contentColor = FohTheme.colors.safeAccent,
-                        )
-                    }
-                    LibraryTrackActionMenuButton(
-                        track = track,
-                        selected = selected,
-                        connected = connected,
-                        renameEnabled = renameEnabled,
-                        compact = false,
-                        onShowDetails = onInspectDetails,
-                        onCue = onCue,
-                        onAddToPlaylist = onAddToPlaylist,
-                        onRemoveFromPlaylist = onRemoveFromPlaylist,
-                        onRename = onRename,
-                        onDelete = onDelete,
-                    )
-                }
+                LibraryTrackActionMenuButton(
+                    track = track,
+                    selected = selected,
+                    connected = connected,
+                    renameEnabled = renameEnabled,
+                    compact = false,
+                    onShowDetails = onInspectDetails,
+                    onCue = onCue,
+                    onAddToPlaylist = onAddToPlaylist,
+                    onRemoveFromPlaylist = onRemoveFromPlaylist,
+                    onRename = onRename,
+                    onDelete = onDelete,
+                )
             }
         }
     }

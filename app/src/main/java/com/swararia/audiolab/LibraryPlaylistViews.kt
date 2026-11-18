@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Badge
@@ -88,7 +86,6 @@ internal fun LibraryCompactHeader(
     welcomeBanner: (@Composable () -> Unit)? = null,
 ) {
     var appMenu by remember { mutableStateOf(false) }
-    var sortMenu by remember { mutableStateOf(false) }
     var searchVisible by rememberSaveable { mutableStateOf(false) }
     val showSearchField = searchVisible || query.isNotEmpty()
     val brand = FohTheme.brand
@@ -289,50 +286,133 @@ internal fun LibraryCompactHeader(
         }
 
         if (section == LibrarySectionTab.ALL_TRACKS) {
+            LibraryAllTracksControlPanel(
+                groupMode = groupMode,
+                alphabetical = alphabetical,
+                viewType = viewType,
+                onSelectGroupMode = onSelectGroupMode,
+                onToggleSort = onToggleSort,
+                onSelectViewType = onSelectViewType,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryAllTracksControlPanel(
+    groupMode: LibraryGroupMode,
+    alphabetical: Boolean,
+    viewType: LibrarySongViewType,
+    onSelectGroupMode: (LibraryGroupMode) -> Unit,
+    onToggleSort: (Boolean) -> Unit,
+    onSelectViewType: (LibrarySongViewType) -> Unit,
+) {
+    val foh = FohTheme.colors
+    var sortMenu by remember { mutableStateOf(false) }
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = foh.surfaceCard.copy(alpha = 0.85f),
+        border = BorderStroke(1.dp, foh.borderSubtle.copy(alpha = 0.78f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = foh.surfaceDeep.copy(alpha = 0.85f),
+                border = BorderStroke(1.dp, foh.borderSubtle.copy(alpha = 0.55f)),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    LibraryGroupMode.entries.forEach { mode ->
+                        val active = mode == groupMode
+                        Surface(
+                            onClick = { onSelectGroupMode(mode) },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (active) foh.safeBg else Color.Transparent,
+                            border = if (active) BorderStroke(1.dp, foh.safeBorder) else null,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 32.dp),
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                            ) {
+                                Text(
+                                    text = mode.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                                    color = if (active) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    LibraryGroupMode.entries.forEach { mode ->
-                        FohFilterChip(
-                            label = mode.label,
-                            selected = mode == groupMode,
-                            onClick = { onSelectGroupMode(mode) },
-                        )
-                    }
-                }
-                Box {
+                Box(modifier = Modifier.weight(1f)) {
                     Surface(
                         onClick = { sortMenu = true },
                         shape = RoundedCornerShape(10.dp),
-                        color = Color.Transparent,
-                        modifier = Modifier.semantics {
-                            contentDescription = "Urutkan audio: ${if (alphabetical) "A–Z" else "Terbaru"}"
-                        },
+                        color = if (alphabetical) foh.safeBg else foh.surfaceDeep.copy(alpha = 0.85f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (alphabetical) foh.safeBorder else foh.borderSubtle.copy(alpha = 0.7f),
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 34.dp)
+                            .semantics {
+                                contentDescription = "Urutkan audio: ${if (alphabetical) "A–Z" else "Terbaru"}"
+                            },
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
+                            Icon(
+                                imageVector = UiIcons.Reorder,
+                                contentDescription = null,
+                                tint = if (alphabetical) foh.safeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp),
+                            )
                             Text(
                                 text = if (alphabetical) "A–Z" else "Terbaru",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (alphabetical) foh.safeAccent else MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
                             )
                             Icon(
-                                UiIcons.ChevronDown,
+                                imageVector = UiIcons.ChevronDown,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(15.dp),
                             )
                         }
                     }
@@ -349,9 +429,12 @@ internal fun LibraryCompactHeader(
                         )
                     }
                 }
+
                 LibraryViewTypeButton(
                     viewType = viewType,
                     onSelectViewType = onSelectViewType,
+                    fillWidth = true,
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
@@ -365,6 +448,7 @@ internal fun LibraryViewTypeButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     compact: Boolean = false,
+    fillWidth: Boolean = false,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val foh = FohTheme.colors
@@ -374,19 +458,33 @@ internal fun LibraryViewTypeButton(
             onClick = { menuOpen = true },
             enabled = enabled,
             shape = RoundedCornerShape(10.dp),
-            color = if (nonDefault) foh.safeBg else foh.surfaceCard,
-            border = BorderStroke(1.dp, if (nonDefault) foh.safeBorder else foh.borderSubtle),
+            color = when {
+                nonDefault -> foh.safeBg
+                fillWidth -> foh.surfaceDeep.copy(alpha = 0.85f)
+                else -> foh.surfaceCard
+            },
+            border = BorderStroke(
+                1.dp,
+                when {
+                    nonDefault -> foh.safeBorder
+                    fillWidth -> foh.borderSubtle.copy(alpha = 0.7f)
+                    else -> foh.borderSubtle
+                },
+            ),
             modifier = Modifier
+                .let { if (fillWidth) it.fillMaxWidth() else it }
                 .heightIn(min = if (compact) 38.dp else 34.dp)
                 .semantics { contentDescription = "Tampilan daftar lagu: ${viewType.label}" },
         ) {
             Row(
-                modifier = Modifier.padding(
-                    horizontal = if (compact) 10.dp else 8.dp,
-                    vertical = 6.dp,
-                ),
+                modifier = Modifier
+                    .let { if (fillWidth) it.fillMaxWidth() else it }
+                    .padding(
+                        horizontal = if (compact || fillWidth) 10.dp else 8.dp,
+                        vertical = 6.dp,
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (fillWidth) 6.dp else 4.dp),
             ) {
                 Icon(
                     imageVector = UiIcons.forSongViewType(viewType),
@@ -396,9 +494,9 @@ internal fun LibraryViewTypeButton(
                     } else if (nonDefault) {
                         foh.safeAccent
                     } else {
-                        MaterialTheme.colorScheme.onSurface
+                        MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(if (fillWidth) 15.dp else 16.dp),
                 )
                 if (!compact) {
                     Text(
@@ -414,13 +512,15 @@ internal fun LibraryViewTypeButton(
                         },
                         maxLines = 1,
                         softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = if (fillWidth) Modifier.weight(1f) else Modifier,
                     )
                 }
                 Icon(
                     imageVector = UiIcons.ChevronDown,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(if (fillWidth) 15.dp else 14.dp),
                 )
             }
         }

@@ -588,9 +588,14 @@ class AndroidRemoteServerEngine(
             "protocol" to "v1",
             "commands" to ALLOWED_ACTIONS,
             "media" to (mediaTransferEnabled && device.transferAllowed && device.role == "control"),
+            "media_max_bytes" to MAX_UPLOAD_BYTES,
             "command_ttl_seconds" to COMMAND_TTL_SEC.toInt(),
             "idempotency_ttl_seconds" to RECORD_TTL_SEC.toInt(),
         )
+    }
+
+    fun trackSha256(numericId: Long): String? = synchronized(lock) {
+        tracksByNumericId[numericId]?.sha256
     }
 
     fun statePayload(device: RemoteDeviceSnapshot): Map<String, Any?> = synchronized(lock) {

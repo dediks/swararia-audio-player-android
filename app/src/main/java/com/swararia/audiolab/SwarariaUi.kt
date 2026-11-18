@@ -348,7 +348,6 @@ fun SwarariaUi(
                                 dispatchGuardedSwitch(showTitle, track, queue, cueOnly)
                             },
                             onToggleCurrentPlayPause = { toggleSwarariaPlayback(controller) },
-                            onOpenPlayer = { navigateTab(MainRootTab.LIVE_DECK) },
                             onOpenStageRta = { navigateTab(MainRootTab.STAGE_RTA) },
                             onOpenBrandStudio = openBrandStudio,
                             activeDownloadCount = activeDownloadCount,

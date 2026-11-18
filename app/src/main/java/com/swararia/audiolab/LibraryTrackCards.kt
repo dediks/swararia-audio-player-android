@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -37,6 +38,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.swararia.audiolab.brandskin.BrandSkinConfig
 import com.swararia.audiolab.brandskin.PrestigeBrandEmblem
@@ -205,6 +207,104 @@ internal fun trackSelectionPalette(
     return activeContainer to borderStroke
 }
 
+/** Shared artwork frame with a centered Play/Pause toggle overlay across Library track views. */
+@Composable
+internal fun LibraryPlayableArtwork(
+    artworkKey: String?,
+    selected: Boolean,
+    wantsPlay: Boolean,
+    connected: Boolean,
+    showPlayControl: Boolean,
+    onTogglePlay: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Dp = 52.dp,
+    cornerRadius: Dp = 11.dp,
+    buttonSize: Dp = 28.dp,
+    iconSize: Dp = 14.dp,
+) {
+    Box(
+        modifier = modifier.size(size),
+        contentAlignment = Alignment.Center,
+    ) {
+        FohAnimatedTrackArtwork(
+            artworkKey = artworkKey,
+            active = selected,
+            playing = wantsPlay,
+            size = size,
+            cornerRadius = cornerRadius,
+        )
+        if (showPlayControl) {
+            LibraryArtworkPlayButton(
+                selected = selected,
+                wantsPlay = wantsPlay,
+                enabled = connected,
+                onClick = onTogglePlay,
+                size = buttonSize,
+                iconSize = iconSize,
+            )
+        }
+    }
+}
+
+/** Circular frosted/FOH Play-Pause button overlaid at the center of track artwork. */
+@Composable
+internal fun LibraryArtworkPlayButton(
+    selected: Boolean,
+    wantsPlay: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Dp = 28.dp,
+    iconSize: Dp = 14.dp,
+) {
+    val foh = FohTheme.colors
+    val isPlaying = selected && wantsPlay
+    val containerColor = when {
+        isPlaying -> foh.safeBg.copy(alpha = 0.92f)
+        selected -> foh.warnBg.copy(alpha = 0.92f)
+        else -> Color(0xAD080E0B)
+    }
+    val borderColor = when {
+        isPlaying -> foh.safeBorder
+        selected -> foh.warnBorder
+        else -> Color.White.copy(alpha = 0.28f)
+    }
+    val contentColor = when {
+        isPlaying -> foh.safeAccent
+        selected -> foh.warnAccent
+        else -> Color.White
+    }
+    val description = when {
+        isPlaying -> "Jeda audio"
+        selected -> "Lanjutkan audio"
+        else -> "Putar audio"
+    }
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = CircleShape,
+        color = containerColor,
+        border = BorderStroke(1.dp, borderColor),
+        modifier = modifier.size(size),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = if (isPlaying) UiIcons.Pause else UiIcons.Play,
+                contentDescription = description,
+                tint = if (enabled) contentColor else contentColor.copy(alpha = 0.38f),
+                modifier = Modifier.size(iconSize),
+            )
+        }
+    }
+}
+
+internal fun libraryTrackTechSpec(track: AudioTrack, includeDuration: Boolean = false): String = listOfNotNull(
+    LibraryRules.audioFormatLabel(track.displayName),
+    UiPresentation.effectiveBitrateKbps(track.sizeBytes, track.durationMs)?.let { "$it kbps" },
+    UiPresentation.fileSizeLabel(track.sizeBytes).takeIf { it.isNotEmpty() },
+    if (includeDuration) LibraryRules.durationLabel(track.durationMs) else null,
+).joinToString(" · ")
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun LibraryCompactAudioRow(
@@ -221,7 +321,6 @@ internal fun LibraryCompactAudioRow(
     onPlay: () -> Unit,
     onCue: () -> Unit,
     onTogglePlayPause: () -> Unit = {},
-    onOpenPlayer: () -> Unit = {},
     onInspectDetails: () -> Unit = {},
     onRename: () -> Unit,
     onAddToPlaylist: () -> Unit,
@@ -235,17 +334,17 @@ internal fun LibraryCompactAudioRow(
         selectionChecked = selectionChecked,
     )
     val compactSpec = UiPresentation.compactTrackSpec(track.displayName, track.sizeBytes, track.durationMs)
-    val artistOrBadge = track.artist?.takeIf { it.isNotBlank() } ?: playlistBadge
+    val artistOrBadge = LibraryRules.sanitizedTag(track.artist) ?: playlistBadge
 
     Surface(
-        shape = RoundedCornerShape(11.dp),
+        shape = RoundedCornerShape(12.dp),
         color = activeContainer,
         border = borderStroke,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 46.dp)
+                .heightIn(min = 52.dp)
                 .semantics { this.selected = selected || selectionChecked == true }
                 .combinedClickable(
                     enabled = inSelection || connected,
@@ -258,9 +357,9 @@ internal fun LibraryCompactAudioRow(
                     onClick = { if (inSelection) onToggleSelect() else onPlay() },
                     onLongClick = { onLongPress() },
                 )
-                .padding(start = 8.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
+                .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (inSelection) {
                 Checkbox(
@@ -277,15 +376,20 @@ internal fun LibraryCompactAudioRow(
                 )
             }
 
-            FohAnimatedTrackArtwork(
+            LibraryPlayableArtwork(
                 artworkKey = track.artworkKey,
-                active = selected,
-                playing = wantsPlay,
-                size = 30.dp,
-                cornerRadius = 7.dp,
+                selected = selected,
+                wantsPlay = wantsPlay,
+                connected = connected,
+                showPlayControl = !inSelection,
+                onTogglePlay = { if (selected) onTogglePlayPause() else onPlay() },
+                size = 40.dp,
+                cornerRadius = 9.dp,
+                buttonSize = 24.dp,
+                iconSize = 12.dp,
             )
 
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = UiPresentation.title(track.displayName),
                     style = MaterialTheme.typography.bodyMedium,
@@ -322,18 +426,6 @@ internal fun LibraryCompactAudioRow(
             )
 
             if (!inSelection) {
-                if (selected) {
-                    CompactCircleButton(
-                        icon = if (wantsPlay) UiIcons.Pause else UiIcons.Play,
-                        description = if (wantsPlay) "Jeda audio" else "Putar audio",
-                        onClick = onTogglePlayPause,
-                        enabled = connected,
-                        size = 28.dp,
-                        iconSize = 14.dp,
-                        containerColor = if (wantsPlay) FohTheme.colors.safeBg else FohTheme.colors.warnBg,
-                        contentColor = if (wantsPlay) FohTheme.colors.safeAccent else FohTheme.colors.warnAccent,
-                    )
-                }
                 LibraryTrackActionMenuButton(
                     track = track,
                     selected = selected,
@@ -368,7 +460,6 @@ internal fun LibraryGridAudioCard(
     onPlay: () -> Unit,
     onCue: () -> Unit,
     onTogglePlayPause: () -> Unit = {},
-    onOpenPlayer: () -> Unit = {},
     onInspectDetails: () -> Unit = {},
     onRename: () -> Unit,
     onAddToPlaylist: () -> Unit,
@@ -385,7 +476,7 @@ internal fun LibraryGridAudioCard(
     val formatLabel = LibraryRules.audioFormatLabel(track.displayName)
     val compactSpec = UiPresentation.compactTrackSpec(track.displayName, track.sizeBytes, track.durationMs)
     val subtitle = playlistBadge?.let { "↳ $it" }
-        ?: track.artist?.takeIf { it.isNotBlank() }
+        ?: LibraryRules.sanitizedTag(track.artist)
         ?: UiPresentation.fileSizeLabel(track.sizeBytes).ifEmpty { formatLabel }
 
     Surface(
@@ -524,18 +615,15 @@ internal fun LibraryGridAudioCard(
                     )
                 }
 
-                if (!inSelection && connected) {
-                    CompactCircleButton(
-                        icon = if (selected && wantsPlay) UiIcons.Pause else UiIcons.Play,
-                        description = if (selected && wantsPlay) "Jeda audio" else "Putar audio",
+                if (!inSelection) {
+                    LibraryArtworkPlayButton(
+                        selected = selected,
+                        wantsPlay = wantsPlay,
+                        enabled = connected,
                         onClick = { if (selected) onTogglePlayPause() else onPlay() },
-                        size = 30.dp,
-                        iconSize = 15.dp,
-                        containerColor = if (selected && wantsPlay) FohTheme.colors.safeBg else Color(0xCC0C1310),
-                        contentColor = if (selected && wantsPlay) FohTheme.colors.safeAccent else Color.White,
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(6.dp),
+                        size = 38.dp,
+                        iconSize = 18.dp,
+                        modifier = Modifier.align(Alignment.Center),
                     )
                 }
             }
@@ -543,8 +631,8 @@ internal fun LibraryGridAudioCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 9.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                    .padding(start = 10.dp, end = 4.dp, top = 7.dp, bottom = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Text(
                     text = UiPresentation.title(track.displayName),
@@ -572,18 +660,6 @@ internal fun LibraryGridAudioCard(
                         modifier = Modifier.weight(1f),
                     )
                     if (!inSelection) {
-                        if (selected) {
-                            CompactCircleButton(
-                                icon = UiIcons.ChevronUp,
-                                description = "Buka pemutar lengkap",
-                                onClick = onOpenPlayer,
-                                enabled = connected,
-                                size = 28.dp,
-                                iconSize = 15.dp,
-                                containerColor = FohTheme.colors.surfaceDeep,
-                                contentColor = FohTheme.colors.safeAccent,
-                            )
-                        }
                         LibraryTrackActionMenuButton(
                             track = track,
                             selected = selected,

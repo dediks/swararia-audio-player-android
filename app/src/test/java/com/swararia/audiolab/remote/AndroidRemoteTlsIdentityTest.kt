@@ -21,6 +21,11 @@ class AndroidRemoteTlsIdentityTest {
         assertEquals(43, identity.fingerprintBase64Url.length)
         assertEquals(64, identity.fingerprintHex.length)
 
+        // Certificate validity tolerates minor clock skew (notBefore >= 14 min earlier).
+        val skewed = AndroidRemoteTlsIdentity.generate(primaryIp = "127.0.0.1", nowMillis = 2_000_000_000_000L)
+        val skewDelta = 2_000_000_000_000L - skewed.certificate.notBefore.time
+        assertTrue("Expected >= 14 min notBefore skew tolerance, got $skewDelta ms", skewDelta >= 14 * 60_000L)
+
         val sanEntries = identity.certificate.subjectAlternativeNames
             ?.filter { (it[0] as? Int) == 7 }
             ?.mapNotNull { it[1] as? String }

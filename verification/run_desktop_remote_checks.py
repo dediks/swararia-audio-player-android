@@ -9,12 +9,16 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / '.cache/gradle/caches/modules-2/files-2.1'
-OUT = Path(os.environ['TMPDIR']) / 'swararia-desktop-remote-wire'
+OUT = Path(os.environ.get('TMPDIR') or '/tmp') / 'swararia-desktop-remote-wire'
 OUT.mkdir(parents=True, exist_ok=True)
 SRC = ROOT / 'app/src/main/java/com/swararia/audiolab'
-DESKTOP = Path(os.environ.get('SWARARIA_DESKTOP_REPO', str(ROOT.parent / 'swararia-desktop')))
+default_desktop = ROOT.parent / 'audio-library-starter'
+if not default_desktop.is_dir():
+    default_desktop = ROOT.parent / 'swararia-desktop'
+DESKTOP = Path(os.environ.get('SWARARIA_DESKTOP_REPO', str(default_desktop)))
 PYTHON = Path(os.environ.get('SWARARIA_DESKTOP_PYTHON', str(DESKTOP / '.venv/bin/python')))
-if not (DESKTOP / 'secure_remote.py').is_file() or not PYTHON.is_file():
+has_desktop_source = (DESKTOP / 'swararia/remote/secure_remote.py').is_file() or (DESKTOP / 'secure_remote.py').is_file()
+if not has_desktop_source or not PYTHON.is_file():
     raise SystemExit('Desktop source/test Python unavailable; set SWARARIA_DESKTOP_REPO/PYTHON explicitly.')
 
 

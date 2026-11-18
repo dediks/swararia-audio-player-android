@@ -55,7 +55,7 @@ object AndroidRemoteTlsIdentity {
             initialize(ECGenParameterSpec("secp256r1"), random)
         }.generateKeyPair()
 
-        val notBeforeMillis = nowMillis - 60_000L
+        val notBeforeMillis = nowMillis - 900_000L
         val notAfterMillis = nowMillis + ttlHours * 3_600_000L
 
         val serial = ByteArray(16).also { buf ->

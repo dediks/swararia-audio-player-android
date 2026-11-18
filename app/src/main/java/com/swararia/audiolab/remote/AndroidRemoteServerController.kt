@@ -442,6 +442,7 @@ class AndroidRemoteServerController(
                 mimeType = readable.mimeType,
                 sizeBytes = readable.sizeBytes,
                 inputStream = readable.inputStream,
+                sha256 = readable.track.sha256,
             )
         }
 

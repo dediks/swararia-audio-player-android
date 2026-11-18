@@ -2,17 +2,27 @@
 Fault modes change only this test process, never desktop source/configuration.
 """
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 import threading
 import time
 
 sys.path.insert(0, sys.argv[1])
-from secure_remote import SecureRemote
-import secure_remote_tls as transport
-from web_ui import RemotePlayerHub
+if (Path(sys.argv[1]) / "swararia" / "remote" / "secure_remote.py").is_file():
+    from swararia.core import fs_browser
+    from swararia.remote.secure_remote import SecureRemote
+    import swararia.remote.secure_remote_tls as transport
+    from swararia.server.hub import RemotePlayerHub
+    media_resolver = fs_browser.resolve_safe_audio_file
+else:
+    from secure_remote import SecureRemote
+    import secure_remote_tls as transport
+    from web_ui import RemotePlayerHub
+    media_resolver = None
 
 control = {"slow": False, "drop": False, "role": "control", "posts": 0, "capability_headers": 0, "wrong_headers": 0}
 base_handler = transport.NativeHandler
@@ -58,7 +68,17 @@ transport.NativeHandler = FixtureHandler
 # Only the fault-injection fixture relaxes the server's normal six-second budget.
 # Otherwise the desktop watchdog would hide a missing client deadline.
 transport.NativeTLSServer.CONNECTION_TTL = 60
-remote = SecureRemote(RemotePlayerHub())
+fixture_dir = Path(tempfile.mkdtemp(prefix="swararia-wire-inbox-"))
+sample_track = fixture_dir / "Test Track + Live.mp3"
+sample_bytes = (b"ID3\x04\x00wire-mp3-frame-" * 128)
+sample_sha = hashlib.sha256(sample_bytes).hexdigest()
+sample_track.write_bytes(sample_bytes)
+if media_resolver is None:
+    def media_resolver(_src, rel, _def):
+        if rel == sample_track.name:
+            return sample_track, "audio/mpeg"
+        raise FileNotFoundError(rel)
+remote = SecureRemote(RemotePlayerHub(), media_resolver=media_resolver, default_inbox=fixture_dir)
 stop = threading.Event()
 
 
@@ -72,7 +92,14 @@ def simulated_master():
             delivered = remote.master_poll({
                 "track": {"name": "Wire fixture.wav"}, "is_playing": False,
                 "transport_state": "CUED", "current_time": 0, "duration": 10,
-            }, acknowledgements, "wire-fixture-master-instance")
+            }, acknowledgements, "wire-fixture-master-instance", catalog={
+                "source_dir": str(fixture_dir),
+                "playlist": "Semua Lagu",
+                "active_group_id": "g_all",
+                "total_tracks": 1,
+                "groups": [{"id": "g_all", "name": "Semua Lagu", "count": 1}],
+                "items": [{"id": "trk_1", "title": "Test Track + Live.mp3", "group_id": "g_all", "rel_path": sample_track.name}],
+            })
             # No audio engine is running. Reject, never fabricate an applied ack.
             acknowledgements = [{"command_id": c["native_id"], "status": "rejected"}
                                 for c in delivered if c.get("native_id")]
@@ -98,6 +125,13 @@ try:
             control["slow"] = True
         elif command == "SLOW_OFF":
             control["slow"] = False
+        elif command == "MEDIA_ON":
+            remote.set_media_transfer(True)
+        elif command == "MEDIA_OFF":
+            remote.set_media_transfer(False)
+        elif command == "MEDIA_META":
+            print(json.dumps({"track_id": "trk_1", "filename": sample_track.name, "size_bytes": len(sample_bytes), "sha256": sample_sha}), flush=True)
+            continue
         elif command == "DROP_NEXT_COMMAND":
             control["drop"] = True
         elif command == "ROLE_VIEW":
@@ -119,5 +153,9 @@ finally:
     remote.stop()
     if "thread" in globals():
         thread.join(timeout=2)
+    if "sample_track" in globals() and sample_track.exists():
+        sample_track.unlink()
+    if "fixture_dir" in globals() and fixture_dir.exists():
+        fixture_dir.rmdir()
     if "path" in globals() and path.exists():
         path.unlink()

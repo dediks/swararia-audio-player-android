@@ -176,7 +176,7 @@ class DesktopRemoteSession(
                         message = "Setujui perangkat ini di perangkat target.")
                 }
             } catch (cancel: CancellationException) { throw cancel }
-              catch (_: Exception) { if (generation == ticket) disconnectWith("Pairing gagal atau hasil tidak diketahui. Buat kode baru di perangkat target; tidak dicoba ulang.") }
+              catch (failure: Exception) { if (generation == ticket) disconnectWith(pairFailureMessage(failure)) }
             finally {
                 parsed.forgetInvitation()
                 if (generation == ticket) {
@@ -461,6 +461,17 @@ class DesktopRemoteSession(
     private fun setDownloadState(ticket: Long, trackId: String, status: DesktopRemoteTrackDownload) {
         if (generation != ticket) return
         mutable.update { prev -> prev.copy(downloads = prev.downloads + (trackId to status)) }
+    }
+
+    private fun pairFailureMessage(failure: Exception): String = when ((failure as? DesktopRemoteFailure)?.kind) {
+        DesktopRemoteFailure.Kind.TRUST ->
+            "Identitas TLS atau jam perangkat target tidak cocok. Periksa QR & waktu perangkat."
+        DesktopRemoteFailure.Kind.AUTH ->
+            "Kode pairing tidak valid, sudah dipakai, atau kedaluwarsa. Buat kode baru di target."
+        DesktopRemoteFailure.Kind.UNAVAILABLE ->
+            "Perangkat target tidak dapat dijangkau. Pastikan satu Wi-Fi/Hotspot & Firewall/Bridge PC aktif."
+        else ->
+            "Pairing gagal atau hasil tidak diketahui. Buat kode baru di perangkat target; tidak dicoba ulang."
     }
 
     private fun downloadFailureMessage(failure: Exception): String = when (failure) {
