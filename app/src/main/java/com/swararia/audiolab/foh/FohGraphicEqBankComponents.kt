@@ -125,7 +125,7 @@ internal fun EqResponseCurveCard(
             .fillMaxWidth()
             .height(curveHeight),
     ) {
-        BoxWithConstraints(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
