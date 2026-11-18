@@ -441,12 +441,14 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         val (sha256, sizeBytes) = AudioFileInspector.computeUriSha256AndSize(resolver, source)
             ?: error("File pilihan tidak dapat dibaca.")
         require(sizeBytes > 0L) { "Sumber audio kosong; tidak ada file yang ditambahkan." }
-        findTrackBySha256AndSize(sha256, sizeBytes)?.let { existing ->
-            return@withContext UploadImportOutcome.Deduplicated(existing)
+        mutationMutex.withLock {
+            findOrBackfillTrackLocked(sha256, sizeBytes)?.let { existing ->
+                return@withLock UploadImportOutcome.Deduplicated(existing)
+            }
+            val input = resolver.openInputStream(source) ?: error("File pilihan tidak dapat dibaca.")
+            val created = input.use { publishLocked(it, name, AUDIO_TYPES.getValue(extension), expectedSha256 = sha256) }
+            UploadImportOutcome.Created(created)
         }
-        val input = resolver.openInputStream(source) ?: error("File pilihan tidak dapat dibaca.")
-        val created = input.use { publish(it, name, AUDIO_TYPES.getValue(extension), expectedSha256 = sha256) }
-        UploadImportOutcome.Created(created)
     }
 
     private suspend fun publish(
@@ -455,6 +457,15 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         mime: String,
         expectedSha256: String? = null,
     ): AudioTrack = mutationMutex.withLock {
+        publishLocked(input, displayName, mime, expectedSha256)
+    }
+
+    private suspend fun publishLocked(
+        input: InputStream,
+        displayName: String,
+        mime: String,
+        expectedSha256: String? = null,
+    ): AudioTrack {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             val (targetFile, actualSha256, copied) = legacyStorage.writeFromStream(input, displayName, expectedSha256)
             val uri = Uri.fromFile(targetFile)
@@ -655,13 +666,37 @@ class MediaLibrary(private val context: Context, private val database: AudioData
         }
     }
 
+    private suspend fun findOrBackfillTrackLocked(cleanHex: String, sizeBytes: Long): AudioTrack? {
+        if (!SHA256_REGEX.matches(cleanHex) || sizeBytes <= 0L) return null
+        val recorded = database.tracks().findBySha256AndSize(cleanHex, sizeBytes)
+        if (recorded != null) {
+            return if (isManagedUri(recorded.uri) &&
+                runCatching { managedItemExists(Uri.parse(recorded.uri)) }.getOrDefault(false)
+            ) {
+                recorded
+            } else {
+                null
+            }
+        }
+        val unhashed = database.tracks().unhashedBySize(sizeBytes)
+        for (candidate in unhashed) {
+            currentCoroutineContext().ensureActive()
+            if (!isManagedUri(candidate.uri)) continue
+            val candidateUri = Uri.parse(candidate.uri)
+            if (!runCatching { managedItemExists(candidateUri) }.getOrDefault(false)) continue
+            val digest = AudioFileInspector.computeUriSha256(resolver, candidateUri) ?: continue
+            database.tracks().updateSha256(candidate.id, digest)
+            if (digest.equals(cleanHex, ignoreCase = true)) {
+                return candidate.copy(sha256 = digest)
+            }
+        }
+        return null
+    }
+
     override suspend fun findTrackBySha256AndSize(sha256: String, sizeBytes: Long): AudioTrack? = withContext(Dispatchers.IO) {
         val cleanHex = sha256.trim().lowercase(Locale.ROOT)
         if (!SHA256_REGEX.matches(cleanHex) || sizeBytes <= 0L) return@withContext null
-        val existing = database.tracks().findBySha256AndSize(cleanHex, sizeBytes) ?: return@withContext null
-        if (!isManagedUri(existing.uri)) return@withContext null
-        val exists = runCatching { managedItemExists(Uri.parse(existing.uri)) }.getOrDefault(false)
-        if (exists) existing else null
+        mutationMutex.withLock { findOrBackfillTrackLocked(cleanHex, sizeBytes) }
     }
 
     override suspend fun importValidatedUpload(
@@ -681,42 +716,25 @@ class MediaLibrary(private val context: Context, private val database: AudioData
 
         AudioFileInspector.validateAudioFileContent(stagedFile)
 
-        // Check existing track by SHA-256 + byte size first; avoid unnecessary write outside lock.
-        val preExisting = findTrackBySha256AndSize(cleanHex, stagedFile.length())
-        if (preExisting != null) {
-            val linkedId = cleanPlaylist?.let { ensurePlaylistAndLink(it, preExisting.id) }
-            return@withContext UploadImportOutcome.Deduplicated(preExisting, linkedId)
-        }
-
-        // Publish into Music/SwarariaAudioLab/ while serializing name resolution + Room state.
-        var createdTrack: AudioTrack? = null
-        var deduplicatedTrack: AudioTrack? = null
-        var targetName = cleanDisplayName
-        val resolvedExisting = mutationMutex.withLock {
-            val existing = database.tracks().findBySha256AndSize(cleanHex, stagedFile.length())
-            if (existing != null && isManagedUri(existing.uri) &&
-                runCatching { managedItemExists(Uri.parse(existing.uri)) }.getOrDefault(false)
-            ) {
-                existing
+        // Atomically check SHA-256 + byte size (with lazy backfill) and publish inside mutationMutex.
+        val (resolvedTrack, createdNew) = mutationMutex.withLock {
+            val existing = findOrBackfillTrackLocked(cleanHex, stagedFile.length())
+            if (existing != null) {
+                existing to false
             } else {
-                targetName = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                val targetName = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                     legacyStorage.uniqueAvailableDisplayName(cleanDisplayName)
                 } else {
                     uniqueAvailableDisplayName(cleanDisplayName)
                 }
-                null
+                val created = stagedFile.inputStream().use { publishLocked(it, targetName, mime, cleanHex) }
+                created to true
             }
         }
-        if (resolvedExisting != null) {
-            deduplicatedTrack = resolvedExisting
-        } else {
-            createdTrack = stagedFile.inputStream().use { publish(it, targetName, mime, cleanHex) }
-        }
 
-        val finalTrack = createdTrack ?: checkNotNull(deduplicatedTrack)
-        val linkedId = cleanPlaylist?.let { ensurePlaylistAndLink(it, finalTrack.id) }
-        if (createdTrack != null) UploadImportOutcome.Created(finalTrack, linkedId)
-        else UploadImportOutcome.Deduplicated(finalTrack, linkedId)
+        val linkedId = cleanPlaylist?.let { ensurePlaylistAndLink(it, resolvedTrack.id) }
+        if (createdNew) UploadImportOutcome.Created(resolvedTrack, linkedId)
+        else UploadImportOutcome.Deduplicated(resolvedTrack, linkedId)
     }
 
     override suspend fun openReadableTrack(trackId: Long): ReadableManagedMedia? = withContext(Dispatchers.IO) {

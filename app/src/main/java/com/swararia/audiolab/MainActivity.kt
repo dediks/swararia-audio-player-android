@@ -144,7 +144,18 @@ class MainActivity : ComponentActivity() {
                 val downloadSettings by model.downloadSettings.collectAsStateWithLifecycle()
                 val playbackSettings by model.playbackSettings.collectAsStateWithLifecycle()
                 val snackbars = remember { SnackbarHostState() }
+                var wasLocalIngestBusy by remember { mutableStateOf(false) }
                 LaunchedEffect(model) { model.messages.collect { snackbars.showSnackbar(it) } }
+                LaunchedEffect(ingest.busy, ingest.stage, ingest.detail) {
+                    if (ingest.busy && ingest.batchId == null) {
+                        wasLocalIngestBusy = true
+                    } else if (wasLocalIngestBusy && !ingest.busy) {
+                        wasLocalIngestBusy = false
+                        if (ingest.batchId == null && ingest.stage == "Impor selesai" && ingest.detail.isNotBlank()) {
+                            snackbars.showSnackbar(ingest.detail)
+                        }
+                    }
+                }
                 LaunchedEffect(tracks, controller) {
                     syncControllerTrackTitles(controller, tracks)
                 }

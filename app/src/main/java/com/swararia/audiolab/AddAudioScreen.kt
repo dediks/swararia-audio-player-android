@@ -90,6 +90,7 @@ fun AddAudioScreen(
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
     var quickToast by remember { mutableStateOf<String?>(null) }
+    var dismissedLocalFinishKey by rememberSaveable { mutableStateOf<String?>(null) }
     var playlistChannel by rememberSaveable { mutableStateOf<String?>(null) }
     var playlistThumbnail by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -329,11 +330,18 @@ fun AddAudioScreen(
                         onPickFiles = triggerLocalImport,
                     )
                 }
-                if (ingest.batchId == null && (ingest.busy || ingest.error)) {
+                val importFinishKey = if (!ingest.busy && !ingest.error && ingest.batchId == null && ingest.stage == "Impor selesai" && ingest.detail.isNotBlank()) {
+                    "${ingest.stage}|${ingest.detail}"
+                } else null
+                if (ingest.busy && dismissedLocalFinishKey != null) {
+                    dismissedLocalFinishKey = null
+                }
+                if (ingest.batchId == null && (ingest.busy || ingest.error || (importFinishKey != null && importFinishKey != dismissedLocalFinishKey))) {
                     item(key = "local-ingest-status", contentType = "banner") {
                         LocalIngestStatusBanner(
                             ingest = ingest,
                             onCancel = onCancel,
+                            onDismiss = importFinishKey?.let { key -> { dismissedLocalFinishKey = key } },
                         )
                     }
                 }

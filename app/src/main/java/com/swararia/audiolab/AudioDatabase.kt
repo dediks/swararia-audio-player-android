@@ -94,6 +94,8 @@ interface TrackDao {
     suspend fun updateMetadata(id: Long, durationMs: Long?, artist: String?, album: String?, genre: String?, checkedAt: Long)
     @Query("SELECT * FROM tracks WHERE sha256 = :sha256 AND sizeBytes = :sizeBytes ORDER BY id ASC LIMIT 1")
     suspend fun findBySha256AndSize(sha256: String, sizeBytes: Long): AudioTrack?
+    @Query("SELECT * FROM tracks WHERE sizeBytes = :sizeBytes AND sha256 IS NULL ORDER BY id ASC")
+    suspend fun unhashedBySize(sizeBytes: Long): List<AudioTrack>
     @Query("SELECT * FROM tracks WHERE sha256 IS NULL ORDER BY id DESC LIMIT :limit")
     suspend fun unhashedTracks(limit: Int = 25): List<AudioTrack>
     @Query("UPDATE tracks SET sha256 = :sha256 WHERE id = :id")

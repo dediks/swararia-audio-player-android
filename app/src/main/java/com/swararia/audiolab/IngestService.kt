@@ -190,12 +190,16 @@ class IngestService : Service() {
                             if (importedCount == 0 && duplicateCount == 0 && failedCount > 0) {
                                 throw IngestUserMessageException(IngestFailureMessages.IMPORT_FAILED)
                             }
-                            val parts = buildList {
-                                add("$importedCount lagu masuk pustaka")
-                                if (duplicateCount > 0) add("$duplicateCount sudah ada")
-                                if (failedCount > 0) add("$failedCount dilewati")
+                            val summary = if (importedCount == 0 && duplicateCount > 0 && failedCount == 0) {
+                                "Semua $duplicateCount lagu sudah ada di pustaka (tidak digandakan)"
+                            } else {
+                                buildList {
+                                    add("$importedCount lagu masuk pustaka")
+                                    if (duplicateCount > 0) add("$duplicateCount sudah ada")
+                                    if (failedCount > 0) add("$failedCount dilewati")
+                                }.joinToString(", ")
                             }
-                            finished("Impor selesai", parts.joinToString(", "))
+                            finished("Impor selesai", summary)
                         }
                     }
                     ACTION_UPDATE -> {

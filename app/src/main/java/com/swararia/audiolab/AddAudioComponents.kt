@@ -79,6 +79,7 @@ internal fun LocalImportActionBanner(
 internal fun LocalIngestStatusBanner(
     ingest: IngestState,
     onCancel: () -> Unit,
+    onDismiss: (() -> Unit)? = null,
 ) {
     val progress = ingest.progress?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
     Surface(
@@ -88,10 +89,10 @@ internal fun LocalIngestStatusBanner(
     ) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (ingest.busy) {
-                    FohSpinningIndicator(size = 18.dp, strokeWidth = 2.2.dp, color = FohTheme.colors.safeAccent)
-                } else if (ingest.error) {
-                    Icon(UiIcons.Warning, null, tint = FohTheme.colors.alertAccent, modifier = Modifier.size(18.dp))
+                when {
+                    ingest.busy -> FohSpinningIndicator(size = 18.dp, strokeWidth = 2.2.dp, color = FohTheme.colors.safeAccent)
+                    ingest.error -> Icon(UiIcons.Warning, null, tint = FohTheme.colors.alertAccent, modifier = Modifier.size(18.dp))
+                    else -> Icon(UiIcons.Check, null, tint = FohTheme.colors.safeAccent, modifier = Modifier.size(18.dp))
                 }
                 Text(
                     text = ingest.stage,
@@ -106,6 +107,10 @@ internal fun LocalIngestStatusBanner(
                     TextButton(onClick = onCancel, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
                         Text("Batal", style = MaterialTheme.typography.labelMedium)
                     }
+                } else if (!ingest.busy && onDismiss != null) {
+                    TextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+                        Text("Tutup", style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
             if (ingest.busy) {
@@ -116,8 +121,12 @@ internal fun LocalIngestStatusBanner(
                     height = 4.dp,
                 )
             }
-            if (ingest.error && ingest.detail.isNotBlank()) {
-                Text(ingest.detail, style = MaterialTheme.typography.bodySmall, color = FohTheme.colors.alertAccent)
+            if ((ingest.error || !ingest.busy) && ingest.detail.isNotBlank()) {
+                Text(
+                    ingest.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (ingest.error) FohTheme.colors.alertAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
