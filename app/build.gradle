@@ -16,7 +16,7 @@ def hasReleaseSigning = releaseStorePath &&
     keystoreProperties.getProperty('keyAlias') &&
     keystoreProperties.getProperty('keyPassword')
 android {
-    namespace 'com.swararia.audiolab'
+    namespace = 'com.swararia.audiolab'
     compileSdk 36
     buildToolsVersion '36.0.0'
     defaultConfig {
@@ -28,10 +28,10 @@ android {
     }
     splits {
         abi {
-            enable true
+            enable = true
             reset()
             include 'arm64-v8a', 'armeabi-v7a'
-            universalApk true
+            universalApk = true
         }
     }
     signingConfigs {
@@ -48,10 +48,10 @@ android {
         debug { minifyEnabled false }
         release {
             minifyEnabled true
-            shrinkResources true
+            shrinkResources = true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             if (hasReleaseSigning) {
-                signingConfig signingConfigs.release
+                signingConfig = signingConfigs.release
             }
         }
     }
@@ -60,7 +60,7 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = '17' }
-    buildFeatures { compose true }
+    buildFeatures { compose = true }
     packaging {
         jniLibs {
             useLegacyPackaging = true
