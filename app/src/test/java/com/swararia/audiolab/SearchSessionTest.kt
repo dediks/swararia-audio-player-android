@@ -438,4 +438,30 @@ class SearchSessionTest {
             assertNull(f.session.search.value.error)
         }
     }
+
+    @Test(timeout = 5000) fun loadMoreKeepsActivePreviewAliveWhileFreshSearchCancelsIt() = runBlocking {
+        Fixture().use { f ->
+            f.gateway.page = { req ->
+                val list = if (req.offset == 0) listOf(hit("aaaaaaaaaaa")) else listOf(hit("bbbbbbbbbbb"))
+                SearchPage(list, YoutubeSearchRules.RESULT_LIMIT, 0)
+            }
+            f.gateway.stream = { h ->
+                PreviewMedia(h.videoId, h.title, "https://rr.googlevideo.com/videoplayback?expire=9999999999", emptyMap())
+            }
+
+            f.session.search("sholawat", SearchProvider.YOUTUBE_MUSIC)
+            f.session.preview(hit("aaaaaaaaaaa"))
+            yield()
+            assertNotNull(f.session.preview.value.media)
+            assertEquals("aaaaaaaaaaa", f.session.preview.value.hit?.videoId)
+
+            f.session.loadMore()
+            assertEquals(listOf("aaaaaaaaaaa", "bbbbbbbbbbb"), f.session.search.value.results.map { it.videoId })
+            assertNotNull(f.session.preview.value.media)
+            assertEquals("aaaaaaaaaaa", f.session.preview.value.hit?.videoId)
+
+            f.session.search("lagu lain", SearchProvider.YOUTUBE)
+            assertNull(f.session.preview.value.media)
+        }
+    }
 }

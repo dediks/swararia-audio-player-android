@@ -201,7 +201,7 @@ class SearchSession(
             reportMessage("Playlist tidak valid."); return
         }
         if (playlistId == null && !append) playlistParent = null
-        cancelPreview()
+        if (!append) cancelPreview()
         qualityJob?.cancel()
         val previous = searchState.value
         val offset = if (append) previous.loadedThrough else 0

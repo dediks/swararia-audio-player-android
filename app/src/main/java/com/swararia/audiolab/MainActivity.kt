@@ -174,8 +174,12 @@ class MainActivity : ComponentActivity() {
                         switchSearch = { query, provider, kind, sort ->
                             if (!ingest.engineBusy && !operationBusy) model.switchSearch(query, provider, kind, sort)
                         },
-                        sort = { model.sortSearch(it) }, loadMore = { whenOnlineIdle { model.loadMore() } },
-                        retry = { whenOnlineIdle { model.retrySearch() } },
+                        sort = { model.sortSearch(it) },
+                        loadMore = { whenOnlineIdle(cancelPreview = false) { model.loadMore() } },
+                        retry = {
+                            if (model.search.value.loadedThrough > 0) whenOnlineIdle(cancelPreview = false) { model.retrySearch() }
+                            else whenOnlineIdle { model.retrySearch() }
+                        },
                         openPlaylist = { hit -> whenOnlineIdle { model.openPlaylist(hit) } },
                         openPlaylistUrl = { playlistId -> whenOnlineIdle { model.openPlaylistUrl(playlistId) } },
                         leavePlaylist = { model.leavePlaylist() },
@@ -320,12 +324,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun whenOnlineIdle(action: () -> Unit) {
+    private fun whenOnlineIdle(cancelPreview: Boolean = true, action: () -> Unit) {
         if (!model.canStartOnlineOperation()) {
             model.message("Tunggu pencarian atau proses audio selesai terlebih dahulu.")
             return
         }
-        model.cancelPreview()
+        if (cancelPreview) model.cancelPreview()
         action()
     }
 
