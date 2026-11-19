@@ -2,7 +2,7 @@
 
 ## Device & Install Ownership
 - Do NOT run `adb install` on the user's phone unless explicitly asked. Build and verify locally, then provide the exact copy-paste `adb` command for the user to run.
-- When the user switches between Debug and Release builds (`com.swararia.audiolab.spike`), note that differing signing keys require a one-time `adb uninstall com.swararia.audiolab.spike` (resets internal app playlists/DB; `/Music` audio files on storage stay safe).
+- When the user switches between Debug and Release builds (`com.swararia.audiolab`), note that differing signing keys require a one-time `adb uninstall com.swararia.audiolab` (resets internal app playlists/DB; `/Music` audio files on storage stay safe).
 
 ## WSL2 & Windows Interop
 - Never leave a Linux `adb` daemon running inside WSL when the user is connecting via USB debugging on Windows—both contend on `tcp:5037` (`protocol fault` / empty `adb devices`). Ensure WSL `adb kill-server` is run if `adb` was invoked in WSL.

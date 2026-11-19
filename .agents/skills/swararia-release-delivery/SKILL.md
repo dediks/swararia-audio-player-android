@@ -27,19 +27,21 @@ Verify release APK signatures:
 ```
 
 ## 3. Deliver Release APKs to Windows Downloads
-Copy verified split & universal APKs with matching SHA-256 check to `/mnt/c/Users/tsimp/Downloads/`:
+Detect the Windows Downloads folder dynamically (`WIN_USER=$(timeout 5s cmd.exe /c "echo %USERNAME%" < /dev/null 2>/dev/null | tr -d '\r')`) and copy verified split & universal APKs with a `SHA256SUMS.txt` manifest:
 ```bash
-cp app/build/outputs/apk/release/app-arm64-v8a-release.apk /mnt/c/Users/tsimp/Downloads/swararia-0.6.0-spike-arm64-v8a-release.apk
-cp app/build/outputs/apk/release/app-universal-release.apk /mnt/c/Users/tsimp/Downloads/swararia-0.6.0-spike-universal-release.apk
-sha256sum app/build/outputs/apk/release/app-arm64-v8a-release.apk /mnt/c/Users/tsimp/Downloads/swararia-0.6.0-spike-arm64-v8a-release.apk app/build/outputs/apk/release/app-universal-release.apk /mnt/c/Users/tsimp/Downloads/swararia-0.6.0-spike-universal-release.apk
+VERSION=$(python3 -c "import json; print(json.load(open('app/build/outputs/apk/release/output-metadata.json'))['elements'][0]['versionName'])")
+WIN_DOWNLOADS="/mnt/c/Users/${WIN_USER}/Downloads"
+cp app/build/outputs/apk/release/app-arm64-v8a-release.apk "${WIN_DOWNLOADS}/SWR-Player-${VERSION}-arm64-v8a-release.apk"
+cp app/build/outputs/apk/release/app-universal-release.apk "${WIN_DOWNLOADS}/SWR-Player-${VERSION}-universal-release.apk"
+(cd "${WIN_DOWNLOADS}" && sha256sum "SWR-Player-${VERSION}-arm64-v8a-release.apk" "SWR-Player-${VERSION}-universal-release.apk" > "SWR-Player-${VERSION}-SHA256SUMS.txt")
+sha256sum app/build/outputs/apk/release/app-arm64-v8a-release.apk "${WIN_DOWNLOADS}/SWR-Player-${VERSION}-arm64-v8a-release.apk" app/build/outputs/apk/release/app-universal-release.apk "${WIN_DOWNLOADS}/SWR-Player-${VERSION}-universal-release.apk"
 ```
-*(Adjust version string dynamically from `app/build/outputs/apk/release/output-metadata.json` if `versionName` changes.)*
 
 ## 4. Provide User Install Commands (Do Not Execute `adb install`)
 - Ensure WSL does not hold port `5037`: `adb kill-server 2>/dev/null || true`.
 - **Windows USB Debugging (PowerShell):**
   ```powershell
   adb devices
-  adb install -r C:\Users\tsimp\Downloads\swararia-<versionName>-arm64-v8a-release.apk
+  adb install -r $env:USERPROFILE\Downloads\SWR-Player-<versionName>-arm64-v8a-release.apk
   ```
-- Remind the user about `adb uninstall com.swararia.audiolab.spike` once when switching between Debug and Release certificates.
+- Remind the user about `adb uninstall com.swararia.audiolab` once when switching between Debug and Release certificates.

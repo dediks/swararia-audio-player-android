@@ -20,11 +20,11 @@ android {
     compileSdk 36
     buildToolsVersion '36.0.0'
     defaultConfig {
-        applicationId 'com.swararia.audiolab.spike'
+        applicationId 'com.swararia.audiolab'
         minSdk 26
         targetSdk 36
-        versionCode 8
-        versionName '0.6.0-spike'
+        versionCode 9
+        versionName '0.6.0'
     }
     splits {
         abi {

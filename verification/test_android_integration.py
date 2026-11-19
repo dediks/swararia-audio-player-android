@@ -44,8 +44,8 @@ class AndroidIntegration(unittest.TestCase):
 
     def test_version_and_retained_test_inventory(self):
         gradle = source('app/build.gradle')
-        self.assertRegex(gradle, r'versionCode\s+8\b')
-        self.assertRegex(gradle, r"versionName\s+'0\.6\.0-spike'")
+        self.assertRegex(gradle, r'versionCode\s+9\b')
+        self.assertRegex(gradle, r"versionName\s+'0\.6\.0'")
         runner = source('verification/run_desktop_remote_session_checks.py')
         self.assertIn("'DesktopRemotePersistence'", runner)
         self.assertIn("'DesktopRemotePersistenceTest'", runner)

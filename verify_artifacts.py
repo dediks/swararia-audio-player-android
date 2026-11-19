@@ -71,7 +71,7 @@ for apk in sorted((ROOT/'app/build/outputs/apk/debug').glob('*.apk')):
     aligned = run([str(TOOLS/'zipalign'), '-c', '-P', '16', '-v', '4', str(apk)])
     badging = run([str(TOOLS/'aapt2'), 'dump', 'badging', str(apk)])
     tree = run([str(TOOLS/'aapt2'), 'dump', 'xmltree', str(apk), '--file', 'AndroidManifest.xml'])
-    assert "package: name='com.swararia.audiolab.spike'" in badging
+    assert "package: name='com.swararia.audiolab'" in badging
     assert re.search(r"(?m)^(?:minSdkVersion|sdkVersion):'26'$", badging)
     assert 'android:extractNativeLibs' in tree
     forbidden = ['MANAGE_EXTERNAL_STORAGE', 'READ_MEDIA_AUDIO', 'CAMERA']

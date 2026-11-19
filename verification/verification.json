@@ -1,8 +1,8 @@
 {
-  "generated_at_utc": "2026-11-15T17:06:33.196716+00:00",
+  "generated_at_utc": "2026-11-19T04:55:18.438182+00:00",
   "build": "debug APK; not a public/production release",
   "unit_tests": {
-    "tests": 169,
+    "tests": 233,
     "failures": 0,
     "errors": 0,
     "skipped": 0
@@ -19,8 +19,8 @@
   "artifacts": [
     {
       "file": "app-arm64-v8a-debug.apk",
-      "bytes": 104539081,
-      "sha256": "abb8debe0e2f8c4ed773a84fd8cf240bb1ef049d696e307824797ed3b0e3f523",
+      "bytes": 74561391,
+      "sha256": "327080e3bfcc32d04bcd89f53074aced0bbdc4a30dd5527bc27eeb4427574916",
       "signature_verified": true,
       "certificate_sha256": "986a7fb658c71f35e31f29254f56ceeb5e1b4464e1707083e005f723c95a4c8b",
       "zipalign_verified": true,
@@ -83,8 +83,8 @@
     },
     {
       "file": "app-armeabi-v7a-debug.apk",
-      "bytes": 97867911,
-      "sha256": "684268c30c2222d159f4c2c47f3fbfabcd1b5fe0f10432a1100428b8a2c27f2c",
+      "bytes": 67890217,
+      "sha256": "3ed9cea4e7aa3ee973d80e62e50ff7b85ff66c9891d7e883164230050dd503c3",
       "signature_verified": true,
       "certificate_sha256": "986a7fb658c71f35e31f29254f56ceeb5e1b4464e1707083e005f723c95a4c8b",
       "zipalign_verified": true,
@@ -93,6 +93,70 @@
         "arm64_elf_count": 0,
         "arm64_16kb_incompatible": [],
         "verdict": "not-applicable-arm32",
+        "device_execution_tested": false
+      }
+    },
+    {
+      "file": "app-universal-debug.apk",
+      "bytes": 220143888,
+      "sha256": "8cabcf9ccaca92fe341745900a11f74729f9e4918f0960b1179dc1b7677e8b1e",
+      "signature_verified": true,
+      "certificate_sha256": "986a7fb658c71f35e31f29254f56ceeb5e1b4464e1707083e005f723c95a4c8b",
+      "zipalign_verified": true,
+      "native": {
+        "elf_count": 1032,
+        "arm64_elf_count": 257,
+        "arm64_16kb_incompatible": [
+          {
+            "path": "lib/arm64-v8a/libffmpeg.zip.so!usr/lib/libsharpyuv.so",
+            "machine": 183,
+            "pt_load_alignments": [
+              4096,
+              4096,
+              4096,
+              4096
+            ]
+          },
+          {
+            "path": "lib/arm64-v8a/libffmpeg.zip.so!usr/lib/libwebpdecoder.so",
+            "machine": 183,
+            "pt_load_alignments": [
+              4096,
+              4096,
+              4096,
+              4096
+            ]
+          },
+          {
+            "path": "lib/arm64-v8a/libffmpeg.zip.so!usr/lib/libwebp.so",
+            "machine": 183,
+            "pt_load_alignments": [
+              4096,
+              4096,
+              4096,
+              4096
+            ]
+          },
+          {
+            "path": "lib/arm64-v8a/libffmpeg.zip.so!usr/lib/libwebpdemux.so",
+            "machine": 183,
+            "pt_load_alignments": [
+              4096,
+              4096,
+              4096
+            ]
+          },
+          {
+            "path": "lib/arm64-v8a/libffmpeg.zip.so!usr/lib/libwebpmux.so",
+            "machine": 183,
+            "pt_load_alignments": [
+              4096,
+              4096,
+              4096
+            ]
+          }
+        ],
+        "verdict": "4KB-only-ingest-prototype",
         "device_execution_tested": false
       }
     }

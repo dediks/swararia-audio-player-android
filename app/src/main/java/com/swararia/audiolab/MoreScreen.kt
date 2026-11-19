@@ -160,7 +160,7 @@ private fun MoreHubScreen(
     val appVersion = remember(context) {
         runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "0.6.0-spike"
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "0.6.0"
     }
     val remoteActive = remoteServerState.snapshot.enabled
     val remoteIp = remoteServerState.interfaces.firstOrNull()?.ip
