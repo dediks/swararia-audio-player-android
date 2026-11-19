@@ -4,6 +4,7 @@ import kotlinx.coroutines.*
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.net.CookieHandler
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -11,6 +12,7 @@ import java.net.Socket
 import java.net.URI
 import java.net.URL
 import java.net.URLDecoder
+import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
@@ -100,6 +102,35 @@ interface DesktopRemoteApi {
         maxBytes: Long,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
     ): DesktopRemoteMediaHead = throw DesktopRemoteFailure()
+    suspend fun syncFolders(
+        pairing: DesktopRemotePairing,
+        grant: DesktopRemoteGrant,
+    ): DesktopRemoteSyncFoldersResult = throw DesktopRemoteFailure()
+    suspend fun syncManifest(
+        pairing: DesktopRemotePairing,
+        grant: DesktopRemoteGrant,
+        folderId: String,
+        offset: Int = 0,
+        limit: Int = 100,
+    ): DesktopRemoteSyncManifestPage = throw DesktopRemoteFailure()
+    suspend fun downloadSyncFile(
+        pairing: DesktopRemotePairing,
+        grant: DesktopRemoteGrant,
+        fileId: String,
+        destinationFile: File,
+        maxBytes: Long,
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ): DesktopRemoteMediaHead = throw DesktopRemoteFailure()
+    suspend fun uploadLibraryTrack(
+        pairing: DesktopRemotePairing,
+        grant: DesktopRemoteGrant,
+        filename: String,
+        sha256: String,
+        sizeBytes: Long,
+        playlistName: String? = null,
+        inputStream: InputStream,
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ): DesktopRemoteUploadOutcome = throw DesktopRemoteFailure()
     suspend fun command(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, action: String, key: String): DesktopRemoteCommand
     suspend fun selectTrack(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, trackId: String, autoPlay: Boolean, key: String): DesktopRemoteCommand =
         command(pairing, grant, "select_track", key)
@@ -169,6 +200,29 @@ class DesktopRemoteHttpsApi(
         }
     }
 
+    override suspend fun syncFolders(
+        pairing: DesktopRemotePairing,
+        grant: DesktopRemoteGrant,
+    ): DesktopRemoteSyncFoldersResult =
+        DesktopRemoteJson.syncFolders(request(pairing, grant.authorization(), "/v1/sync/folders", maxBytes = 131_072))
+
+    override suspend fun syncManifest(
+        pairing: DesktopRemotePairing,
+        grant: DesktopRemoteGrant,
+        folderId: String,
+        offset: Int,
+        limit: Int,
+    ): DesktopRemoteSyncManifestPage =
+        DesktopRemoteJson.syncManifest(
+            request(
+                pairing,
+                grant.authorization(),
+                "/v1/sync/manifest",
+                DesktopRemoteJson.syncManifestBody(folderId, offset, limit),
+                maxBytes = 262_144,
+            ),
+        )
+
     override suspend fun downloadTrackMedia(
         pairing: DesktopRemotePairing,
         grant: DesktopRemoteGrant,
@@ -180,15 +234,129 @@ class DesktopRemoteHttpsApi(
         if (!DesktopRemoteJson.isValidTrackId(trackId) || maxBytes <= 0L) {
             throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.INPUT)
         }
+        return downloadMediaAtPath(trackId, "/v1/tracks/$trackId/media", pairing, grant, destinationFile, maxBytes, onProgress)
+    }
+
+    override suspend fun downloadSyncFile(
+        pairing: DesktopRemotePairing,
+        grant: DesktopRemoteGrant,
+        fileId: String,
+        destinationFile: File,
+        maxBytes: Long,
+        onProgress: (Long, Long) -> Unit,
+    ): DesktopRemoteMediaHead {
+        if (!DesktopRemoteJson.isValidSyncFileId(fileId) || maxBytes <= 0L) {
+            throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.INPUT)
+        }
+        return downloadMediaAtPath(fileId, "/v1/sync/files/$fileId", pairing, grant, destinationFile, maxBytes, onProgress)
+    }
+
+    override suspend fun uploadLibraryTrack(
+        pairing: DesktopRemotePairing,
+        grant: DesktopRemoteGrant,
+        filename: String,
+        sha256: String,
+        sizeBytes: Long,
+        playlistName: String?,
+        inputStream: InputStream,
+        onProgress: (Long, Long) -> Unit,
+    ): DesktopRemoteUploadOutcome {
+        val cleanName = filename.replace('\\', '/').substringAfterLast('/').trim()
+        val ext = cleanName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        if (cleanName.isBlank() || !DesktopRemoteJson.isValidSha256Hex(sha256) || sizeBytes <= 0L) {
+            throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.INPUT)
+        }
+        if (ext in DesktopRemoteJson.excludedPhaseExtensions) {
+            throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.PROTOCOL, DesktopRemoteFailure.Reason.WAV_FLAC_EXCLUDED)
+        }
+        if (ext !in DesktopRemoteJson.allowedCompressedExtensions) {
+            throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.PROTOCOL, DesktopRemoteFailure.Reason.MEDIA_UNSUPPORTED)
+        }
+        if (sizeBytes > 150L * 1024L * 1024L) {
+            throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.PROTOCOL, DesktopRemoteFailure.Reason.MEDIA_TOO_LARGE)
+        }
+        val cleanSha = sha256.trim().lowercase(Locale.ROOT)
+        val encodedName = URLEncoder.encode(cleanName, "UTF-8").replace("+", "%20")
+        val cleanPlaylist = playlistName?.trim()?.takeIf { it.isNotEmpty() }?.take(60)
+        val encodedPlaylist = cleanPlaylist?.let { URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+        return inputStream.use { stream ->
+            withPinnedConnection(
+                timeoutMs = 120_000,
+                pairing = pairing,
+                secret = grant.authorization(),
+                path = "/v1/library/upload",
+                method = "POST",
+                readTimeoutMs = 30_000,
+                configure = { connection ->
+                    connection.doOutput = true
+                    connection.setRequestProperty("Accept", "application/json")
+                    connection.setRequestProperty("Content-Type", "application/octet-stream")
+                    connection.setRequestProperty("X-Swararia-Capabilities", "extended-v1")
+                    connection.setRequestProperty("X-Swararia-Filename", encodedName)
+                    connection.setRequestProperty("X-Swararia-Sha256", cleanSha)
+                    if (encodedPlaylist != null) {
+                        connection.setRequestProperty("X-Swararia-Playlist", encodedPlaylist)
+                    }
+                    connection.setFixedLengthStreamingMode(sizeBytes)
+                },
+            ) { connection ->
+                var sent = 0L
+                var lastReportAt = 0L
+                connection.outputStream.use { out ->
+                    val buffer = ByteArray(16_384)
+                    while (sent < sizeBytes) {
+                        currentCoroutineContext().ensureActive()
+                        val remaining = sizeBytes - sent
+                        val toRead = minOf(buffer.size.toLong(), remaining).toInt()
+                        val n = stream.read(buffer, 0, toRead)
+                        if (n < 0) break
+                        if (n > 0) {
+                            out.write(buffer, 0, n)
+                            sent += n
+                            val now = System.currentTimeMillis()
+                            if (now - lastReportAt >= 80L || sent == sizeBytes) {
+                                lastReportAt = now
+                                onProgress(sent, sizeBytes)
+                            }
+                        }
+                    }
+                    out.flush()
+                }
+                if (sent != sizeBytes) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.INPUT)
+                val code = connection.responseCode
+                if (code !in listOf(200, 201)) {
+                    val errBytes = runCatching { readBounded(connection.errorStream, 512) }.getOrNull()
+                    throw mapMediaError(code, DesktopRemoteJson.safeErrorCode(errBytes))
+                }
+                val bytes = readBounded(connection.inputStream, 8_192)
+                DesktopRemoteJson.uploadOutcome(DesktopRemoteJson.objectValue(bytes, 8_192))
+            }
+        }
+    }
+
+    private suspend fun downloadMediaAtPath(
+        itemId: String,
+        path: String,
+        pairing: DesktopRemotePairing,
+        grant: DesktopRemoteGrant,
+        destinationFile: File,
+        maxBytes: Long,
+        onProgress: (Long, Long) -> Unit,
+    ): DesktopRemoteMediaHead {
         return try {
             withPinnedConnection(
                 timeoutMs = 120_000,
                 pairing = pairing,
                 secret = grant.authorization(),
-                path = "/v1/tracks/$trackId/media",
+                path = path,
                 method = "GET",
                 readTimeoutMs = 15_000,
-                configure = { it.setRequestProperty("Accept", "audio/*, application/octet-stream") },
+                configure = { connection ->
+                    connection.setRequestProperty("Accept", "audio/*, application/octet-stream")
+                    if (path.startsWith("/v1/sync/")) {
+                        connection.setRequestProperty("X-Swararia-Capabilities", "extended-v1")
+                    }
+                },
             ) { connection ->
                 connection.connect()
                 val code = connection.responseCode
@@ -196,7 +364,7 @@ class DesktopRemoteHttpsApi(
                     val errBytes = runCatching { readBounded(connection.errorStream, 512) }.getOrNull()
                     throw mapMediaError(code, DesktopRemoteJson.safeErrorCode(errBytes))
                 }
-                val head = parseMediaHeaders(trackId, connection, maxBytes)
+                val head = parseMediaHeaders(itemId, connection, maxBytes)
                 val digest = MessageDigest.getInstance("SHA-256")
                 var totalRead = 0L
                 var lastReported = 0L
@@ -311,11 +479,16 @@ class DesktopRemoteHttpsApi(
         }
         val reason = when {
             errCode == "view_only" -> DesktopRemoteFailure.Reason.MEDIA_VIEW_ONLY
+            errCode == "sync_disabled" -> DesktopRemoteFailure.Reason.SYNC_DISABLED
+            errCode == "upload_disabled" -> DesktopRemoteFailure.Reason.UPLOAD_DISABLED
+            errCode == "wav_flac_excluded" -> DesktopRemoteFailure.Reason.WAV_FLAC_EXCLUDED
+            errCode == "sha256_mismatch" -> DesktopRemoteFailure.Reason.SHA256_MISMATCH
             errCode == "media_disabled" -> DesktopRemoteFailure.Reason.MEDIA_DISABLED
             errCode == "media_busy" || code == 429 -> DesktopRemoteFailure.Reason.MEDIA_BUSY
-            errCode == "media_too_large" || code == 413 -> DesktopRemoteFailure.Reason.MEDIA_TOO_LARGE
-            errCode == "unsupported_media_format" || code == 415 -> DesktopRemoteFailure.Reason.MEDIA_UNSUPPORTED
-            errCode in setOf("unknown_track", "media_unavailable", "media_forbidden", "master_unavailable") || code == 404 || code == 409 ->
+            errCode == "media_too_large" || errCode == "file_too_large" || code == 413 -> DesktopRemoteFailure.Reason.MEDIA_TOO_LARGE
+            errCode in setOf("unsupported_media_format", "unsupported_format", "invalid_audio_content", "invalid_audio_stream") || code == 415 ->
+                DesktopRemoteFailure.Reason.MEDIA_UNSUPPORTED
+            errCode in setOf("unknown_track", "unknown_folder", "sync_unavailable", "media_unavailable", "media_forbidden", "master_unavailable") || code == 404 || code == 409 ->
                 DesktopRemoteFailure.Reason.MEDIA_UNAVAILABLE
             code == 403 -> DesktopRemoteFailure.Reason.MEDIA_DISABLED
             else -> DesktopRemoteFailure.Reason.NONE
@@ -335,7 +508,7 @@ class DesktopRemoteHttpsApi(
             readTimeoutMs = 4_000,
             configure = { connection ->
                 connection.setRequestProperty("Accept", "application/json")
-                if (body == null && path == "/v1/capabilities") {
+                if (path == "/v1/capabilities" || path.startsWith("/v1/sync/")) {
                     connection.setRequestProperty("X-Swararia-Capabilities", "extended-v1")
                 }
                 if (body != null) {
@@ -348,8 +521,14 @@ class DesktopRemoteHttpsApi(
             connection.connect()
             if (body != null) connection.outputStream.use { it.write(body) }
             val code = connection.responseCode
-            if (code == 401 || code == 403) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.AUTH)
-            if (code != expected) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.PROTOCOL)
+            if (code != expected) {
+                if (path.startsWith("/v1/sync/")) {
+                    val errBytes = runCatching { readBounded(connection.errorStream, 512) }.getOrNull()
+                    throw mapMediaError(code, DesktopRemoteJson.safeErrorCode(errBytes))
+                }
+                if (code == 401 || code == 403) throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.AUTH)
+                throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.PROTOCOL)
+            }
             if (connection.contentType?.substringBefore(';')?.trim() != "application/json" || connection.contentLengthLong > maxBytes) {
                 throw DesktopRemoteFailure()
             }

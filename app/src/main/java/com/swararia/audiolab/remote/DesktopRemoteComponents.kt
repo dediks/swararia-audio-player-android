@@ -87,6 +87,8 @@ internal fun ActiveRemoteHeaderBar(
     onToggleKeepScreenOn: () -> Unit,
     onRefresh: () -> Unit,
     onSyncGroupToPc: () -> Unit,
+    onOpenFolderSync: (() -> Unit)? = null,
+    onOpenUpload: (() -> Unit)? = null,
     onShowSessionInfo: () -> Unit,
     onRequestDisconnect: () -> Unit,
 ) {
@@ -174,6 +176,20 @@ internal fun ActiveRemoteHeaderBar(
                                 text = { Text("Terapkan folder ini ke target") },
                                 leadingIcon = { Icon(UiIcons.Refresh, null, modifier = Modifier.size(18.dp)) },
                                 onClick = { menuOpen = false; onSyncGroupToPc() },
+                            )
+                        }
+                        if (state.canSyncFolders && onOpenFolderSync != null) {
+                            DropdownMenuItem(
+                                text = { Text("Sinkron folder / playlist") },
+                                leadingIcon = { Icon(UiIcons.Folder, null, modifier = Modifier.size(18.dp)) },
+                                onClick = { menuOpen = false; onOpenFolderSync() },
+                            )
+                        }
+                        if (state.canUploadToDesktop && onOpenUpload != null) {
+                            DropdownMenuItem(
+                                text = { Text("Unggah audio ke PC") },
+                                leadingIcon = { Icon(UiIcons.ArrowUp, null, modifier = Modifier.size(18.dp)) },
+                                onClick = { menuOpen = false; onOpenUpload() },
                             )
                         }
                         DropdownMenuItem(

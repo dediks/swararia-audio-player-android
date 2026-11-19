@@ -553,6 +553,8 @@ internal fun SessionInfoDialog(
     } else {
         "Nonaktif (aktifkan izin Transfer & Sync pada server target bila perlu mengunduh)"
     }
+    val syncLabel = if (state.syncSupported) "Aktif (dapat menarik folder playlist ke Library HP)" else "Nonaktif"
+    val uploadLabel = if (state.uploadSupported) "Aktif (dapat mengunggah audio terkompresi HP → PC)" else "Nonaktif"
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Info & Keamanan Sesi") },
@@ -561,6 +563,8 @@ internal fun SessionInfoDialog(
                 Text("Endpoint: ${state.endpoint ?: "-"}", style = MaterialTheme.typography.bodySmall)
                 Text("Peran perangkat ini: $roleLabel", style = MaterialTheme.typography.bodySmall)
                 Text("Unduh file lagu: $mediaLabel", style = MaterialTheme.typography.bodySmall)
+                Text("Sinkronisasi folder playlist: $syncLabel", style = MaterialTheme.typography.bodySmall)
+                Text("Unggah lagu ke PC: $uploadLabel", style = MaterialTheme.typography.bodySmall)
                 Text(
                     "Menutup aplikasi tidak menghentikan audio di perangkat target. Token sesi dienkripsi dengan Android Keystore.",
                     style = MaterialTheme.typography.bodySmall,

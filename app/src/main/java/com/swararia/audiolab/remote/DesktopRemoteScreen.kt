@@ -60,6 +60,8 @@ fun DesktopRemoteScreen(
     var transportDockCollapsed by rememberSaveable { mutableStateOf(false) }
     var showDisconnectConfirm by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
+    var showFolderSyncDialog by remember { mutableStateOf(false) }
+    var showUploadDialog by remember { mutableStateOf(false) }
     var pendingTrackSwitch by remember { mutableStateOf<PendingTrackChoice?>(null) }
     var pendingScrollToTrackId by remember { mutableStateOf<String?>(null) }
 
@@ -113,6 +115,8 @@ fun DesktopRemoteScreen(
             transportDockCollapsed = false
             showDisconnectConfirm = false
             showSessionInfo = false
+            showFolderSyncDialog = false
+            showUploadDialog = false
             pendingTrackSwitch = null
             pendingScrollToTrackId = null
         }
@@ -339,8 +343,24 @@ fun DesktopRemoteScreen(
             onToggleKeepScreenOn = { keepScreenOn = !keepScreenOn },
             onRefresh = { session.refresh() },
             onSyncGroupToPc = { effectiveGroupId?.let { session.selectGroup(it) } },
+            onOpenFolderSync = {
+                session.loadSyncFolders()
+                showFolderSyncDialog = true
+            },
+            onOpenUpload = { showUploadDialog = true },
             onShowSessionInfo = { showSessionInfo = true },
             onRequestDisconnect = { showDisconnectConfirm = true },
+        )
+
+        RemoteTransferActionStrip(
+            state = state,
+            onOpenFolderSync = {
+                session.loadSyncFolders()
+                showFolderSyncDialog = true
+            },
+            onOpenUpload = { showUploadDialog = true },
+            onCancelFolderSync = { session.cancelFolderSync() },
+            onCancelUpload = { session.cancelDesktopUpload() },
         )
 
         if (supportsSelectTrack) {
@@ -516,6 +536,35 @@ fun DesktopRemoteScreen(
         SessionInfoDialog(
             state = state,
             onDismiss = { showSessionInfo = false },
+        )
+    }
+
+    if (showFolderSyncDialog) {
+        FolderSyncDialog(
+            state = state.folderSync,
+            canSyncFolders = state.canSyncFolders,
+            onRefreshFolders = { session.loadSyncFolders() },
+            onStartSync = { folderIds ->
+                onRequireLegacyStoragePermission {
+                    session.syncRemoteFolders(folderIds)
+                }
+            },
+            onCancelSync = { session.cancelFolderSync() },
+            onDismiss = { showFolderSyncDialog = false },
+        )
+    }
+
+    if (showUploadDialog) {
+        UploadToDesktopDialog(
+            localTracks = state.localTracks,
+            localPlaylists = state.localPlaylists,
+            batchState = state.batchUpload,
+            canUpload = state.canUploadToDesktop,
+            onStartUpload = { trackIds, targetPlaylist ->
+                session.uploadTracksToDesktop(trackIds, targetPlaylist)
+            },
+            onCancelUpload = { session.cancelDesktopUpload() },
+            onDismiss = { showUploadDialog = false },
         )
     }
 }

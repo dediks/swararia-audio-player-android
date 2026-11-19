@@ -14,6 +14,7 @@ class DesktopRemoteWiring(unittest.TestCase):
                          'ViewModel must consume injected reusable port, not construct network implementation')
         self.assertIn('DesktopRemoteHttpsApi()', root)
         self.assertIn('container.desktopRemoteApi()', root)
+        self.assertIn('container.desktopRemoteMediaUploader()', root)
         self.assertIn('AndroidKeystoreDesktopRemoteStore(', root)
         self.assertIn('container.desktopRemoteStore()', root)
         self.assertIn('private val rememberedDesktopSession by lazy', root)
@@ -23,7 +24,7 @@ class DesktopRemoteWiring(unittest.TestCase):
         self.assertIn('desktopRemote.release()', vm)
 
     def test_remote_feature_never_owns_phone_player_or_durable_credentials(self):
-        non_screen_names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteComponents', 'DesktopRemoteTransportDock', 'DesktopRemotePairingUi', 'DesktopRemoteQrScanner']
+        non_screen_names = ['DesktopRemoteProtocol', 'DesktopRemoteHttpsApi', 'DesktopRemoteSession', 'DesktopRemoteComponents', 'DesktopRemoteTransferUi', 'DesktopRemoteTransportDock', 'DesktopRemotePairingUi', 'DesktopRemoteQrScanner']
         screen_source = (SRC / 'remote/DesktopRemoteScreen.kt').read_text()
         source = '\n'.join([(SRC / 'remote' / (n + '.kt')).read_text() for n in non_screen_names] + [screen_source])
         for forbidden in ['MediaController', 'ExoPlayer', 'PlaybackService', 'SharedPreferences',

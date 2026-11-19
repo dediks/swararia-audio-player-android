@@ -90,6 +90,56 @@ object DesktopRemoteWireProbe {
             catch (failure: DesktopRemoteFailure) { check(failure.reason == DesktopRemoteFailure.Reason.MEDIA_DISABLED) }
             println("PASS wire media: actual HEAD/GET audio streaming, decoded filename, and SHA-256 verification")
 
+            check(control("SYNC_ON") == "OK")
+            check(control("UPLOAD_ON") == "OK")
+            val capsTransfer = api.capabilitiesInfo(connection, grant)
+            check(capsTransfer.sync && capsTransfer.upload) { "Desktop sync/upload capabilities missing: $capsTransfer" }
+            val foldersRes = api.syncFolders(connection, grant)
+            check(foldersRes.folders.size == 2 && foldersRes.excludedWavFlacCount == 1) { "Unexpected sync folders: $foldersRes" }
+            val folder = foldersRes.folders.first { it.relFolder == "Show Malam" }
+            val manifest = api.syncManifest(connection, grant, folder.folderId)
+            check(manifest.files.size == 1 && manifest.excludedWavFlacCount == 1) { "Unexpected sync manifest: $manifest" }
+            val syncFile = manifest.files.first()
+            val syncDest = directory.resolve("synced-playlist-track.mp3").toFile()
+            val syncDown = api.downloadSyncFile(connection, grant, syncFile.fileId, syncDest, capsTransfer.mediaMaxBytes)
+            check(syncDown.sha256 == syncFile.sha256 && syncDest.length() == syncFile.sizeBytes)
+
+            // Re-upload the genuine MP3 bytes back into another Desktop playlist subfolder, then verify WAV rejection & toggle OFF
+            val uploadOutcome = syncDest.inputStream().use { uploadStream ->
+                api.uploadLibraryTrack(
+                    connection,
+                    grant,
+                    filename = "FromAndroid.mp3",
+                    sha256 = syncFile.sha256,
+                    sizeBytes = syncFile.sizeBytes,
+                    playlistName = "Set Android",
+                    inputStream = uploadStream,
+                )
+            }
+            check(!uploadOutcome.deduplicated && uploadOutcome.filename == "FromAndroid.mp3" && uploadOutcome.sha256 == syncFile.sha256)
+            Files.deleteIfExists(syncDest.toPath())
+
+            try {
+                api.uploadLibraryTrack(
+                    connection,
+                    grant,
+                    filename = "Lossless.wav",
+                    sha256 = "b".repeat(64),
+                    sizeBytes = 64L,
+                    playlistName = "Set Android",
+                    inputStream = java.io.ByteArrayInputStream(ByteArray(64)),
+                )
+                error("WAV upload should be skipped/rejected in phase")
+            } catch (failure: DesktopRemoteFailure) {
+                check(failure.reason == DesktopRemoteFailure.Reason.WAV_FLAC_EXCLUDED)
+            }
+
+            check(control("SYNC_OFF") == "OK")
+            check(control("UPLOAD_OFF") == "OK")
+            try { api.syncFolders(connection, grant); error("Disabled sync accepted") }
+            catch (failure: DesktopRemoteFailure) { check(failure.reason == DesktopRemoteFailure.Reason.SYNC_DISABLED) }
+            println("PASS wire transfer: actual /v1/sync/* pull + /v1/library/upload + WAV/FLAC warning gates")
+
             fun posts(): Int = DesktopRemoteJson.objectValue(control("STATS").toByteArray())["command_posts"].intValue()
             val before = posts()
             check(control("DROP_NEXT_COMMAND") == "OK")

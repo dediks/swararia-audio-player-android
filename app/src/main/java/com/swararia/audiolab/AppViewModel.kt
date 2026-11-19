@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.swararia.audiolab.remote.AndroidRemoteServerController
 import com.swararia.audiolab.remote.DesktopRemoteApi
 import com.swararia.audiolab.remote.DesktopRemoteMediaImporter
+import com.swararia.audiolab.remote.DesktopRemoteMediaUploader
 import com.swararia.audiolab.remote.DesktopRemotePersistence
 import com.swararia.audiolab.remote.DesktopRemoteSession
 import com.swararia.audiolab.remote.RemoteServerUiState
@@ -27,6 +28,7 @@ class AppViewModel(
     desktopRemoteStore: DesktopRemotePersistence? = null,
     private val remoteServer: AndroidRemoteServerController? = null,
     desktopRemoteMediaImporter: DesktopRemoteMediaImporter? = null,
+    desktopRemoteMediaUploader: DesktopRemoteMediaUploader? = null,
     private val ytMusicAccount: YoutubeMusicAccountManager? = null,
     private val downloadPreferences: DownloadPreferences? = null,
     private val playbackPreferences: PlaybackPreferences? = null,
@@ -36,6 +38,7 @@ class AppViewModel(
         viewModelScope,
         persistence = desktopRemoteStore,
         mediaImporter = desktopRemoteMediaImporter,
+        mediaUploader = desktopRemoteMediaUploader,
     )
     private val session: SearchSession = SearchSession(searchRepository, viewModelScope,
         { ingest.value.engineBusy || busy.value || operations.busy.value }, ::message, previewPlayback)

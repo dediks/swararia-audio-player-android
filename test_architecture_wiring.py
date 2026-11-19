@@ -41,6 +41,9 @@ class Boundaries(unittest.TestCase):
         self.assertIn('session.previewError()', vm)
         service=(SRC/'PlaybackService.kt').read_text()
         owner=(SRC/'PreviewSession.kt').read_text()
+        begin_preview=service.split('private fun beginPreview(',1)[1].split('private fun preparePreview(',1)[0]
+        self.assertIn('IngestStatus.state.value.engineBusy', begin_preview)
+        self.assertNotIn('IngestStatus.state.value.busy', begin_preview)
         self.assertIn('override fun onPlayerError', service)
         self.assertIn('previewOwner.previewError(); finishPreview(keepError = true)', service)
         self.assertIn('searchRepository.invalidatePreview(hit.videoId)', owner)

@@ -19,14 +19,22 @@ class DesktopRemoteSessionTest {
         var catalogCancelled = false
         var extended = false
         var mediaSupported = false
+        var syncSupported = false
+        var uploadSupported = false
         var mediaMaxBytes = 150L * 1024L * 1024L
         var expiry = 4e9
         var pairGate: CompletableDeferred<Unit>? = null
         var headCalls = 0
         var downloadCalls = 0
+        var syncDownloadCalls = 0
+        var uploadCalls = 0
         var mediaHead = DesktopRemoteMediaHead("trk_01", "Track.mp3", "audio/mpeg", 1024L, "a".repeat(64))
         var downloadFailure: DesktopRemoteFailure? = null
         var downloadGate: CompletableDeferred<Unit>? = null
+        var syncFiles = listOf(
+            DesktopRemoteSyncFile("fil_0123456789abcdef0123", "Song1.mp3", "Setlist/Song1.mp3", "mp3", 1024L, "b".repeat(64)),
+            DesktopRemoteSyncFile("fil_1123456789abcdef0123", "Song2.m4a", "Setlist/Song2.m4a", "m4a", 2048L, "c".repeat(64)),
+        )
         override suspend fun pair(pairing: DesktopRemotePairing): DesktopRemoteGrant {
             pairs++
             pairGate?.let { withContext(NonCancellable) { it.await() } }
@@ -41,7 +49,36 @@ class DesktopRemoteSessionTest {
         }
         override suspend fun capabilities(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) = if (extended) setOf("play", "pause", "stop", "select_track", "select_group") else setOf("play", "pause", "stop")
         override suspend fun capabilitiesInfo(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
-            DesktopRemoteCapabilities(capabilities(pairing, grant), mediaSupported, mediaMaxBytes)
+            DesktopRemoteCapabilities(capabilities(pairing, grant), mediaSupported, mediaMaxBytes, syncSupported, uploadSupported)
+        override suspend fun syncFolders(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) =
+            DesktopRemoteSyncFoldersResult(
+                folders = listOf(DesktopRemoteSyncFolder("fld_1234567890abcdef", "Setlist", "Setlist", 2, 3072L, excludedWavFlacCount = 1)),
+                excludedWavFlacCount = 1,
+                warnings = listOf("1 file .wav/.flac dilewati."),
+            )
+        override suspend fun syncManifest(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, folderId: String, offset: Int, limit: Int) =
+            DesktopRemoteSyncManifestPage(
+                folderId = folderId,
+                relFolder = "Setlist",
+                folderName = "Setlist",
+                total = syncFiles.size,
+                offset = 0,
+                nextOffset = null,
+                excludedWavFlacCount = 1,
+                warnings = listOf("1 file .wav/.flac dilewati."),
+                files = syncFiles,
+            )
+        override suspend fun downloadSyncFile(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, fileId: String, destinationFile: java.io.File, maxBytes: Long, onProgress: (Long, Long) -> Unit): DesktopRemoteMediaHead {
+            syncDownloadCalls++
+            val entry = syncFiles.first { it.fileId == fileId }
+            destinationFile.writeBytes(byteArrayOf(1, 2, 3, 4))
+            return DesktopRemoteMediaHead(fileId, entry.name, "audio/mpeg", entry.sizeBytes, entry.sha256)
+        }
+        override suspend fun uploadLibraryTrack(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant, filename: String, sha256: String, sizeBytes: Long, playlistName: String?, inputStream: java.io.InputStream, onProgress: (Long, Long) -> Unit): DesktopRemoteUploadOutcome {
+            uploadCalls++
+            inputStream.use { it.readBytes() }
+            return DesktopRemoteUploadOutcome(false, filename, "${playlistName ?: "."}/$filename", sha256, playlistName ?: ".", false)
+        }
         override suspend fun state(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant) = DesktopRemotePlayback(role!!, true, false, "PAUSED", 0.0, 10.0, "Track")
         override suspend fun tracks(pairing: DesktopRemotePairing, grant: DesktopRemoteGrant): DesktopRemoteCatalog {
             if (catalogCancelled) throw CancellationException("catalog cancelled")
@@ -353,10 +390,12 @@ class DesktopRemoteSessionTest {
     private class FakeImporter(
         var alreadyHas: Boolean = false,
         var hasStorage: Boolean = true,
+        val knownShas: MutableSet<String> = mutableSetOf(),
     ) : DesktopRemoteMediaImporter {
         var imports = 0
+        val importedPlaylists = mutableListOf<String?>()
         val createdTempFiles = mutableListOf<java.io.File>()
-        override suspend fun hasTrack(sha256: String, sizeBytes: Long): Boolean = alreadyHas
+        override suspend fun hasTrack(sha256: String, sizeBytes: Long): Boolean = alreadyHas || sha256 in knownShas
         override fun hasEnoughStorage(requiredBytes: Long): Boolean = hasStorage
         override fun createTempDownloadFile(): java.io.File =
             java.io.File.createTempFile("remote-test-", ".part").also { createdTempFiles.add(it) }
@@ -364,9 +403,29 @@ class DesktopRemoteSessionTest {
             stagedFile: java.io.File,
             requestedName: String,
             expectedSha256: String,
+        ): DesktopRemoteMediaImportOutcome = importDownloadedAudio(stagedFile, requestedName, expectedSha256, null)
+        override suspend fun importDownloadedAudio(
+            stagedFile: java.io.File,
+            requestedName: String,
+            expectedSha256: String,
+            playlistName: String?,
         ): DesktopRemoteMediaImportOutcome {
             imports++
+            importedPlaylists.add(playlistName)
             return if (alreadyHas) DesktopRemoteMediaImportOutcome.Deduplicated else DesktopRemoteMediaImportOutcome.Saved
+        }
+    }
+
+    private class FakeUploader(
+        tracks: List<DesktopRemoteLocalTrackSummary>,
+    ) : DesktopRemoteMediaUploader {
+        override val localTracksFlow = kotlinx.coroutines.flow.MutableStateFlow(tracks)
+        override val localPlaylistsFlow = kotlinx.coroutines.flow.MutableStateFlow(
+            listOf(DesktopRemoteLocalPlaylistSummary(1L, "Set Pagi", tracks.map { it.trackId })),
+        )
+        override suspend fun openUploadStream(trackId: Long): DesktopRemoteOpenedUpload? {
+            val found = localTracksFlow.value.firstOrNull { it.trackId == trackId } ?: return null
+            return DesktopRemoteOpenedUpload(found.displayName, found.sizeBytes, found.sha256 ?: "d".repeat(64), java.io.ByteArrayInputStream(byteArrayOf(1, 2, 3, 4)))
         }
     }
 
@@ -474,4 +533,44 @@ class DesktopRemoteSessionTest {
         } finally { scope.cancel() }
     }
 
+    @Test fun folderSyncSkipsDuplicatesImportsPlaylistAndBatchUploadWarnsOnWavFlac() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val port = Port().apply { role = "control"; extended = true; syncSupported = true; uploadSupported = true }
+            val importer = FakeImporter(knownShas = mutableSetOf("b".repeat(64)))
+            val uploader = FakeUploader(
+                listOf(
+                    DesktopRemoteLocalTrackSummary(10L, "Compressed.mp3", 1024L, 1000L, "d".repeat(64)),
+                    DesktopRemoteLocalTrackSummary(11L, "Lossless.wav", 4096L, 2000L, "e".repeat(64)),
+                ),
+            )
+            val session = DesktopRemoteSession(
+                port,
+                scope,
+                100_000,
+                ioDispatcher = Dispatchers.Unconfined,
+                mediaImporter = importer,
+                mediaUploader = uploader,
+            )
+            session.visible(Any()); session.connect(pairing); settle()
+            assertTrue(session.state.value.canSyncFolders)
+            assertTrue(session.state.value.canUploadToDesktop)
+
+            session.loadSyncFolders(); settle()
+            assertEquals(1, session.state.value.folderSync.folders.size)
+            session.syncRemoteFolders(listOf("fld_1234567890abcdef")); settle()
+            // Song1 matched knownShas ("b"*64) and skipped download; Song2 imported into playlist "Setlist"
+            assertEquals(1, port.syncDownloadCalls)
+            assertEquals(1, session.state.value.folderSync.downloadedCount)
+            assertEquals(1, session.state.value.folderSync.skippedDuplicateCount)
+            assertEquals(listOf<String?>("Setlist"), importer.importedPlaylists)
+            assertTrue(session.state.value.folderSync.lastSummary?.contains("1 WAV/FLAC dilewati") == true)
+
+            session.uploadTracksToDesktop(listOf(10L, 11L), "Playlist HP"); settle()
+            assertEquals(1, port.uploadCalls)
+            assertEquals(1, session.state.value.batchUpload.savedCount)
+            assertEquals(1, session.state.value.batchUpload.wavFlacSkippedCount)
+            assertTrue(session.state.value.batchUpload.warnings.any { it.contains("WAV/FLAC") })
+        } finally { scope.cancel() }
+    }
 }

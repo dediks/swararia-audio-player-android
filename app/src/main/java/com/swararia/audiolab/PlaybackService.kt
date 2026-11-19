@@ -481,7 +481,7 @@ class PlaybackService : MediaSessionService() {
         val title = args.getString(PreviewProtocol.TITLE).orEmpty()
         val token = args.getString(PreviewProtocol.TOKEN).orEmpty()
         if (!Regex("[A-Za-z0-9_-]{11}").matches(id) || title.length > 200 || title.any { it.isISOControl() } ||
-            previewOwner.preview.value.loading || IngestStatus.state.value.busy || !lease.begin(token, args.getLong(PreviewProtocol.GENERATION)))
+            previewOwner.preview.value.loading || IngestStatus.state.value.engineBusy || !lease.begin(token, args.getLong(PreviewProtocol.GENERATION)))
             return SessionResult(SessionError.ERROR_BAD_VALUE, stateExtras())
         finishPreview()
         val player = appPlayer ?: return SessionResult(SessionError.ERROR_INVALID_STATE, stateExtras())

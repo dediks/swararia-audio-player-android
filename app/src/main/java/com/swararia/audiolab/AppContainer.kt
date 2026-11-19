@@ -16,8 +16,12 @@ import com.swararia.audiolab.remote.AndroidKeystoreDesktopRemoteStore
 import com.swararia.audiolab.remote.AndroidRemoteServerController
 import com.swararia.audiolab.remote.DesktopRemoteApi
 import com.swararia.audiolab.remote.DesktopRemoteHttpsApi
+import com.swararia.audiolab.remote.DesktopRemoteLocalPlaylistSummary
+import com.swararia.audiolab.remote.DesktopRemoteLocalTrackSummary
 import com.swararia.audiolab.remote.DesktopRemoteMediaImportOutcome
 import com.swararia.audiolab.remote.DesktopRemoteMediaImporter
+import com.swararia.audiolab.remote.DesktopRemoteMediaUploader
+import com.swararia.audiolab.remote.DesktopRemoteOpenedUpload
 import com.swararia.audiolab.remote.DesktopRemotePersistence
 import com.swararia.audiolab.remote.RemoteNsdCoordinator
 import com.swararia.audiolab.remote.RemoteWifiPeerController
@@ -30,6 +34,9 @@ import com.swararia.audiolab.ytmusic.clearAndroidWebViewYoutubeSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
@@ -110,13 +117,63 @@ class AppContainer(context: Context) {
             stagedFile: File,
             requestedName: String,
             expectedSha256: String,
+        ): DesktopRemoteMediaImportOutcome =
+            importDownloadedAudio(stagedFile, requestedName, expectedSha256, playlistName = null)
+
+        override suspend fun importDownloadedAudio(
+            stagedFile: File,
+            requestedName: String,
+            expectedSha256: String,
+            playlistName: String?,
         ): DesktopRemoteMediaImportOutcome {
-            val outcome = library.importValidatedUpload(stagedFile, requestedName, expectedSha256, playlistName = null)
+            val outcome = library.importValidatedUpload(stagedFile, requestedName, expectedSha256, playlistName = playlistName)
             return if (outcome is UploadImportOutcome.Deduplicated) {
                 DesktopRemoteMediaImportOutcome.Deduplicated
             } else {
                 DesktopRemoteMediaImportOutcome.Saved
             }
+        }
+    }
+
+    fun desktopRemoteMediaUploader(): DesktopRemoteMediaUploader = object : DesktopRemoteMediaUploader {
+        override val localTracksFlow: Flow<List<DesktopRemoteLocalTrackSummary>> =
+            combine(library.tracks, library.playlists) { tracksList, playlistList ->
+                val playlistsByTrack = HashMap<Long, MutableList<Long>>()
+                for (playlist in playlistList) {
+                    for (tid in playlist.trackIds) {
+                        playlistsByTrack.getOrPut(tid) { mutableListOf() }.add(playlist.id)
+                    }
+                }
+                tracksList.map { track ->
+                    DesktopRemoteLocalTrackSummary(
+                        trackId = track.id,
+                        displayName = track.displayName,
+                        sizeBytes = track.sizeBytes,
+                        durationMs = track.durationMs,
+                        sha256 = track.sha256,
+                        playlistIds = playlistsByTrack[track.id].orEmpty(),
+                    )
+                }
+            }
+
+        override val localPlaylistsFlow: Flow<List<DesktopRemoteLocalPlaylistSummary>> =
+            library.playlists.map { list ->
+                list.map { DesktopRemoteLocalPlaylistSummary(it.id, it.name, it.trackIds) }
+            }
+
+        override suspend fun openUploadStream(trackId: Long): DesktopRemoteOpenedUpload? {
+            val media = library.openReadableTrack(trackId) ?: return null
+            val sha = media.track.sha256?.takeIf { it.isNotBlank() }
+            if (sha == null || media.sizeBytes <= 0L) {
+                runCatching { media.inputStream.close() }
+                return null
+            }
+            return DesktopRemoteOpenedUpload(
+                filename = media.track.displayName,
+                sizeBytes = media.sizeBytes,
+                sha256 = sha,
+                inputStream = media.inputStream,
+            )
         }
     }
     val remoteServerController: AndroidRemoteServerController by lazy {
@@ -146,6 +203,7 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
             container.desktopRemoteStore(),
             container.remoteServerController,
             container.desktopRemoteMediaImporter(),
+            container.desktopRemoteMediaUploader(),
             container.ytMusicAccount,
             container.downloadPreferences,
             container.playbackPreferences,

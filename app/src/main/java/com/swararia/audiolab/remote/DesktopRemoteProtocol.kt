@@ -3,8 +3,12 @@ package com.swararia.audiolab.remote
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import java.io.File
+import java.io.InputStream
 import java.util.Base64
+import java.util.Locale
 
 /** Static errors only: never expose input, server bodies or exception messages. */
 class DesktopRemoteFailure(
@@ -20,6 +24,10 @@ class DesktopRemoteFailure(
         MEDIA_UNAVAILABLE,
         MEDIA_TOO_LARGE,
         MEDIA_UNSUPPORTED,
+        SYNC_DISABLED,
+        UPLOAD_DISABLED,
+        WAV_FLAC_EXCLUDED,
+        SHA256_MISMATCH,
     }
 }
 
@@ -127,6 +135,82 @@ data class DesktopRemoteCapabilities(
     val commands: Set<String>,
     val media: Boolean = false,
     val mediaMaxBytes: Long = 0L,
+    val sync: Boolean = false,
+    val upload: Boolean = false,
+)
+
+data class DesktopRemoteSyncFolder(
+    val folderId: String,
+    val relFolder: String,
+    val name: String,
+    val trackCount: Int,
+    val totalBytes: Long,
+    val excludedWavFlacCount: Int = 0,
+    val oversizedCount: Int = 0,
+)
+
+data class DesktopRemoteSyncFoldersResult(
+    val folders: List<DesktopRemoteSyncFolder>,
+    val excludedWavFlacCount: Int = 0,
+    val oversizedCount: Int = 0,
+    val warnings: List<String> = emptyList(),
+)
+
+data class DesktopRemoteSyncFile(
+    val fileId: String,
+    val name: String,
+    val relPath: String,
+    val ext: String,
+    val sizeBytes: Long,
+    val sha256: String,
+)
+
+data class DesktopRemoteSyncManifestPage(
+    val folderId: String,
+    val relFolder: String,
+    val folderName: String,
+    val total: Int,
+    val offset: Int,
+    val nextOffset: Int?,
+    val excludedWavFlacCount: Int = 0,
+    val oversizedCount: Int = 0,
+    val warnings: List<String> = emptyList(),
+    val files: List<DesktopRemoteSyncFile>,
+)
+
+data class DesktopRemoteUploadOutcome(
+    val deduplicated: Boolean,
+    val filename: String,
+    val relPath: String,
+    val sha256: String,
+    val subfolder: String,
+    val renamed: Boolean,
+)
+
+data class DesktopRemoteLocalTrackSummary(
+    val trackId: Long,
+    val displayName: String,
+    val sizeBytes: Long,
+    val durationMs: Long?,
+    val sha256: String?,
+    val playlistIds: List<Long> = emptyList(),
+) {
+    val ext: String get() = displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+    val isWavOrFlac: Boolean get() = ext in DesktopRemoteJson.excludedPhaseExtensions
+    val isSupportedCompressedAudio: Boolean get() = ext in DesktopRemoteJson.allowedCompressedExtensions
+}
+
+data class DesktopRemoteLocalPlaylistSummary(
+    val id: Long,
+    val name: String,
+    val trackIds: List<Long>,
+)
+
+data class DesktopRemoteOpenedUpload(
+    val filename: String,
+    val sizeBytes: Long,
+    val sha256: String,
+    val inputStream: InputStream,
 )
 
 data class DesktopRemoteMediaHead(
@@ -160,12 +244,28 @@ interface DesktopRemoteMediaImporter {
         requestedName: String,
         expectedSha256: String,
     ): DesktopRemoteMediaImportOutcome
+    suspend fun importDownloadedAudio(
+        stagedFile: File,
+        requestedName: String,
+        expectedSha256: String,
+        playlistName: String?,
+    ): DesktopRemoteMediaImportOutcome = importDownloadedAudio(stagedFile, requestedName, expectedSha256)
+}
+
+interface DesktopRemoteMediaUploader {
+    val localTracksFlow: Flow<List<DesktopRemoteLocalTrackSummary>> get() = emptyFlow()
+    val localPlaylistsFlow: Flow<List<DesktopRemoteLocalPlaylistSummary>> get() = emptyFlow()
+    suspend fun openUploadStream(trackId: Long): DesktopRemoteOpenedUpload? = null
 }
 
 object DesktopRemoteJson {
+    val excludedPhaseExtensions = setOf("wav", "flac")
+    val allowedCompressedExtensions = setOf("mp3", "m4a", "mp4", "aac", "opus", "ogg", "webm")
     private val mapper = ObjectMapper().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
     private val trackIdRegex = Regex("[A-Za-z0-9_-]{3,32}")
     private val groupIdRegex = Regex("[A-Za-z0-9_-]{2,32}")
+    private val syncFolderIdRegex = Regex("(?:root|fld_[0-9a-f]{16})")
+    private val syncFileIdRegex = Regex("fil_[0-9a-f]{20}")
     private val allowedCommands = setOf("play", "pause", "stop", "fade_out", "prev", "next", "select_track", "select_group")
     fun objectValue(bytes: ByteArray, maxBytes: Int = 16_384): JsonNode = checked {
         require(bytes.size in 2..maxBytes)
@@ -232,6 +332,10 @@ object DesktopRemoteJson {
     }
     fun isValidTrackId(trackId: String): Boolean = trackId.matches(trackIdRegex)
 
+    fun isValidSyncFolderId(folderId: String): Boolean = folderId.matches(syncFolderIdRegex)
+
+    fun isValidSyncFileId(fileId: String): Boolean = fileId.matches(syncFileIdRegex)
+
     fun isValidSha256Hex(raw: String): Boolean =
         raw.length == 64 && raw.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
 
@@ -268,7 +372,166 @@ object DesktopRemoteJson {
             maxNode.isIntegralNumber && maxNode.longValue() >= 0L -> maxNode.longValue()
             else -> throw DesktopRemoteFailure()
         }
-        return DesktopRemoteCapabilities(parsedCommands, media, mediaMaxBytes)
+        fun optBool(key: String): Boolean {
+            val child = node.get(key)
+            return when {
+                child == null || child.isNull -> false
+                child.isBoolean -> child.booleanValue()
+                else -> throw DesktopRemoteFailure()
+            }
+        }
+        return DesktopRemoteCapabilities(
+            commands = parsedCommands,
+            media = media,
+            mediaMaxBytes = mediaMaxBytes,
+            sync = optBool("sync"),
+            upload = optBool("upload"),
+        )
+    }
+
+    private fun safeRelativeText(node: JsonNode, name: String, max: Int = 180, allowEmpty: Boolean = false): String {
+        val v = node.get(name) ?: throw DesktopRemoteFailure()
+        if (!v.isTextual) throw DesktopRemoteFailure()
+        val s = v.textValue()
+        if (s.isEmpty() && allowEmpty) return ""
+        if (s.length !in 1..max || s.any { it.isISOControl() } || s.contains("://") || s.contains('\\')) {
+            throw DesktopRemoteFailure()
+        }
+        val segments = s.split('/')
+        if (segments.any { it == ".." || it == "." }) throw DesktopRemoteFailure()
+        return s
+    }
+
+    private fun safeNonNegativeInt(node: JsonNode, name: String, defaultValue: Int = 0): Int {
+        val child = node.get(name) ?: return defaultValue
+        if (child.isNull) return defaultValue
+        if (!child.isIntegralNumber || child.intValue() < 0) throw DesktopRemoteFailure()
+        return child.intValue()
+    }
+
+    private fun safeWarnings(node: JsonNode): List<String> {
+        val arr = node.get("warnings") ?: return emptyList()
+        if (arr.isNull) return emptyList()
+        if (!arr.isArray || arr.size() > 8) throw DesktopRemoteFailure()
+        return arr.map { item ->
+            if (!item.isTextual || item.textValue().length !in 1..240 || item.textValue().any { it.isISOControl() }) {
+                throw DesktopRemoteFailure()
+            }
+            item.textValue()
+        }
+    }
+
+    fun syncFolders(node: JsonNode): DesktopRemoteSyncFoldersResult {
+        protocol(node)
+        val arr = node.get("folders") ?: throw DesktopRemoteFailure()
+        if (!arr.isArray || arr.size() > 256) throw DesktopRemoteFailure()
+        val seenIds = HashSet<String>(arr.size())
+        val folders = ArrayList<DesktopRemoteSyncFolder>(arr.size())
+        for (entry in arr) {
+            if (!entry.isObject) throw DesktopRemoteFailure()
+            val fid = idToken(entry, "folder_id", syncFolderIdRegex, nullable = false)!!
+            if (!seenIds.add(fid)) throw DesktopRemoteFailure()
+            val relFolder = safeRelativeText(entry, "rel_folder", 180, allowEmpty = true)
+            val name = safeRelativeText(entry, "name", 180, allowEmpty = false)
+            val trackCount = safeNonNegativeInt(entry, "track_count", 0)
+            val bytesNode = entry.get("total_bytes")
+            val totalBytes = if (bytesNode == null || bytesNode.isNull) 0L else {
+                if (!bytesNode.isIntegralNumber || bytesNode.longValue() < 0L) throw DesktopRemoteFailure()
+                bytesNode.longValue()
+            }
+            folders.add(
+                DesktopRemoteSyncFolder(
+                    folderId = fid,
+                    relFolder = relFolder,
+                    name = name,
+                    trackCount = trackCount,
+                    totalBytes = totalBytes,
+                    excludedWavFlacCount = safeNonNegativeInt(entry, "excluded_wav_flac_count", 0),
+                    oversizedCount = safeNonNegativeInt(entry, "oversized_count", 0),
+                ),
+            )
+        }
+        return DesktopRemoteSyncFoldersResult(
+            folders = folders,
+            excludedWavFlacCount = safeNonNegativeInt(node, "excluded_wav_flac_count", 0),
+            oversizedCount = safeNonNegativeInt(node, "oversized_count", 0),
+            warnings = safeWarnings(node),
+        )
+    }
+
+    fun syncManifestBody(folderId: String, offset: Int, limit: Int): ByteArray {
+        if (!folderId.matches(syncFolderIdRegex) || offset < 0 || limit !in 1..100) {
+            throw DesktopRemoteFailure(DesktopRemoteFailure.Kind.INPUT)
+        }
+        return mapper.writeValueAsBytes(mapOf("folder_id" to folderId, "offset" to offset, "limit" to limit))
+    }
+
+    fun syncManifest(node: JsonNode): DesktopRemoteSyncManifestPage {
+        protocol(node)
+        val fid = idToken(node, "folder_id", syncFolderIdRegex, nullable = false)!!
+        val relFolder = safeRelativeText(node, "rel_folder", 180, allowEmpty = true)
+        val folderName = safeRelativeText(node, "folder_name", 180, allowEmpty = false)
+        val total = safeNonNegativeInt(node, "total")
+        val offset = safeNonNegativeInt(node, "offset")
+        val nextNode = node.get("next_offset")
+        val nextOffset = if (nextNode == null || nextNode.isNull) null else {
+            if (!nextNode.isIntegralNumber || nextNode.intValue() <= offset) throw DesktopRemoteFailure()
+            nextNode.intValue()
+        }
+        val arr = node.get("files") ?: throw DesktopRemoteFailure()
+        if (!arr.isArray || arr.size() > 100) throw DesktopRemoteFailure()
+        val seenIds = HashSet<String>(arr.size())
+        val items = ArrayList<DesktopRemoteSyncFile>(arr.size())
+        for (entry in arr) {
+            if (!entry.isObject) throw DesktopRemoteFailure()
+            val fileId = idToken(entry, "file_id", syncFileIdRegex, nullable = false)!!
+            if (!seenIds.add(fileId)) throw DesktopRemoteFailure()
+            val name = safeTitle(entry, "name", 180) ?: throw DesktopRemoteFailure()
+            val relPath = safeRelativeText(entry, "rel_path", 240, allowEmpty = false)
+            val rawExt = text(entry, "ext", 12).lowercase(Locale.ROOT).trimStart('.')
+            if (rawExt !in allowedCompressedExtensions) throw DesktopRemoteFailure()
+            val sizeNode = entry.get("size_bytes") ?: throw DesktopRemoteFailure()
+            if (!sizeNode.isIntegralNumber || sizeNode.longValue() !in 1L..(150L * 1024L * 1024L)) {
+                throw DesktopRemoteFailure()
+            }
+            val sha = text(entry, "sha256", 64).lowercase(Locale.ROOT)
+            if (!isValidSha256Hex(sha)) throw DesktopRemoteFailure()
+            items.add(
+                DesktopRemoteSyncFile(
+                    fileId = fileId,
+                    name = name,
+                    relPath = relPath,
+                    ext = rawExt,
+                    sizeBytes = sizeNode.longValue(),
+                    sha256 = sha,
+                ),
+            )
+        }
+        return DesktopRemoteSyncManifestPage(
+            folderId = fid,
+            relFolder = relFolder,
+            folderName = folderName,
+            total = total,
+            offset = offset,
+            nextOffset = nextOffset,
+            excludedWavFlacCount = safeNonNegativeInt(node, "excluded_wav_flac_count", 0),
+            oversizedCount = safeNonNegativeInt(node, "oversized_count", 0),
+            warnings = safeWarnings(node),
+            files = items,
+        )
+    }
+
+    fun uploadOutcome(node: JsonNode): DesktopRemoteUploadOutcome {
+        val dedup = node.get("deduplicated")?.let { if (it.isBoolean) it.booleanValue() else throw DesktopRemoteFailure() }
+            ?: (node.get("status")?.takeIf { it.isTextual }?.textValue() == "skipped_duplicate")
+        val filename = safeTitle(node, "filename", 200) ?: throw DesktopRemoteFailure()
+        val relPath = safeRelativeText(node, "rel_path", 260, allowEmpty = false)
+        val sha = text(node, "sha256", 64).lowercase(Locale.ROOT)
+        if (!isValidSha256Hex(sha)) throw DesktopRemoteFailure()
+        val subfolderNode = node.get("subfolder")
+        val subfolder = if (subfolderNode == null || subfolderNode.isNull) "." else safeRelativeText(node, "subfolder", 180, allowEmpty = true)
+        val renamed = node.get("renamed")?.let { if (it.isBoolean) it.booleanValue() else throw DesktopRemoteFailure() } ?: false
+        return DesktopRemoteUploadOutcome(dedup, filename, relPath, sha, subfolder, renamed)
     }
     fun playback(node: JsonNode): DesktopRemotePlayback {
         protocol(node)

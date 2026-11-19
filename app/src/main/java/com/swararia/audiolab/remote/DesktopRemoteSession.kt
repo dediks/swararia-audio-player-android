@@ -43,15 +43,56 @@ enum class RemoteCommandOutcome(val wire: String, val inFlight: Boolean = false)
     }
 }
 
+data class DesktopRemoteFolderSyncState(
+    val loadingFolders: Boolean = false,
+    val running: Boolean = false,
+    val folders: List<DesktopRemoteSyncFolder> = emptyList(),
+    val hostWarnings: List<String> = emptyList(),
+    val excludedWavFlacCount: Int = 0,
+    val oversizedCount: Int = 0,
+    val currentFolderName: String? = null,
+    val currentFileName: String? = null,
+    val completedFiles: Int = 0,
+    val totalFiles: Int = 0,
+    val downloadedCount: Int = 0,
+    val skippedDuplicateCount: Int = 0,
+    val failedCount: Int = 0,
+    val lastSummary: String? = null,
+    val error: String? = null,
+)
+
+data class DesktopRemoteBatchUploadState(
+    val running: Boolean = false,
+    val completedFiles: Int = 0,
+    val totalFiles: Int = 0,
+    val currentFileName: String? = null,
+    val currentFileSentBytes: Long = 0L,
+    val currentFileTotalBytes: Long = 0L,
+    val savedCount: Int = 0,
+    val deduplicatedCount: Int = 0,
+    val renamedCount: Int = 0,
+    val wavFlacSkippedCount: Int = 0,
+    val oversizedSkippedCount: Int = 0,
+    val failedCount: Int = 0,
+    val warnings: List<String> = emptyList(),
+    val lastSummary: String? = null,
+    val error: String? = null,
+)
+
 data class DesktopRemoteUiState(
     val endpoint: String? = null, val phase: String = RemotePhase.DISCONNECTED.wire, val role: String? = null,
     val playback: DesktopRemotePlayback? = null, val commands: Set<String> = emptySet(),
     val mediaSupported: Boolean = false, val mediaMaxBytes: Long = 0L,
+    val syncSupported: Boolean = false, val uploadSupported: Boolean = false,
     val playlist: String? = null, val activeGroupId: String? = null, val totalTracks: Int = 0,
     val groups: List<DesktopRemoteTrackGroup> = emptyList(),
     val currentTrackId: String? = null,
     val tracks: List<DesktopRemoteTrack> = emptyList(),
     val downloads: Map<String, DesktopRemoteTrackDownload> = emptyMap(),
+    val folderSync: DesktopRemoteFolderSyncState = DesktopRemoteFolderSyncState(),
+    val batchUpload: DesktopRemoteBatchUploadState = DesktopRemoteBatchUploadState(),
+    val localTracks: List<DesktopRemoteLocalTrackSummary> = emptyList(),
+    val localPlaylists: List<DesktopRemoteLocalPlaylistSummary> = emptyList(),
     val busy: Boolean = false, val fresh: Boolean = false, val message: String? = null,
     val outcome: String? = null,
 ) {
@@ -74,6 +115,14 @@ data class DesktopRemoteUiState(
             remoteRole == RemoteRole.CONTROL &&
             mediaSupported &&
             playback?.online == true
+    val canSyncFolders: Boolean
+        get() = remotePhase == RemotePhase.ACTIVE &&
+            remoteRole == RemoteRole.CONTROL &&
+            syncSupported
+    val canUploadToDesktop: Boolean
+        get() = remotePhase == RemotePhase.ACTIVE &&
+            remoteRole == RemoteRole.CONTROL &&
+            uploadSupported
 }
 
 /** Android-free RAM owner. Like SearchSession, invoke on the caller's single UI thread.
@@ -88,6 +137,7 @@ class DesktopRemoteSession(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val persistence: DesktopRemotePersistence? = store?.let { DesktopRemotePersistence(it, ioDispatcher) },
     private val mediaImporter: DesktopRemoteMediaImporter? = null,
+    private val mediaUploader: DesktopRemoteMediaUploader? = null,
 ) {
     private val mutable = MutableStateFlow(DesktopRemoteUiState())
     val state = mutable.asStateFlow()
@@ -103,9 +153,23 @@ class DesktopRemoteSession(
     private var mutation: Job? = null
     private var commandId: String? = null
     private val downloadJobs = HashMap<String, Job>()
+    private var folderSyncJob: Job? = null
+    private var batchUploadJob: Job? = null
 
     init {
         restore()
+        mediaUploader?.let { uploader ->
+            scope.launch {
+                uploader.localTracksFlow.collect { items ->
+                    mutable.update { it.copy(localTracks = items) }
+                }
+            }
+            scope.launch {
+                uploader.localPlaylistsFlow.collect { items ->
+                    mutable.update { it.copy(localPlaylists = items) }
+                }
+            }
+        }
     }
 
     private fun restore() {
@@ -128,11 +192,15 @@ class DesktopRemoteSession(
             grant = DesktopRemoteGrant(loaded.deviceId, loaded.secret())
             expiresAt = loaded.expiresAt
             persistedKey = sessionKey(savedPairing.endpoint, loaded.deviceId, loaded.expiresAt)
-            mutable.value = DesktopRemoteUiState(
-                endpoint = savedPairing.endpoint,
-                phase = "active",
-                message = "Menyambung ulang ke perangkat target…",
-            )
+            mutable.update { prev ->
+                DesktopRemoteUiState(
+                    endpoint = savedPairing.endpoint,
+                    phase = "active",
+                    message = "Menyambung ulang ke perangkat target…",
+                    localTracks = prev.localTracks,
+                    localPlaylists = prev.localPlaylists,
+                )
+            }
             startPolling()
         }
     }
@@ -163,7 +231,15 @@ class DesktopRemoteSession(
             mutable.update { it.copy(message = "Kode pairing tidak valid.") }; return
         }
         val ticket = ++generation
-        mutable.value = DesktopRemoteUiState(endpoint = parsed.endpoint, phase = "connecting", busy = true)
+        mutable.update { prev ->
+            DesktopRemoteUiState(
+                endpoint = parsed.endpoint,
+                phase = "connecting",
+                busy = true,
+                localTracks = prev.localTracks,
+                localPlaylists = prev.localPlaylists,
+            )
+        }
         mutation = scope.launch {
             try {
                 serial.withLock {
@@ -172,8 +248,15 @@ class DesktopRemoteSession(
                     if (generation != ticket) return@withLock
                     parsed.forgetInvitation()
                     pairing = parsed; grant = issued
-                    mutable.value = DesktopRemoteUiState(endpoint = parsed.endpoint, phase = "pending",
-                        message = "Setujui perangkat ini di perangkat target.")
+                    mutable.update { prev ->
+                        DesktopRemoteUiState(
+                            endpoint = parsed.endpoint,
+                            phase = "pending",
+                            message = "Setujui perangkat ini di perangkat target.",
+                            localTracks = prev.localTracks,
+                            localPlaylists = prev.localPlaylists,
+                        )
+                    }
                 }
             } catch (cancel: CancellationException) { throw cancel }
               catch (failure: Exception) { if (generation == ticket) disconnectWith(pairFailureMessage(failure)) }
@@ -201,14 +284,26 @@ class DesktopRemoteSession(
         downloadJobs.clear()
     }
 
+    private fun cancelTransferBatchJobs() {
+        folderSyncJob?.cancel(); folderSyncJob = null
+        batchUploadJob?.cancel(); batchUploadJob = null
+    }
+
     private fun clearMemoryState(message: String?) {
         generation++
         poll?.cancel(); poll = null
         mutation?.cancel(); mutation = null
         cancelActiveDownloads()
+        cancelTransferBatchJobs()
         pairing?.forgetInvitation(); pairing = null; grant = null; commandId = null
         expiresAt = 0.0; persistedKey = null
-        mutable.value = DesktopRemoteUiState(message = message)
+        mutable.update { prev ->
+            DesktopRemoteUiState(
+                message = message,
+                localTracks = prev.localTracks,
+                localPlaylists = prev.localPlaylists,
+            )
+        }
     }
 
     private fun disconnectWith(message: String?) {
@@ -254,6 +349,7 @@ class DesktopRemoteSession(
             expiresAt = approval.expiresAt
             if (approval.status == "pending") {
                 cancelActiveDownloads()
+                cancelTransferBatchJobs()
                 if (persistedKey != null) {
                     persistedKey = null
                     clearStore()
@@ -262,9 +358,13 @@ class DesktopRemoteSession(
                     it.copy(
                         phase = "pending", role = null, playback = null,
                         commands = emptySet(), mediaSupported = false, mediaMaxBytes = 0L,
+                        syncSupported = false, uploadSupported = false,
                         playlist = null, activeGroupId = null, totalTracks = 0,
                         groups = emptyList(), currentTrackId = null, tracks = emptyList(),
-                        downloads = emptyMap(), fresh = false, message = "Setujui perangkat ini di perangkat target.",
+                        downloads = emptyMap(),
+                        folderSync = DesktopRemoteFolderSyncState(),
+                        batchUpload = DesktopRemoteBatchUploadState(),
+                        fresh = false, message = "Setujui perangkat ini di perangkat target.",
                     )
                 }
                 return
@@ -287,7 +387,11 @@ class DesktopRemoteSession(
             val caps = api.capabilitiesInfo(p, g)
             val supported = caps.commands
             val mediaAllowed = caps.media && approval.role == "control"
+            val syncAllowed = caps.sync && approval.role == "control"
+            val uploadAllowed = caps.upload && approval.role == "control"
             if (!mediaAllowed) cancelActiveDownloads()
+            if (!syncAllowed) { folderSyncJob?.cancel(); folderSyncJob = null }
+            if (!uploadAllowed) { batchUploadJob?.cancel(); batchUploadJob = null }
             current(ticket, owner)
             val playback = api.state(p, g)
             current(ticket, owner)
@@ -316,6 +420,7 @@ class DesktopRemoteSession(
                 it.copy(
                     phase = "active", role = approval.role, commands = availableCommands,
                     mediaSupported = mediaAllowed, mediaMaxBytes = caps.mediaMaxBytes,
+                    syncSupported = syncAllowed, uploadSupported = uploadAllowed,
                     playback = playback, playlist = catalog?.playlist, activeGroupId = catalog?.activeGroupId,
                     totalTracks = catalog?.totalTracks ?: 0, groups = catalog?.groups ?: emptyList(),
                     currentTrackId = catalog?.currentTrackId,
@@ -463,6 +568,440 @@ class DesktopRemoteSession(
         mutable.update { prev -> prev.copy(downloads = prev.downloads + (trackId to status)) }
     }
 
+    fun loadSyncFolders() {
+        val snapshot = mutable.value
+        val p = pairing ?: return
+        val g = grant ?: return
+        if (!snapshot.canSyncFolders || expiresAt <= now()) return
+        val ticket = generation
+        mutable.update { it.copy(folderSync = it.folderSync.copy(loadingFolders = true, error = null)) }
+        scope.launch {
+            try {
+                val res = api.syncFolders(p, g)
+                if (generation != ticket) return@launch
+                mutable.update {
+                    it.copy(
+                        folderSync = it.folderSync.copy(
+                            loadingFolders = false,
+                            folders = res.folders,
+                            hostWarnings = res.warnings,
+                            excludedWavFlacCount = res.excludedWavFlacCount,
+                            oversizedCount = res.oversizedCount,
+                            error = null,
+                        ),
+                    )
+                }
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (failure: Exception) {
+                if (generation == ticket) {
+                    mutable.update {
+                        it.copy(folderSync = it.folderSync.copy(loadingFolders = false, error = downloadFailureMessage(failure)))
+                    }
+                }
+            }
+        }
+    }
+
+    fun syncRemoteFolders(folderIds: List<String>) {
+        val importer = mediaImporter ?: return
+        val snapshot = mutable.value
+        val p = pairing ?: return
+        val g = grant ?: return
+        val cleanIds = folderIds.distinct().filter { DesktopRemoteJson.isValidSyncFolderId(it) }
+        if (!snapshot.canSyncFolders || cleanIds.isEmpty() || expiresAt <= now() || folderSyncJob?.isActive == true) return
+        val ticket = generation
+        val maxBytes = snapshot.mediaMaxBytes.takeIf { it > 0L } ?: (150L * 1024L * 1024L)
+        mutable.update {
+            it.copy(
+                folderSync = it.folderSync.copy(
+                    running = true,
+                    currentFolderName = null,
+                    currentFileName = "Mengambil manifest folder…",
+                    completedFiles = 0,
+                    totalFiles = 0,
+                    downloadedCount = 0,
+                    skippedDuplicateCount = 0,
+                    failedCount = 0,
+                    lastSummary = null,
+                    error = null,
+                ),
+            )
+        }
+        folderSyncJob = scope.launch {
+            try {
+                data class QueuedSyncEntry(val folderLabel: String, val playlistName: String, val entry: DesktopRemoteSyncFile)
+                val queue = ArrayList<QueuedSyncEntry>()
+                var skippedWav = 0
+                var skippedOversized = 0
+                val manifestWarnings = LinkedHashSet<String>()
+
+                for (fid in cleanIds) {
+                    var offset = 0
+                    while (true) {
+                        val page = api.syncManifest(p, g, fid, offset = offset, limit = 100)
+                        if (generation != ticket) return@launch
+                        if (offset == 0) {
+                            skippedWav += page.excludedWavFlacCount
+                            skippedOversized += page.oversizedCount
+                            manifestWarnings.addAll(page.warnings)
+                        }
+                        val targetPlaylist = safePlaylistNameFromFolder(page.relFolder, page.folderName)
+                        for (file in page.files) {
+                            queue.add(QueuedSyncEntry(page.folderName, targetPlaylist, file))
+                        }
+                        offset = page.nextOffset ?: break
+                    }
+                }
+
+                if (queue.isEmpty()) {
+                    val emptyMsg = if (skippedWav > 0) {
+                        "$skippedWav file .wav/.flac di folder terpilih dilewati (WAV/FLAC belum didukung fase ini)."
+                    } else {
+                        "Tidak ada file audio terkompresi (.mp3/.m4a/.aac/.opus/.ogg/.webm) di folder terpilih."
+                    }
+                    mutable.update {
+                        it.copy(
+                            folderSync = it.folderSync.copy(
+                                running = false,
+                                currentFileName = null,
+                                hostWarnings = manifestWarnings.toList(),
+                                lastSummary = emptyMsg,
+                            ),
+                        )
+                    }
+                    return@launch
+                }
+
+                var downloaded = 0
+                var duplicates = 0
+                var failed = 0
+                var done = 0
+                var storageError: String? = null
+                val total = queue.size
+
+                mutable.update {
+                    it.copy(
+                        folderSync = it.folderSync.copy(
+                            totalFiles = total,
+                            hostWarnings = manifestWarnings.toList(),
+                            excludedWavFlacCount = skippedWav,
+                            oversizedCount = skippedOversized,
+                        ),
+                    )
+                }
+
+                for (item in queue) {
+                    currentCoroutineContext().ensureActive()
+                    if (generation != ticket) return@launch
+                    mutable.update {
+                        it.copy(
+                            folderSync = it.folderSync.copy(
+                                currentFolderName = item.playlistName,
+                                currentFileName = item.entry.name,
+                                completedFiles = done,
+                            ),
+                        )
+                    }
+                    var tempFile: File? = null
+                    try {
+                        val exists = withContext(ioDispatcher) {
+                            importer.hasTrack(item.entry.sha256, item.entry.sizeBytes)
+                        }
+                        if (exists) {
+                            duplicates++
+                        } else {
+                            val hasSpace = withContext(ioDispatcher) { importer.hasEnoughStorage(item.entry.sizeBytes) }
+                            if (!hasSpace) {
+                                storageError = "Ruang penyimpanan HP penuh saat menyinkronkan ${item.entry.name}."
+                                failed++
+                                break
+                            }
+                            tempFile = withContext(ioDispatcher) { importer.createTempDownloadFile() }
+                            val staged = tempFile
+                            val verified = api.downloadSyncFile(p, g, item.entry.fileId, staged, maxBytes)
+                            if (generation != ticket) return@launch
+                            val outcome = withContext(ioDispatcher) {
+                                importer.importDownloadedAudio(
+                                    stagedFile = staged,
+                                    requestedName = verified.filename,
+                                    expectedSha256 = verified.sha256,
+                                    playlistName = item.playlistName,
+                                )
+                            }
+                            if (outcome is DesktopRemoteMediaImportOutcome.Saved) downloaded++ else duplicates++
+                        }
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (_: Exception) {
+                        failed++
+                    } finally {
+                        tempFile?.let { file ->
+                            withContext(NonCancellable + ioDispatcher) {
+                                runCatching { if (file.exists()) file.delete() }
+                            }
+                        }
+                    }
+                    done++
+                    mutable.update {
+                        it.copy(
+                            folderSync = it.folderSync.copy(
+                                completedFiles = done,
+                                downloadedCount = downloaded,
+                                skippedDuplicateCount = duplicates,
+                                failedCount = failed,
+                            ),
+                        )
+                    }
+                }
+
+                if (generation == ticket) {
+                    val extras = buildList {
+                        if (duplicates > 0) add("$duplicates duplikat dilewati")
+                        if (skippedWav > 0) add("$skippedWav WAV/FLAC dilewati")
+                        if (skippedOversized > 0) add("$skippedOversized >150 MB dilewati")
+                        if (failed > 0) add("$failed gagal")
+                    }
+                    val suffix = if (extras.isNotEmpty()) " (${extras.joinToString(", ")})" else ""
+                    mutable.update {
+                        it.copy(
+                            folderSync = it.folderSync.copy(
+                                running = false,
+                                currentFolderName = null,
+                                currentFileName = null,
+                                error = storageError,
+                                lastSummary = "$downloaded lagu tersimpan ke playlist Library HP$suffix.",
+                            ),
+                        )
+                    }
+                }
+            } catch (cancel: CancellationException) {
+                if (generation == ticket) {
+                    mutable.update {
+                        it.copy(folderSync = it.folderSync.copy(running = false, currentFileName = null))
+                    }
+                }
+                throw cancel
+            } catch (failure: Exception) {
+                if (generation == ticket) {
+                    mutable.update {
+                        it.copy(
+                            folderSync = it.folderSync.copy(
+                                running = false,
+                                currentFileName = null,
+                                error = downloadFailureMessage(failure),
+                            ),
+                        )
+                    }
+                }
+            } finally {
+                folderSyncJob = null
+            }
+        }
+    }
+
+    fun cancelFolderSync() {
+        folderSyncJob?.cancel()
+        folderSyncJob = null
+    }
+
+    fun uploadTracksToDesktop(trackIds: List<Long>, targetPlaylistName: String?) {
+        val uploader = mediaUploader ?: return
+        val snapshot = mutable.value
+        val p = pairing ?: return
+        val g = grant ?: return
+        val cleanIds = trackIds.distinct()
+        if (!snapshot.canUploadToDesktop || cleanIds.isEmpty() || expiresAt <= now() || batchUploadJob?.isActive == true) return
+        val ticket = generation
+        val maxBytes = snapshot.mediaMaxBytes.takeIf { it > 0L } ?: (150L * 1024L * 1024L)
+        val byId = snapshot.localTracks.associateBy { it.trackId }
+        val selected = cleanIds.mapNotNull { byId[it] }
+        if (selected.isEmpty()) return
+
+        var wavSkipped = 0
+        var overSkipped = 0
+        val warnList = ArrayList<String>()
+        val validTracks = ArrayList<DesktopRemoteLocalTrackSummary>()
+        for (item in selected) {
+            when {
+                item.isWavOrFlac -> {
+                    wavSkipped++
+                    if (warnList.size < 6) {
+                        warnList.add("${item.displayName}: format WAV/FLAC dilewati untuk fase ini.")
+                    }
+                }
+                !item.isSupportedCompressedAudio -> {
+                    if (warnList.size < 6) warnList.add("${item.displayName}: format tidak didukung.")
+                }
+                item.sizeBytes > maxBytes -> {
+                    overSkipped++
+                    if (warnList.size < 6) warnList.add("${item.displayName}: ukuran melebihi 150 MB.")
+                }
+                else -> validTracks.add(item)
+            }
+        }
+        if (wavSkipped > 6) warnList.add("Total $wavSkipped file .wav/.flac dilewati.")
+
+        if (validTracks.isEmpty()) {
+            val summaryMsg = if (wavSkipped > 0) {
+                "$wavSkipped file .wav/.flac dilewati — pilih file MP3/M4A/AAC/OPUS/OGG/WEBM untuk diunggah ke PC."
+            } else {
+                "Tidak ada file audio terkompresi valid untuk diunggah."
+            }
+            mutable.update {
+                it.copy(
+                    batchUpload = DesktopRemoteBatchUploadState(
+                        wavFlacSkippedCount = wavSkipped,
+                        oversizedSkippedCount = overSkipped,
+                        warnings = warnList,
+                        lastSummary = summaryMsg,
+                    ),
+                )
+            }
+            return
+        }
+
+        val sanitizedPlaylist = sanitizeTargetPlaylistName(targetPlaylistName)
+        mutable.update {
+            it.copy(
+                batchUpload = DesktopRemoteBatchUploadState(
+                    running = true,
+                    totalFiles = validTracks.size,
+                    wavFlacSkippedCount = wavSkipped,
+                    oversizedSkippedCount = overSkipped,
+                    warnings = warnList,
+                ),
+            )
+        }
+
+        batchUploadJob = scope.launch {
+            var saved = 0
+            var dedup = 0
+            var renamed = 0
+            var failed = 0
+            var done = 0
+            var lastErr: String? = null
+            try {
+                for (item in validTracks) {
+                    currentCoroutineContext().ensureActive()
+                    if (generation != ticket) return@launch
+                    mutable.update {
+                        it.copy(
+                            batchUpload = it.batchUpload.copy(
+                                currentFileName = item.displayName,
+                                currentFileSentBytes = 0L,
+                                currentFileTotalBytes = item.sizeBytes,
+                            ),
+                        )
+                    }
+                    try {
+                        val opened = withContext(ioDispatcher) { uploader.openUploadStream(item.trackId) }
+                        if (opened == null) {
+                            failed++
+                        } else {
+                            val res = api.uploadLibraryTrack(
+                                pairing = p,
+                                grant = g,
+                                filename = opened.filename,
+                                sha256 = opened.sha256,
+                                sizeBytes = opened.sizeBytes,
+                                playlistName = sanitizedPlaylist,
+                                inputStream = opened.inputStream,
+                                onProgress = { sentBytes, totalBytes ->
+                                    if (generation == ticket) {
+                                        mutable.update { prev ->
+                                            prev.copy(
+                                                batchUpload = prev.batchUpload.copy(
+                                                    currentFileSentBytes = sentBytes,
+                                                    currentFileTotalBytes = totalBytes,
+                                                ),
+                                            )
+                                        }
+                                    }
+                                },
+                            )
+                            if (res.deduplicated) dedup++ else {
+                                saved++
+                                if (res.renamed) renamed++
+                            }
+                        }
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (failure: Exception) {
+                        failed++
+                        lastErr = downloadFailureMessage(failure)
+                    }
+                    done++
+                    mutable.update {
+                        it.copy(
+                            batchUpload = it.batchUpload.copy(
+                                completedFiles = done,
+                                savedCount = saved,
+                                deduplicatedCount = dedup,
+                                renamedCount = renamed,
+                                failedCount = failed,
+                            ),
+                        )
+                    }
+                }
+                if (generation == ticket) {
+                    val extras = buildList {
+                        if (dedup > 0) add("$dedup duplikat dilewati")
+                        if (renamed > 0) add("$renamed di-rename otomatis")
+                        if (wavSkipped > 0) add("$wavSkipped WAV/FLAC dilewati")
+                        if (overSkipped > 0) add("$overSkipped >150 MB dilewati")
+                        if (failed > 0) add("$failed gagal")
+                    }
+                    val suffix = if (extras.isNotEmpty()) " (${extras.joinToString(", ")})" else ""
+                    mutable.update {
+                        it.copy(
+                            batchUpload = it.batchUpload.copy(
+                                running = false,
+                                currentFileName = null,
+                                error = lastErr,
+                                lastSummary = "$saved lagu diunggah ke PC$suffix.",
+                            ),
+                        )
+                    }
+                }
+            } catch (cancel: CancellationException) {
+                if (generation == ticket) {
+                    mutable.update { it.copy(batchUpload = it.batchUpload.copy(running = false, currentFileName = null)) }
+                }
+                throw cancel
+            } finally {
+                batchUploadJob = null
+            }
+        }
+    }
+
+    fun cancelDesktopUpload() {
+        batchUploadJob?.cancel()
+        batchUploadJob = null
+    }
+
+    private fun safePlaylistNameFromFolder(relFolder: String, fallbackName: String): String {
+        val raw = relFolder.trim().substringAfterLast('/').ifBlank {
+            fallbackName.removePrefix("Root (").removeSuffix(")").trim().ifBlank { "Sync PC" }
+        }
+        return sanitizeTargetPlaylistName(raw) ?: "Sync PC"
+    }
+
+    private fun sanitizeTargetPlaylistName(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        val cleaned = buildString(raw.length) {
+            for (ch in raw.replace('\\', ' ').replace('/', ' ')) {
+                if (!ch.isISOControl()) append(ch)
+            }
+        }.trim()
+        if (cleaned.isEmpty()) return null
+        var limit = cleaned.length
+        while (limit > 0 && cleaned.substring(0, limit).toByteArray(Charsets.UTF_8).size > 60) {
+            limit--
+        }
+        return cleaned.substring(0, limit).trim().takeIf { it.isNotEmpty() }
+    }
+
     private fun pairFailureMessage(failure: Exception): String = when ((failure as? DesktopRemoteFailure)?.kind) {
         DesktopRemoteFailure.Kind.TRUST ->
             "Identitas TLS atau jam perangkat target tidak cocok. Periksa QR & waktu perangkat."
@@ -477,19 +1016,23 @@ class DesktopRemoteSession(
     private fun downloadFailureMessage(failure: Exception): String = when (failure) {
         is DesktopRemoteFailure -> when (failure.reason) {
             DesktopRemoteFailure.Reason.MEDIA_DISABLED -> "Fitur unduh dimatikan di perangkat target."
-            DesktopRemoteFailure.Reason.MEDIA_VIEW_ONLY -> "Mode Pantau Saja tidak bisa mengunduh."
-            DesktopRemoteFailure.Reason.MEDIA_BUSY -> "Antrean unduh perangkat target penuh. Coba sebentar lagi."
+            DesktopRemoteFailure.Reason.SYNC_DISABLED -> "Sinkronisasi folder dimatikan di perangkat target."
+            DesktopRemoteFailure.Reason.UPLOAD_DISABLED -> "Fitur unggah ke PC belum diaktifkan di modal Android Remote PC."
+            DesktopRemoteFailure.Reason.WAV_FLAC_EXCLUDED -> "Format WAV/FLAC sementara dilewati pada fase transfer ini."
+            DesktopRemoteFailure.Reason.SHA256_MISMATCH -> "Checksum SHA-256 tidak cocok saat transfer."
+            DesktopRemoteFailure.Reason.MEDIA_VIEW_ONLY -> "Mode Pantau Saja tidak bisa mentransfer audio."
+            DesktopRemoteFailure.Reason.MEDIA_BUSY -> "Antrean transfer perangkat target penuh. Coba sebentar lagi."
             DesktopRemoteFailure.Reason.MEDIA_TOO_LARGE -> "Ukuran file melebihi batas 150 MB."
-            DesktopRemoteFailure.Reason.MEDIA_UNSUPPORTED -> "Format audio tidak didukung di perangkat ini."
-            DesktopRemoteFailure.Reason.MEDIA_UNAVAILABLE -> "File tidak tersedia di perangkat target."
+            DesktopRemoteFailure.Reason.MEDIA_UNSUPPORTED -> "Format audio tidak didukung di perangkat target."
+            DesktopRemoteFailure.Reason.MEDIA_UNAVAILABLE -> "File atau folder tidak tersedia di perangkat target."
             DesktopRemoteFailure.Reason.NONE -> when (failure.kind) {
-                DesktopRemoteFailure.Kind.AUTH -> "Akses unduh ditolak perangkat target."
+                DesktopRemoteFailure.Kind.AUTH -> "Akses transfer ditolak perangkat target."
                 DesktopRemoteFailure.Kind.TRUST -> "Identitas TLS perangkat target tidak cocok."
-                DesktopRemoteFailure.Kind.UNAVAILABLE -> "Koneksi terputus saat mengunduh."
-                else -> "Unduhan gagal diverifikasi."
+                DesktopRemoteFailure.Kind.UNAVAILABLE -> "Koneksi terputus saat mentransfer audio."
+                else -> "Transfer audio gagal diverifikasi."
             }
         }
-        else -> "Gagal menyimpan ke Library."
+        else -> "Gagal mentransfer audio."
     }
 
     private fun dispatchControlAction(

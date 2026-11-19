@@ -13,16 +13,18 @@ import time
 
 sys.path.insert(0, sys.argv[1])
 if (Path(sys.argv[1]) / "swararia" / "remote" / "secure_remote.py").is_file():
-    from swararia.core import fs_browser
-    from swararia.remote.secure_remote import SecureRemote
+    from swararia.core import fs_browser, transfer
+    from swararia.remote.secure_remote import RemoteError, SecureRemote
     import swararia.remote.secure_remote_tls as transport
     from swararia.server.hub import RemotePlayerHub
     media_resolver = fs_browser.resolve_safe_audio_file
+    sync_scanner = transfer.scan_sync_folders
 else:
-    from secure_remote import SecureRemote
+    from secure_remote import RemoteError, SecureRemote
     import secure_remote_tls as transport
     from web_ui import RemotePlayerHub
     media_resolver = None
+    sync_scanner = None
 
 control = {"slow": False, "drop": False, "role": "control", "posts": 0, "capability_headers": 0, "wrong_headers": 0}
 base_handler = transport.NativeHandler
@@ -35,6 +37,9 @@ class FixtureHandler(base_handler):
             if header == "extended-v1":
                 control["capability_headers"] += 1
             else:
+                control["wrong_headers"] += 1
+        elif self.path.startswith("/v1/sync/") or self.path == "/v1/library/upload":
+            if header != "extended-v1":
                 control["wrong_headers"] += 1
         elif header is not None:
             control["wrong_headers"] += 1
@@ -68,17 +73,63 @@ transport.NativeHandler = FixtureHandler
 # Only the fault-injection fixture relaxes the server's normal six-second budget.
 # Otherwise the desktop watchdog would hide a missing client deadline.
 transport.NativeTLSServer.CONNECTION_TTL = 60
-fixture_dir = Path(tempfile.mkdtemp(prefix="swararia-wire-inbox-"))
+import shutil
+import subprocess
+
+fixture_dir = Path(tempfile.mkdtemp(prefix="swararia-wire-inbox-", dir="/tmp" if Path("/tmp").is_dir() else None))
+setlist_dir = fixture_dir / "Show Malam"
+setlist_dir.mkdir(parents=True, exist_ok=True)
 sample_track = fixture_dir / "Test Track + Live.mp3"
 sample_bytes = (b"ID3\x04\x00wire-mp3-frame-" * 128)
 sample_sha = hashlib.sha256(sample_bytes).hexdigest()
 sample_track.write_bytes(sample_bytes)
+playlist_track = setlist_dir / "Lagu Sync.mp3"
+if shutil.which("ffmpeg"):
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.1", "-c:a", "libmp3lame", "-b:a", "128k", str(playlist_track)],
+        check=True,
+    )
+    playlist_bytes = playlist_track.read_bytes()
+else:
+    playlist_bytes = (b"ID3\x04\x00playlist-mp3-frame-" * 128)
+    playlist_track.write_bytes(playlist_bytes)
+playlist_sha = hashlib.sha256(playlist_bytes).hexdigest()
+(setlist_dir / "RawLossless.wav").write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt ")
+
 if media_resolver is None:
     def media_resolver(_src, rel, _def):
-        if rel == sample_track.name:
-            return sample_track, "audio/mpeg"
+        cand = (fixture_dir / rel).resolve()
+        if cand.is_relative_to(fixture_dir.resolve()) and cand.is_file():
+            return cand, "audio/mpeg"
         raise FileNotFoundError(rel)
-remote = SecureRemote(RemotePlayerHub(), media_resolver=media_resolver, default_inbox=fixture_dir)
+
+
+def fixture_upload_handler(rfile, content_length, dest_root, filename, sha256_hex, playlist_name):
+    if sync_scanner is not None:
+        try:
+            committed = transfer.stage_and_commit_stream(
+                rfile,
+                content_length,
+                dest_root,
+                filename,
+                sha256_hex,
+                subfolder=playlist_name,
+                default_inbox=fixture_dir,
+            )
+        except transfer.TransferValidationError as exc:
+            raise RemoteError(exc.code, exc.status) from None
+        committed.pop("_saved_path", None)
+        return (200 if committed.get("deduplicated") else 201), committed
+    raise RemoteError("upload_disabled", 403)
+
+
+remote = SecureRemote(
+    RemotePlayerHub(),
+    media_resolver=media_resolver,
+    default_inbox=fixture_dir,
+    sync_scanner=sync_scanner,
+    upload_handler=fixture_upload_handler if sync_scanner is not None else None,
+)
 stop = threading.Event()
 
 
@@ -129,8 +180,24 @@ try:
             remote.set_media_transfer(True)
         elif command == "MEDIA_OFF":
             remote.set_media_transfer(False)
+        elif command == "SYNC_ON":
+            if hasattr(remote, "set_sync_enabled"):
+                remote.set_sync_enabled(True, source_dir=str(fixture_dir), source_label="wire-fixture")
+        elif command == "SYNC_OFF":
+            if hasattr(remote, "set_sync_enabled"):
+                remote.set_sync_enabled(False)
+        elif command == "UPLOAD_ON":
+            if hasattr(remote, "set_upload_enabled"):
+                remote.set_upload_enabled(True, dest_dir=str(fixture_dir), dest_label="wire-fixture")
+        elif command == "UPLOAD_OFF":
+            if hasattr(remote, "set_upload_enabled"):
+                remote.set_upload_enabled(False)
         elif command == "MEDIA_META":
             print(json.dumps({"track_id": "trk_1", "filename": sample_track.name, "size_bytes": len(sample_bytes), "sha256": sample_sha}), flush=True)
+            continue
+        elif command == "SYNC_META":
+            fid = transfer.make_sync_folder_id("Show Malam") if sync_scanner is not None else ""
+            print(json.dumps({"folder_id": fid, "playlist_sha": playlist_sha, "playlist_size": len(playlist_bytes)}), flush=True)
             continue
         elif command == "DROP_NEXT_COMMAND":
             control["drop"] = True
@@ -153,9 +220,7 @@ finally:
     remote.stop()
     if "thread" in globals():
         thread.join(timeout=2)
-    if "sample_track" in globals() and sample_track.exists():
-        sample_track.unlink()
-    if "fixture_dir" in globals() and fixture_dir.exists():
-        fixture_dir.rmdir()
     if "path" in globals() and path.exists():
         path.unlink()
+    if "fixture_dir" in globals() and fixture_dir.exists():
+        shutil.rmtree(fixture_dir, ignore_errors=True)

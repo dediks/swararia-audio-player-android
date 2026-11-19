@@ -61,4 +61,51 @@ class DesktopRemoteProtocolTest {
         assertEquals("Samsung SM-M156B", formatDeviceClientLabel("samsung", "SM-M156B"))
         assertEquals("Xiaomi 2312DRA50G", formatDeviceClientLabel("XIAOMI", "2312DRA50G"))
     }
+
+    @Test
+    fun capabilitiesSyncFoldersManifestAndUploadOutcomeValidateStrictly() {
+        val caps = DesktopRemoteJson.capabilitiesInfo(
+            DesktopRemoteJson.objectValue(
+                "{\"protocol\":\"v1\",\"commands\":[\"play\"],\"media\":true,\"sync\":true,\"upload\":true,\"media_max_bytes\":157286400}".toByteArray(),
+            ),
+        )
+        assertTrue(caps.sync)
+        assertTrue(caps.upload)
+
+        val foldersRes = DesktopRemoteJson.syncFolders(
+            DesktopRemoteJson.objectValue(
+                """{"protocol":"v1","folders":[{"folder_id":"fld_1234567890abcdef","rel_folder":"Show/Malam","name":"Show/Malam","track_count":2,"total_bytes":4096,"excluded_wav_flac_count":1,"oversized_count":0}],"excluded_wav_flac_count":1,"oversized_count":0,"warnings":["1 file .wav/.flac dilewati."]}""".toByteArray(),
+            ),
+        )
+        assertEquals(1, foldersRes.folders.size)
+        assertEquals("fld_1234567890abcdef", foldersRes.folders.first().folderId)
+        assertEquals(1, foldersRes.excludedWavFlacCount)
+
+        val validSha = "a".repeat(64)
+        val manifest = DesktopRemoteJson.syncManifest(
+            DesktopRemoteJson.objectValue(
+                """{"protocol":"v1","folder_id":"fld_1234567890abcdef","rel_folder":"Show/Malam","folder_name":"Show/Malam","total":1,"offset":0,"next_offset":null,"excluded_wav_flac_count":1,"oversized_count":0,"warnings":[],"files":[{"file_id":"fil_0123456789abcdef0123","name":"Intro.mp3","rel_path":"Show/Malam/Intro.mp3","ext":".mp3","size_bytes":1024,"sha256":"$validSha"}]}""".toByteArray(),
+            ),
+        )
+        assertEquals(1, manifest.files.size)
+        assertEquals("mp3", manifest.files.first().ext)
+
+        // Reject traversal in rel_path
+        assertThrows(DesktopRemoteFailure::class.java) {
+            DesktopRemoteJson.syncManifest(
+                DesktopRemoteJson.objectValue(
+                    """{"protocol":"v1","folder_id":"fld_1234567890abcdef","rel_folder":"Show","folder_name":"Show","total":1,"offset":0,"next_offset":null,"files":[{"file_id":"fil_0123456789abcdef0123","name":"Intro.mp3","rel_path":"../Intro.mp3","ext":".mp3","size_bytes":1024,"sha256":"$validSha"}]}""".toByteArray(),
+                ),
+            )
+        }
+
+        val upload = DesktopRemoteJson.uploadOutcome(
+            DesktopRemoteJson.objectValue(
+                """{"status":"saved","deduplicated":false,"filename":"Track (2).mp3","rel_path":"Set1/Track (2).mp3","sha256":"$validSha","subfolder":"Set1","renamed":true}""".toByteArray(),
+            ),
+        )
+        assertFalse(upload.deduplicated)
+        assertTrue(upload.renamed)
+        assertEquals("Set1", upload.subfolder)
+    }
 }
